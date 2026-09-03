@@ -171,16 +171,19 @@ GB10 复测运行 ID：`run-ba26160a0daf4eaebe58e029f5b77c26`；候选批次：`
 
 | 类型 | 样本数 | GB10 批次 | 结果 |
 |---|---:|---|---|
-| XLSX | 3 | `batch-task-07af91f4217242ca9754b7b7a8d719e1` | 通过，exact_equal |
-| XLS | 3 | `batch-task-917129b138b5417eaf4527c182aafce5` | 通过，exact_equal |
-| CSV | 3 | `batch-task-9056583918a8459db5c48be7c06fc066` | 通过，exact_equal |
-| JSON | 3 | `batch-task-118bb32e634747d8888f682d0353c67a` | 通过，exact_equal |
-| MD | 3 | `batch-task-6a3b62959b084be98433cced6ecbd08c` | 通过，exact_equal |
-| TXT | 3 | `batch-task-e274438aa1884392917f5c1fa27ba0c4` | 通过，exact_equal |
-| DOCX | 3 | `batch-task-f5930d0e517a44e0aabe75e2d3166789` | 通过，exact_equal |
-| PDF | 3 | `batch-task-10b0d50441cb4a749664289cfccc8bfb` | 通过，exact_equal |
-| DWG | 3 | `batch-task-b84e737e2007413d8e3cb9fe24df2b24` | 通过，exact_equal |
-| ZIP | 3 | `batch-task-6b55dff8435c4c349af5466a9947c68b` | 通过，exact_equal |
-| PY | 3 | `batch-task-bf3f05a7b3644568be11f4394ba1dc0d` | 通过，exact_equal |
+| XLSX | 3 | `batch-task-77e151e8fa8f45acb51902113b7b78d3` | 通过，exact_equal |
+| XLS | 3 | `batch-task-6f6d7a7a90924d2e8cdc08341c1762d3` | 通过，exact_equal |
+| CSV | 3 | `batch-task-9395ebecfafc4759b95fde5d5e2916e4` | 通过，exact_equal |
+| JSON | 3 | `batch-task-7f30d4abec9640ba831e3ee5a502991f` | 通过，exact_equal |
+| MD | 3 | `batch-task-6f4d388401b94b9d9d5d50c84c9d6c4d` | 通过，exact_equal |
+| TXT | 3 | `batch-task-cbba63c1e9be4d108f73e146331a6d72` | 通过，exact_equal |
+| DOCX | 3 | `batch-task-4eef09bf0ed1458084118910b296cae6` | 通过，exact_equal |
+| PDF | 3 | `batch-task-bbef1879f9394e7bb757458ebcc9620b` | 通过，exact_equal |
+| DWG | 3 | `batch-task-b5daf0c001b146448e3adce4913de857` | 通过，exact_equal |
+| ZIP | 3 | `batch-task-319e3cc683604ea5b3af8d022a57ed40` | 通过，exact_equal |
+| PY | 3 | `batch-task-dae9c64998d14c76a7ad66e02e88a583` | 通过，exact_equal |
+| RAR | 2 | `batch-task-d6215c8b7d714f75b02a6fd3c3b54865` | 提取一致，但样本不足 |
+| ET | 1 | `batch-task-d62469b968514b4da6db4a36840c7e19` | 提取一致，但样本不足 |
+| PS1 | 1 | `batch-task-ab3e1398b4174c279e74621d27a37c61` | 提取一致，但样本不足 |
 
-本轮修复了三个跨类型问题：上传 staging 文件名加入序号，避免同名/同内容文件互相覆盖；将 `.py/.ps1/.et/.rar/.7z` 纳入可追踪二进制文件类型；补齐 `pypdf`、`python-docx` 依赖，确保 Codex 与 GB10 使用同一解析能力。当前资料中 RAR 仅 2 个、ET/PS1 各 1 个、TSV/7Z 为 0 个，无法按“每类 3 个真实文件”构成样本，已标记为样本不足而没有伪造通过结论。
+本轮修复了三个跨类型问题：上传 staging 文件名加入序号，避免同名/同内容文件互相覆盖；将 `.py/.ps1/.et/.rar/.7z` 纳入可追踪二进制文件类型；补齐 `pypdf`、`python-docx` 依赖，确保 Codex 与 GB10 使用同一解析能力。当前资料中 RAR 仅 2 个、ET/PS1 各 1 个、TSV/7Z 为 0 个，已上传所有现有样本并标记样本不足，没有伪造三样本通过结论。

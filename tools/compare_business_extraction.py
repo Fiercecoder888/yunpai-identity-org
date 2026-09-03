@@ -78,8 +78,8 @@ def main() -> None:
     with httpx.Client(timeout=240) as client:
         for ext in EXTENSIONS:
             selected = sorted(files_by_ext[ext], key=lambda p: (p.stat().st_size, str(p)))[:3]
-            entry = {"available": len(files_by_ext[ext]), "selected": [str(p) for p in selected], "status": "insufficient_samples"}
-            if len(selected) < 3:
+            entry = {"available": len(files_by_ext[ext]), "selected": [str(p) for p in selected], "status": "insufficient_samples", "sample_requirement_met": len(selected) >= 3}
+            if not selected:
                 report["types"][ext] = entry
                 continue
             local = []
@@ -105,7 +105,7 @@ def main() -> None:
             remote = sorted((normalize_extraction(item) for item in remote), key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, default=str))
             equal = local == remote
             entry.update({
-                "status": "pass" if equal and batch["error_count"] == 0 else "mismatch",
+                "status": "pass" if equal and batch["error_count"] == 0 and len(selected) >= 3 else ("pass_insufficient_samples" if equal and batch["error_count"] == 0 else "mismatch"),
                 "batch_id": batch["batch_id"],
                 "run_id": payload["run_id"],
                 "error_count": batch["error_count"],
