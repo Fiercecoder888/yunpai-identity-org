@@ -20,6 +20,91 @@ def test_planner_selects_business_data_skill_for_upload_intent():
     assert decision["steps"][0]["kind"] == "skill"
 
 
+def test_high_level_skills_are_registered_with_tool_descriptions():
+    catalog = {item["name"]: item for item in build_default_skill_registry().catalog()}
+    expected = {
+        "business-data-identification",
+        "yunpai-m0-data-foundation",
+        "yunpai-m1-document-parser",
+        "yunpai-m2-bom-sop",
+        "yunpai-m3-material-planning",
+        "yunpai-m4-procurement",
+        "yunpai-m5-pmc",
+        "yunpai-m5-pmc-lifecycle",
+    }
+    assert set(catalog) == expected
+    assert "solve_scheduling" in catalog["yunpai-m5-pmc"]["tools"]
+    assert "dispatch_m5_schedule" in catalog["yunpai-m5-pmc-lifecycle"]["tools"]
+    assert all(item["description"] for item in catalog.values())
+
+
+def test_planner_routes_explicit_and_semantic_pmc_lifecycle_skill():
+    planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
+    registry = build_default_registry()
+    explicit = planner.plan({"skill": "yunpai-m5-pmc-lifecycle", "skill_payload": {"operation": "versions"}}, registry)
+    semantic = planner.plan({"message": "查看排程版本和生产执行回传"}, registry)
+    assert explicit["steps"][0]["kind"] == "skill"
+    assert explicit["steps"][0]["tool"] == "yunpai-m5-pmc-lifecycle"
+    assert semantic["steps"][0]["tool"] == "yunpai-m5-pmc-lifecycle"
+
+
+@pytest.mark.asyncio
+async def test_skill_dispatches_through_registry_and_preserves_gate_semantics():
+    import base64
+
+    graph = YunpaiGraph()
+    state = await graph.run(new_state({
+        "skill": "yunpai-m0-data-foundation",
+        "skill_payload": {
+            "operation": "ingest",
+            "files": [{"filename": "order.json", "content_b64": base64.b64encode(b'{"records":[{"kind":"order"}]}').decode()}],
+        },
+    }))
+    assert state["pending_gate"]["type"] == "authorization"
+    state = await graph.resume(state, "approve", actor="skill-test")
+    result = state["outputs"]["yunpai-m0-data-foundation"]
+    assert state["pending_gate"]["type"] == "candidate"
+    assert result["invoked_tool"] == "data_import_run"
+    assert result["skill_operation"] == "ingest"
+    assert any(event["event"] == "react.action" and event["tool"] == "yunpai-m0-data-foundation" for event in state["trace"])
+
+
+@pytest.mark.asyncio
+async def test_skill_tool_whitelist_rejects_cross_module_tool():
+    graph = YunpaiGraph()
+    state = new_state({
+        "skill": "yunpai-m5-pmc-lifecycle",
+        "skill_payload": {"operation": "versions", "tool": "data_import_commit", "tool_payload": {}},
+    })
+    state = await graph.run(state)
+    assert state["status"] == "failed"
+    assert "not allowed" in state["errors"][0]["message"] or "not allowed" in str(state["errors"])
+
+
+@pytest.mark.asyncio
+async def test_skill_operation_maps_to_registered_tool_handler():
+    from yunpai_langgraph.contracts import ToolSpec
+    from yunpai_langgraph.registry import ToolRegistry
+
+    calls = []
+
+    async def fake_schedule(payload, context):
+        calls.append((payload, context))
+        return {"plan_version": "pv-test"}
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec("get_m5_schedule", "m5", "查询排程", {"type": "object"}, {"type": "object"}), fake_schedule)
+    skills = build_default_skill_registry()
+    result = await skills.call(
+        "yunpai-m5-pmc-lifecycle",
+        {"operation": "schedule", "tool_payload": {"plan_version": "pv-test"}},
+        {"task_id": "TASK-SKILL-MAP", "_tool_registry": registry},
+    )
+    assert result["invoked_tool"] == "get_m5_schedule"
+    assert result["plan_version"] == "pv-test"
+    assert calls == [({"plan_version": "pv-test"}, {"task_id": "TASK-SKILL-MAP"})]
+
+
 @pytest.mark.asyncio
 async def test_business_data_skill_runs_after_planner_and_opens_review_gate(tmp_path):
     root = tmp_path / "business"

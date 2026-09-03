@@ -43,3 +43,28 @@ def test_streaming_route_expands_batches_and_projects_quantity_wip():
     assert len(schedule["wip_edges"]) == 11
     assert any(float(seg["end_quantity"]) > 0 for seg in schedule["wip_segments"])
     assert any(seg["state"] == "starved" for seg in schedule["state_segments"])
+
+
+def test_streaming_adapter_satisfies_registered_m5_output_contract():
+    from yunpai_langgraph.registry import build_default_registry
+
+    payload = _payload()
+    payload["scenario_purpose"] = "production"
+    payload["wip_pmc"] = True
+    payload["production_use_allowed"] = False
+    payload["tracking_task_id"] = "TASK-PMCV2-REGISTRY"
+    payload["planning_start"] = "2026-09-03T08:00:00+08:00"
+    payload["orders"][0]["due_time"] = "2026-09-04T17:00:00+08:00"
+    payload["resources"] = [{**item, "name": item.get("resource_id")} for item in payload["resources"]]
+    payload["resources"].append({"resource_id": "EQ-01", "name": "验证设备", "resource_type": "EQUIPMENT"})
+    payload["routing_steps"] = [
+        {**item, "eligible_resources": [{"resource_id": "EQ-01", "processing_minutes": 1}]}
+        for item in payload["routing_steps"]
+    ]
+    result = __import__("asyncio").run(
+        build_default_registry().call("solve_scheduling", payload, {"task_id": "TASK-PMCV2-REGISTRY"})
+    )
+    assert result["data"]["parent_plan_version"] is None
+    assert result["data"]["tracking_task_id"] == "TASK-PMCV2-REGISTRY"
+    assert result["data"]["schedule"]["execution_model"] == "STREAMING_FLOW"
+    assert result["data"]["schedule"]["production_blocked"] is True

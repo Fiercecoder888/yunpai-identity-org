@@ -30,6 +30,7 @@
 | E-PMC-DIFF-001 | 2026-09-03 | `.venv/bin/python -m pytest -q`; `cd frontend && npm test -- --run`; `cd frontend && npm run build`; 代码/历史证据审阅；PMC 默认值最小复现 | 0 | `dev` 工作区（HEAD `0a766ed`，含未提交改动） | 差异文档完成；48 后端测试、4 前端测试和构建通过；PMC 生产闭环仍未通过 | `docs/FUNCTION_DIFFERENCE_39085_0902_CURRENT.md` 及文档列出的证据路径 | 2026-12-31 |
 | E-PMCV2-GB10-001 | 2026-09-03 | Tailscale HTTP health/API 联调；GB10 `solve_scheduling` 显式 PMC v2 调用；浏览器结果预览截图 | 0 | run `run-a6954a7068dd4667bdf4650d072a165f`；plan `wip-v2-f705464333` | PO-20260902-001/W-H410 生成 5 道工序、08:00–08:10 排程，资源阻断 0，validator PASS；停在发布前人工 Gate，未发布 | `docs/pmc-v2-gb10-PO-20260902-001-preview.html`、`docs/pmc-v2-gb10-PO-20260902-001-20260903.png` | 2026-09-10 |
 | E-PMCV2-STREAM-001 | 2026-09-03 | 本地后端/前端测试、W-H128 SOP 流式候选、浏览器截图、GB10 Tailscale release/API/静态资源验证 | 0 | release `20260903201200`；run `run-67f945452c254e37a3a3d991749f1d72`；包 SHA-256 `dae7d89292f0cdc2e58df7a3b739184d745579e2470170827952ecff4d77e20b` | `STREAMING_FLOW` 15 道工序展开 180 条子批次，GB10 返回 324 条 WIP 数量段、14 条 WIP 边、180 active/266 blocked 状态段，validator PASS，停在人工发布 Gate；39092 新前端资源包含批次甘特逻辑 | `docs/pmc-v2-streaming/wh128-15ops-gantt.png`、`docs/pmc-v2-streaming/gb10-wh128-15ops-r3-run.json` | 2026-09-10 |
+| E-39092-SKILL-REAL-001 | 2026-09-03 | 高阶 Skill/Tool/MCP 注册测试；真实 XLSX `/runs/upload` 全链路；显式 PMC v2 Skill；`pytest`、前端测试/构建、ledger validate | 0 | `dev` 工作区；run `run-98a0544c93674118b8d470a175a97230`、PMC run `run-4df2d4081de94ea184ea88c7a420abea` | 8 个 Skill、114 个 Tool/MCP 合同可发现；真实订单 8 行贯通 M0→M5 并生成 8 道工序；PMC v2 94 batches 因缺工位/人员绑定阻断，未投产 | `docs/39092_REAL_DATA_UPLOAD_TEST_20260903.md` | 2026-09-10 |
 
 ## Gate 记录
 
@@ -44,3 +45,4 @@
 - 2026-09-03：检查治理文件、分支策略、claim 模板和配置校验；证据 `E-SESSION-001`；结论：可开始并行 session，业务验收仍按各任务单独记录。
 - 2026-09-03：检查 39085/0902/当前 PMC 功能差异并完成规定测试；证据 `E-PMC-DIFF-001`；结论：差异审计通过，PMC 仅能标注为 constrained preview/draft，P0/P1 修复后再做生产验收。
 - 2026-09-03：GB10 Tailscale 联调与 PMC v2 只读候选截图验收；证据 `E-PMCV2-GB10-001`；结论：候选计算和前端预览可复核，生产发布 Gate 未批准，生产闭环仍待严格生命周期接入。
+- 2026-09-03：验收 39092 Skill 注册、Agent 路由和真实订单上传；证据 `E-39092-SKILL-REAL-001`；结论：注册与数据桥接通过，真实 PMC v2 因缺少工位/人员事实正确阻断，业务生产验收仍未完成。

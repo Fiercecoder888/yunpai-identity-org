@@ -196,6 +196,12 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
         from .pmc_v2_adapter import PmcError, run_pmc_v2
         try:
             result = run_pmc_v2(payload)
+            # The M5 manifest requires lifecycle identity and the root TaskID
+            # even for v2 candidates; keep these fields at the adapter edge so
+            # output-schema validation cannot silently drop traceability.
+            data = result.setdefault("data", {})
+            data.setdefault("parent_plan_version", payload.get("expected_head_plan_version"))
+            data.setdefault("tracking_task_id", ctx.get("task_id"))
             result["trace_id"] = result.get("trace_id") or _trace(ctx, "m5-pmc-v2")
             return result
         except PmcError as exc:

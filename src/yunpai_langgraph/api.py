@@ -26,7 +26,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "module": "yunpai-langgraph", "tools": len(graph.registry.specs), "bound_tools": len(graph.registry.handlers), "planner_model": graph.planner.router.config.public()}
+        return {"status": "ok", "module": "yunpai-langgraph", "tools": len(graph.registry.specs), "bound_tools": len(graph.registry.handlers), "skills": len(graph.skills.specs), "planner_model": graph.planner.router.config.public()}
 
     @app.get("/tools")
     async def list_tools(module: str | None = None):

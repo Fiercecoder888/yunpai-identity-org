@@ -21,6 +21,15 @@ INTENT_TO_TOOL = (
 
 BUSINESS_DATA_SKILL = "business-data-identification"
 
+INTENT_TO_SKILL = (
+    (("主数据治理", "canonical", "资料治理"), "yunpai-m0-data-foundation"),
+    (("文档智能", "文档审核", "解析报告"), "yunpai-m1-document-parser"),
+    (("工程控制", "bom审核", "sop审核"), "yunpai-m2-bom-sop"),
+    (("物料齐套", "物料计划", "mrp分析"), "yunpai-m3-material-planning"),
+    (("采购跟踪", "供应商跟踪", "采购预警"), "yunpai-m4-procurement"),
+    (("排程生命周期", "排程版本", "生产执行", "派工", "报工", "执行回传", "flow board"), "yunpai-m5-pmc-lifecycle"),
+)
+
 
 class PlannerAgent:
     """总规划 Agent：只做意图、路径和依赖规划，不执行工具。"""
@@ -99,6 +108,15 @@ class PlannerAgent:
         text = str(request.get("message") or request.get("task") or "").lower()
         if self._business_skill_requested(request) and skills and BUSINESS_DATA_SKILL in skills.specs:
             return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": BUSINESS_DATA_SKILL, "kind": "skill", "mode": "free"}], "reason": "识别为业务资料识别与候选入库请求"}
+        requested_skill = request.get("skill")
+        if requested_skill:
+            if not skills or requested_skill not in skills.specs:
+                raise ValueError(f"未注册 Skill: {requested_skill}")
+            return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": str(requested_skill), "kind": "skill", "mode": "free"}], "reason": f"显式选择已注册 Skill: {requested_skill}"}
+        if skills:
+            for keywords, skill_name in INTENT_TO_SKILL:
+                if skill_name in skills.specs and any(keyword in text for keyword in keywords):
+                    return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": skill_name, "kind": "skill", "mode": "free"}], "reason": f"语义匹配高阶 Skill: {skill_name}"}
         full = request.get("workflow") == "m0_m5" or "全链路" in text or all(word in text for word in ("订单", "采购", "排程"))
         if full:
             workflow = load_workflow("m0_m5")
@@ -156,11 +174,12 @@ class WorkerAgent:
     def __init__(self, registry: ToolRegistry, skills: SkillRegistry | None = None) -> None:
         self.registry = registry
         self.skills = skills or build_default_skill_registry()
+        self.skills.validate_tools(self.registry.specs)
 
     async def run(self, state: RunState, step: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         tool = step["tool"]
         if step.get("kind") == "skill":
-            result = await self.skills.call(tool, payload, {"run_id": state["run_id"], "task_id": state["task_id"], "tenant_id": state.get("tenant_id")})
+            result = await self.skills.call(tool, payload, {"run_id": state["run_id"], "task_id": state["task_id"], "tenant_id": state.get("tenant_id"), "_tool_registry": self.registry})
             return {"module": "orchestrator", "tool": tool, "result": result, "input_summary": summarize(payload), "output_summary": summarize(result)}
         spec = self.registry.specs[tool]
         result = await self.registry.call(tool, payload, {
@@ -185,10 +204,23 @@ class ReviewerAgent:
     _POST_REVIEWED_DRAFT_TOOLS = {
         "data_import_run", "business-data-identification", "ingest_document", "run_bom_sop_workflow", "solve_scheduling",
     }
+    _READ_ONLY_SKILL_OPERATIONS = {
+        "yunpai-m0-data-foundation": {"preview"},
+        "yunpai-m1-document-parser": {"report"},
+        "yunpai-m3-material-planning": {"readiness", "readiness_summary", "plan", "handoff"},
+        "yunpai-m4-procurement": {"orders", "tracking", "alerts", "supply", "supplier_reply"},
+        "yunpai-m5-pmc": {"schedule", "progress", "versions", "readiness", "advise", "intelligent", "execution"},
+        "yunpai-m5-pmc-lifecycle": {"default", "schedule", "progress", "versions", "execution"},
+    }
 
     def preflight(self, step: dict[str, Any], state: RunState) -> dict[str, Any] | None:
         if step.get("mode") != "free" or step["id"] in state.get("authorized_steps", []):
             return None
+        if step.get("kind") == "skill":
+            skill_payload = state.get("request", {}).get("skill_payload")
+            operation = str(skill_payload.get("operation") or "default") if isinstance(skill_payload, dict) else "default"
+            if operation in self._READ_ONLY_SKILL_OPERATIONS.get(str(step["tool"]), set()):
+                return None
         method = str(step.get("http_method") or "POST").upper()
         if method not in {"GET", "HEAD", "OPTIONS"} and step["tool"] not in self._POST_REVIEWED_DRAFT_TOOLS:
             return {
@@ -199,32 +231,36 @@ class ReviewerAgent:
         return None
 
     def review(self, tool: str, module: str, result: dict[str, Any]) -> dict[str, Any]:
+        # High-level Skills flatten the underlying Tool result and identify it
+        # explicitly so the same deterministic Gate rules still apply.
+        effective_tool = str(result.get("invoked_tool") or tool) if isinstance(result, dict) else tool
+        effective_module = str(result.get("invoked_module") or module) if isinstance(result, dict) else module
         data = result_data(result)
         errors = result.get("errors") if isinstance(result.get("errors"), list) else []
         if result.get("success") is False or result.get("code") == "BLOCKED_INPUT":
             message = errors[0].get("message") if errors and isinstance(errors[0], dict) else result.get("message", "缺少权威输入")
-            return self._gate("data", module, tool, message, ["补充数据", "终止"])
-        if tool in {"data_import_run", "business-data-identification"}:
+            return self._gate("data", effective_module, effective_tool, message, ["补充数据", "终止"])
+        if effective_tool in {"data_import_run", "business-data-identification"}:
             if result.get("status") == "failed":
                 return {"approved": False, "terminal": True, "error": {"code": "IMPORT_FAILED", "message": "M0 未生成可审核候选"}}
-            message = "业务资料候选已写入识别库，必须审核后才能进入 M0 canonical 发布" if tool == "business-data-identification" else "M0 候选必须审核后才能发布 canonical 事实"
-            return self._gate("candidate", module, tool, message, ["批准候选", "补充裁决", "终止"])
-        if tool == "ingest_document" and (result.get("needs_review") or float(result.get("overall_confidence") or 0) < 0.8):
-            return self._gate("review", module, tool, "M1 解析置信度不足或存在字段缺口", ["修正并重试", "接受结果", "终止"])
-        if tool == "run_bom_sop_workflow":
+            message = "业务资料候选已写入识别库，必须审核后才能进入 M0 canonical 发布" if effective_tool == "business-data-identification" else "M0 候选必须审核后才能发布 canonical 事实"
+            return self._gate("candidate", effective_module, effective_tool, message, ["批准候选", "补充裁决", "终止"])
+        if effective_tool == "ingest_document" and (result.get("needs_review") or float(result.get("overall_confidence") or 0) < 0.8):
+            return self._gate("review", effective_module, effective_tool, "M1 解析置信度不足或存在字段缺口", ["修正并重试", "接受结果", "终止"])
+        if effective_tool == "run_bom_sop_workflow":
             if result.get("status") == "human_input_required":
-                return self._gate("data", module, tool, "M2 缺少产品/BOM 权威输入", ["补充数据", "终止"])
+                return self._gate("data", effective_module, effective_tool, "M2 缺少产品/BOM 权威输入", ["补充数据", "终止"])
             if result.get("status") == "draft_created":
-                return self._gate("engineering", module, tool, "BOM/SOP 草稿必须由工程人员批准", ["批准 BOM/SOP", "修改后重试", "终止"])
-        if tool == "run_m3_procurement_requirements" and not data.get("lines") and not data.get("shortage_lines"):
-            return self._gate("data", module, tool, "M3 缺少可计算的 BOM 行", ["补充 BOM 后重试", "终止"])
-        if tool == "import_m4_purchase_suggestions_json":
+                return self._gate("engineering", effective_module, effective_tool, "BOM/SOP 草稿必须由工程人员批准", ["批准 BOM/SOP", "修改后重试", "终止"])
+        if effective_tool == "run_m3_procurement_requirements" and not data.get("lines") and not data.get("shortage_lines"):
+            return self._gate("data", effective_module, effective_tool, "M3 缺少可计算的 BOM 行", ["补充 BOM 后重试", "终止"])
+        if effective_tool == "import_m4_purchase_suggestions_json":
             suggestions = result.get("suggestions") or result.get("items") or []
             missing_supplier = any(not item.get("supplier_name") for item in suggestions if isinstance(item, dict))
             if suggestions and missing_supplier:
-                return self._gate("procurement", module, tool, "采购建议缺少权威供应商或交期", ["补充供应商后重试", "保留草稿继续", "终止"])
-        if tool == "solve_scheduling" and data.get("lifecycle_status") == "draft":
-            return self._gate("apply", module, tool, "排程候选验证通过，但设置 current/发布仍需人工批准", ["发布", "重排", "终止"])
+                return self._gate("procurement", effective_module, effective_tool, "采购建议缺少权威供应商或交期", ["补充供应商后重试", "保留草稿继续", "终止"])
+        if effective_tool == "solve_scheduling" and data.get("lifecycle_status") == "draft":
+            return self._gate("apply", effective_module, effective_tool, "排程候选验证通过，但设置 current/发布仍需人工批准", ["发布", "重排", "终止"])
         return {"approved": True, "terminal": False, "gate": None}
 
     @staticmethod

@@ -19,6 +19,7 @@
 | F-003 | Session 实时修改报告 | 高 | 已完成 | Session 分支、reports 目录 | 每个 session 有独立报告并按工作节点记录修改、验证、阻塞和交接 | E-SESSION-001 |
 | F-002 | 前端工作台与 GB10 验收 | 高 | 进行中 | 前端、后端、GB10 | Playwright 报告与线上验收证据持续更新 | E-PLAYWRIGHT-001 |
 | F-004 | 39085/0902/当前版本功能差异与 PMC 专项审计 | 高 | 已完成 | 历史验收证据、0902 架构包、当前代码 | 差异文档完成，PMC 风险按 P0/P1/P2 分级并有代码/证据定位 | E-PMC-DIFF-001 |
+| F-005 | 39092 高阶 Skill/Tool/MCP 注册与真实订单 Agent 链路 | 高 | 进行中 | M0-M5 manifests、SkillRegistry、Planner/Worker/Reviewer、真实订单资料 | 8 个高阶 Skill 可发现并按白名单调用 114 个 Tool；Agent 路由、TaskID/trace、M0→M5 数据桥接和 PMC v2 阻断通过真实订单验证 | E-39092-SKILL-REAL-001 |
 
 ## 功能变更历史
 
@@ -26,3 +27,4 @@
 
 - 2026-09-03：新增 F-001 多 session 隔离协作和 F-003 Session 实时修改报告，原因是用户要求并行修复且避免冲突；证据 `E-SESSION-001`；确认来源：用户请求。
 - 2026-09-03：新增 F-004 版本功能差异与 PMC 专项审计；完成 39085、0902 和当前工作区对照，确认当前 PMC 仅可作为 constrained preview/draft，生产闭环仍有 P0/P1 缺口；证据 `E-PMC-DIFF-001`；确认来源：用户请求。
+- 2026-09-03：新增 F-005 39092 高阶 Skill/Tool/MCP 注册与真实订单 Agent 链路；证据 `E-39092-SKILL-REAL-001`；确认来源：本次任务。
