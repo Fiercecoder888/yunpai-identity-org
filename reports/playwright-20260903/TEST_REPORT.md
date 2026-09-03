@@ -51,3 +51,7 @@
 ### GB10 发布验证
 
 已使用 `zhb` 账号将前端静态产物发布到 `/home/wjc/yunpai-langgraph/releases/20260903162000` 并切换 `current`，补齐静态代理脚本后重启 39092。线上 HTML 当前加载 `index-BsJpnkQs.js` 与 `index-C6ILRoYD.css`；线上计算样式确认 `.run-list` 和 `.progress-rail` 均为 `overflow-y: auto`，并分别使用可见 scrollbar 颜色。
+
+### 2026-09-03 自适应滚动修复
+
+进一步测量发现原布局中两侧 rail 被长内容撑到约 2145px，列表 `scrollHeight` 等于 `clientHeight`，所以看似有 `overflow-y: auto` 实际无法滑动。已增加 `.panel-wrap`/rail 的 `min-height: 0` 和 `.run-list { flex: 1 1 auto }`，并将桌面列宽改为 `minmax(220px, 18vw)`、`minmax(260px, 21vw)`，中间列自适应剩余宽度。右栏滑块恢复为细窄浅色风格。修复后的静态资源已重新发布到同一 release。
