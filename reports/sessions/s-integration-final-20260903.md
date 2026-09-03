@@ -1,6 +1,6 @@
 # Session s-integration-final-20260903
 
-状态：进行中
+状态：已交接
 负责人：zhb / Codex
 分支：`dev`
 基线 commit：`7096644e`
@@ -11,8 +11,8 @@
 ## 当前工作
 
 - 目标：把已验证修复完整交付到集成 `dev`，保留可追溯报告并完成最小回归。
-- 正在修改：集成分支提交历史与项目验收记录。
-- 下一步：比较基线、合并后端提交，按序引入前端修复，运行验证并推送。
+- 正在修改：无；提交集成、回归、线上复核、账本更新和推送均已完成。
+- 下一步：后续需求由新 session 按协作规则认领和交接。
 
 ## 时间线
 
@@ -43,8 +43,17 @@
 - 风险/阻塞：完整 Windows pytest 的 EOL 误报需在统一 LF/CI 环境复核；不修改 provenance 值或 manifest 内容作为本次集成的一部分。
 - 证据：`git diff 7096644e..HEAD -- registry` 为空；Git blob SHA-256 对照输出；`reports/sessions/s-progress-restore-20260903.md`。
 
+### 2026-09-03 18:20 +08:00
+
+- 计划修改：推送集成分支并完成最终交接，确认远端指针、账本校验和 claim 状态。
+- 实际修改：`dev` 已推送到 `neworigin/dev`，远端与本地均为 `d48ce911`；旧右栏 claim 已删除，当前仅保留本 session claim 作为本次记录的一部分。
+- 文件：`.project-to-act/`、`reports/sessions/` 和集成提交历史；无新增产品代码。
+- 验证：`git push neworigin dev` 退出 0；`git ls-remote --heads neworigin dev` 返回 `d48ce911`；项目管理 `--validate` 返回 `valid=true`；前端顺序 typecheck/build/test 均退出 0；线上 39092/health/浏览器关键路径复核通过。
+- 风险/阻塞：Windows provenance EOL 误报、CLI Chromium 缺失和中文 OCR 缺失均已在验收账本中标注，不影响线上当前资源和交互。
+- 证据：`E-INTEGRATION-003`、`E-REGRESSION-002`、`reports/s-progress-restore-20260903/REPORT.md`、远端 `neworigin/dev`。
+
 ## 交接
 
-- 最终 commit：未完成
-- 未完成事项：合并、测试、验收记录、推送和 claim 释放。
-- 接手人：集成负责人
+- 最终 commit：`d48ce911`
+- 未完成事项：无；跨平台 provenance EOL 复核属于独立后续任务，不阻塞本次交付。
+- 接手人：后续 session 按 `docs/SESSION_COLLABORATION_RULES.md` 新建独立 claim/report
