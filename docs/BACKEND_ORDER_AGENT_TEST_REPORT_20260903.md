@@ -142,7 +142,7 @@ invalid input for data_import_preview: 'batch_id' is a required property
 
 ## 7. GB10 发布后最终验收
 
-修复版本已发布到 GB10 当前版本 `20260903162740`，39092 反向代理后的 `/api/health` 返回 HTTP 200，`tools=114`、`bound_tools=7`、Qwen 已配置。
+修复版本已提交为 Git `7f11814`，并发布到 GB10 当前版本 `20260903170400`；39092 反向代理后的 `/api/health` 返回 HTTP 200，`tools=114`、`bound_tools=7`、Qwen 已配置。
 
 - 三份原先会因包装文本或 `/` 失败的真实订单，`POST /runs/upload` 均返回 HTTP 200、`status=completed`、解析 `confidence=0.98`、`validation_issues=[]`。
 - CSV 订单现在返回 HTTP 415，错误码 `UNSUPPORTED_FILE_TYPE`，不再产生 HTTP 500。
@@ -171,16 +171,16 @@ GB10 复测运行 ID：`run-ba26160a0daf4eaebe58e029f5b77c26`；候选批次：`
 
 | 类型 | 样本数 | GB10 批次 | 结果 |
 |---|---:|---|---|
-| XLSX | 3 | `batch-task-04a28e6966f44623926faef4ed014b6d` | 通过，exact_equal |
-| XLS | 3 | `batch-task-c5082022aaae49cbade5f7add6dbe696` | 通过，exact_equal |
-| CSV | 3 | `batch-task-a6fb5850449d419186579c2f53b2c9f7` | 通过，exact_equal |
-| JSON | 3 | `batch-task-58b158b347034806b8f1b90d5b612a58` | 通过，exact_equal |
-| MD | 3 | `batch-task-a096de96baf9482db075d8381b893ab9` | 通过，exact_equal |
-| TXT | 3 | `batch-task-6898798eb0a94148b5cccf63e259c567` | 通过，exact_equal |
-| DOCX | 3 | `batch-task-c1ec6b5607a5401f84698481f78d1a42` | 通过，exact_equal |
-| PDF | 3 | `batch-task-13f43e5d1e1b4e3fa56bb053ad875d47` | 通过，exact_equal |
-| DWG | 3 | `batch-task-f27c84c0ac8248c889ba89d155c9f1d1` | 通过，exact_equal |
-| ZIP | 3 | `batch-task-88d7ba7ea03d40edb6ac7d6bed5f2a01` | 通过，exact_equal |
-| PY | 3 | `batch-task-6a589bee571b43a6ab0c7ccca8b73efe` | 通过，exact_equal |
+| XLSX | 3 | `batch-task-07af91f4217242ca9754b7b7a8d719e1` | 通过，exact_equal |
+| XLS | 3 | `batch-task-917129b138b5417eaf4527c182aafce5` | 通过，exact_equal |
+| CSV | 3 | `batch-task-9056583918a8459db5c48be7c06fc066` | 通过，exact_equal |
+| JSON | 3 | `batch-task-118bb32e634747d8888f682d0353c67a` | 通过，exact_equal |
+| MD | 3 | `batch-task-6a3b62959b084be98433cced6ecbd08c` | 通过，exact_equal |
+| TXT | 3 | `batch-task-e274438aa1884392917f5c1fa27ba0c4` | 通过，exact_equal |
+| DOCX | 3 | `batch-task-f5930d0e517a44e0aabe75e2d3166789` | 通过，exact_equal |
+| PDF | 3 | `batch-task-10b0d50441cb4a749664289cfccc8bfb` | 通过，exact_equal |
+| DWG | 3 | `batch-task-b84e737e2007413d8e3cb9fe24df2b24` | 通过，exact_equal |
+| ZIP | 3 | `batch-task-6b55dff8435c4c349af5466a9947c68b` | 通过，exact_equal |
+| PY | 3 | `batch-task-bf3f05a7b3644568be11f4394ba1dc0d` | 通过，exact_equal |
 
 本轮修复了三个跨类型问题：上传 staging 文件名加入序号，避免同名/同内容文件互相覆盖；将 `.py/.ps1/.et/.rar/.7z` 纳入可追踪二进制文件类型；补齐 `pypdf`、`python-docx` 依赖，确保 Codex 与 GB10 使用同一解析能力。当前资料中 RAR 仅 2 个、ET/PS1 各 1 个、TSV/7Z 为 0 个，无法按“每类 3 个真实文件”构成样本，已标记为样本不足而没有伪造通过结论。
