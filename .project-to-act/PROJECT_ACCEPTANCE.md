@@ -20,12 +20,14 @@
 | A-004 | 阻塞与重大遗留问题已处理 | 待检查 | 对照 `PROJECT_PROGRESS.md` | 无 |
 | A-005 | 多 session 有唯一分支/worktree、路径认领和发布锁规则 | 通过 | 检查 `docs/SESSION_COLLABORATION_RULES.md`、claims 模板并运行 `--validate` | E-SESSION-001 |
 | A-006 | 每个 session 持续维护独立实时修改报告 | 通过 | 检查实时报告规则和 `reports/sessions/README.md` 模板 | E-SESSION-001 |
+| A-007 | 39085/0902/当前版本功能差异与 PMC 风险有可追溯结论 | 通过 | 审阅差异文档、历史 39085 排程 JSON、当前 PMC 代码并运行规定测试 | E-PMC-DIFF-001 |
 
 ## 证据索引
 
 | 证据 ID | 时间 | 方法或命令 | 退出状态 | 版本或文件哈希 | 结果摘要 | 证据位置 | 有效期 |
 |---|---|---|---|---|---|---|---|
 | E-SESSION-001 | 2026-09-03 | 初始化脚本 `--validate`；人工审阅规则文件 | 0 | `dev` / `4b9c1aa1` | 治理账本有效，规则与 claim 模板已落盘 | `.project-to-act/`、`docs/SESSION_COLLABORATION_RULES.md`、`.coordination/claims/README.md` | 2026-12-31 |
+| E-PMC-DIFF-001 | 2026-09-03 | `.venv/bin/python -m pytest -q`; `cd frontend && npm test -- --run`; `cd frontend && npm run build`; 代码/历史证据审阅；PMC 默认值最小复现 | 0 | `dev` 工作区（HEAD `0a766ed`，含未提交改动） | 差异文档完成；48 后端测试、4 前端测试和构建通过；PMC 生产闭环仍未通过 | `docs/FUNCTION_DIFFERENCE_39085_0902_CURRENT.md` 及文档列出的证据路径 | 2026-12-31 |
 
 ## Gate 记录
 
@@ -38,3 +40,4 @@
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
 
 - 2026-09-03：检查治理文件、分支策略、claim 模板和配置校验；证据 `E-SESSION-001`；结论：可开始并行 session，业务验收仍按各任务单独记录。
+- 2026-09-03：检查 39085/0902/当前 PMC 功能差异并完成规定测试；证据 `E-PMC-DIFF-001`；结论：差异审计通过，PMC 仅能标注为 constrained preview/draft，P0/P1 修复后再做生产验收。
