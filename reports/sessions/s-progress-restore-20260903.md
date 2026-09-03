@@ -1,6 +1,6 @@
 # Session s-progress-restore-20260903
 
-状态：进行中
+状态：已交接
 负责人：zhb / Codex
 分支：`dev-s-progress-restore-20260903`
 基线 commit：`7096644e8ef5a193921c2ee2c95172ab3f82b835`
@@ -11,8 +11,8 @@
 ## 当前工作
 
 - 目标：修复线上右栏缺少节点、连线、进度条和当前 Agent 卡片的问题，并确认本地源码/业务数据没有被误删。
-- 正在修改：已恢复 `app.css` 中被误删的 progress rail 子选择器，并将桌面右栏容器设为满高；准备补充 CSS 回归断言并检查静态资源。
-- 下一步：运行前端 typecheck/build/test，创建新 GB10 release，浏览器多视口点击与截图验收。
+- 正在修改：无；右栏源码恢复、构建、发布和线上验收均已完成。
+- 下一步：由 `s-integration-final-20260903` 将提交集成到 `dev` 并完成最终回归。
 
 ## 时间线
 
@@ -115,8 +115,17 @@
 - 风险/阻塞：CLI Playwright 因缺少本机 Chromium 可执行文件未能启动；浏览器控制 API 已完成真实线上点击和截图。中文 OCR 引擎未安装，报告明确采用截图视觉 + DOM 可读文本复核，未伪造 OCR 结论。
 - 证据：`reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张线上截图、远端发布输出。
 
+### 2026-09-03 18:10 +08:00
+
+- 计划修改：将已验收的右栏修复交接给集成负责人，释放本 session 的路径认领和发布锁。
+- 实际修改：右栏恢复、百分比列/满高适配、线上 release 和浏览器点击证据已完成；提交 `9e0f57d3` 及其前序 `b1092369`、`681e6d6c` 已由集成负责人 cherry-pick 到 `dev`（对应 `5095abf0`、`674905c0`、`24da1d70`）。
+- 文件：本报告、`reports/s-progress-restore-20260903/`、`frontend/src/styles/app.css`、`frontend/e2e/acceptance.spec.ts`。
+- 验证：线上 `39092` HTTP 200；`/api/health` status=ok/tools=114；右栏 top=0、bottom=viewport、scrollTop 可变且 pageScrollY=0；控制台 error/warning=0。
+- 风险/阻塞：本机 Playwright CLI 缺 Chromium、中文 OCR 引擎未安装；已在报告中如实记录，并以浏览器控制 API 的真实线上 DOM/截图证据补足。
+- 证据：`reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、release `20260903173855`。
+
 ## 交接
 
-- 最终 commit：未完成
-- 未完成事项：源码恢复、构建、线上发布和浏览器验收。
-- 接手人：集成负责人（zhb）
+- 最终 commit：`9e0f57d3`（已集成到 `dev` 的 `24da1d70`）
+- 未完成事项：无；最终分支回归和推送由 `s-integration-final-20260903` 完成。
+- 接手人：`s-integration-final-20260903` / 集成负责人（zhb）
