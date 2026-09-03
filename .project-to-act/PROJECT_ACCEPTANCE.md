@@ -29,6 +29,7 @@
 | E-SESSION-001 | 2026-09-03 | 初始化脚本 `--validate`；人工审阅规则文件 | 0 | `dev` / `4b9c1aa1` | 治理账本有效，规则与 claim 模板已落盘 | `.project-to-act/`、`docs/SESSION_COLLABORATION_RULES.md`、`.coordination/claims/README.md` | 2026-12-31 |
 | E-PMC-DIFF-001 | 2026-09-03 | `.venv/bin/python -m pytest -q`; `cd frontend && npm test -- --run`; `cd frontend && npm run build`; 代码/历史证据审阅；PMC 默认值最小复现 | 0 | `dev` 工作区（HEAD `0a766ed`，含未提交改动） | 差异文档完成；48 后端测试、4 前端测试和构建通过；PMC 生产闭环仍未通过 | `docs/FUNCTION_DIFFERENCE_39085_0902_CURRENT.md` 及文档列出的证据路径 | 2026-12-31 |
 | E-PMCV2-GB10-001 | 2026-09-03 | Tailscale HTTP health/API 联调；GB10 `solve_scheduling` 显式 PMC v2 调用；浏览器结果预览截图 | 0 | run `run-a6954a7068dd4667bdf4650d072a165f`；plan `wip-v2-f705464333` | PO-20260902-001/W-H410 生成 5 道工序、08:00–08:10 排程，资源阻断 0，validator PASS；停在发布前人工 Gate，未发布 | `docs/pmc-v2-gb10-PO-20260902-001-preview.html`、`docs/pmc-v2-gb10-PO-20260902-001-20260903.png` | 2026-09-10 |
+| E-PMCV2-STREAM-001 | 2026-09-03 | 本地后端/前端测试、W-H128 SOP 流式候选、浏览器截图、GB10 Tailscale release/API/静态资源验证 | 0 | release `20260903201200`；run `run-67f945452c254e37a3a3d991749f1d72`；包 SHA-256 `dae7d89292f0cdc2e58df7a3b739184d745579e2470170827952ecff4d77e20b` | `STREAMING_FLOW` 15 道工序展开 180 条子批次，GB10 返回 324 条 WIP 数量段、14 条 WIP 边、180 active/266 blocked 状态段，validator PASS，停在人工发布 Gate；39092 新前端资源包含批次甘特逻辑 | `docs/pmc-v2-streaming/wh128-15ops-gantt.png`、`docs/pmc-v2-streaming/gb10-wh128-15ops-r3-run.json` | 2026-09-10 |
 
 ## Gate 记录
 
