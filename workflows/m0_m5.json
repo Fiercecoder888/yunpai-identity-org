@@ -1,0 +1,21 @@
+{
+  "workflow_id": "m0_m5_order_to_schedule",
+  "version": "1.0.0",
+  "description": "从原始订单/工程数据候选，经 M0 发布、M1 解析、M2 BOM/SOP、M3 MRP、M4 采购到 M5 排程的受控主链。",
+  "task_id_policy": "同一次运行的根 task_id 原样传播到所有步骤，不为子任务生成替代 TaskID。",
+  "steps": [
+    {"id":"m0_ingest","module":"m0","tool":"data_import_run","depends_on":[],"gate":"candidate","input_from":["request.documents"],"produces":["batch_id","candidate","evidence"]},
+    {"id":"m0_publish","module":"m0","tool":"data_import_commit","depends_on":["m0_ingest"],"gate":null,"input_from":["data_import_run.batch_id","candidate.approval"],"produces":["canonical_revision","ledger_id"]},
+    {"id":"m1_parse","module":"m1","tool":"ingest_document","depends_on":["m0_publish"],"gate":"low_confidence_or_missing_fields","input_from":["request.document"],"produces":["m1.document.v2","order","field_evidence"]},
+    {"id":"m2_engineering","module":"m2","tool":"run_bom_sop_workflow","depends_on":["m1_parse"],"gate":"engineering_approval","input_from":["order.product_code","request.bom_lines","request.routing_steps"],"produces":["bom_draft","sop_draft"]},
+    {"id":"m3_mrp","module":"m3","tool":"run_m3_procurement_requirements","depends_on":["m2_engineering"],"gate":"blocked_input_or_material_match","input_from":["order","approved_bom","request.inventory"],"produces":["requirements","shortage_lines"]},
+    {"id":"m4_procurement","module":"m4","tool":"import_m4_purchase_suggestions_json","depends_on":["m3_mrp"],"gate":"missing_supplier_or_eta","input_from":["shortage_lines","request.supplier_by_material"],"produces":["purchase_suggestions","purchase_batch"]},
+    {"id":"m5_schedule","module":"m5","tool":"solve_scheduling","depends_on":["m4_procurement"],"gate":"schedule_apply","input_from":["order","approved_route","request.resources","material_readiness"],"produces":["schedule_candidate","validation_report","plan_version"]}
+  ],
+  "invariants": [
+    "candidate 不能作为 canonical fact 驱动下游",
+    "缺少订单、BOM、库存、供应商、工艺或资源事实时失败关闭",
+    "M3 到 M4、M4 到 M5 只由 Orchestrator 做结构化桥接",
+    "M5 draft 只有审查通过并经人工批准后才能标记 released"
+  ]
+}

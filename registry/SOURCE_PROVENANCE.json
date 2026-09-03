@@ -1,0 +1,19 @@
+{
+  "source_archive": {
+    "path": "yunpai-0825-source-8fb686d5.zip",
+    "sha256": "a0f602545184e3033a2677bda3199afb9abe5fee3197d4d3ffa819339bc1b7a5"
+  },
+  "architecture_archive": {
+    "path": "Yunpai-0902-architecture-package-20260902.zip",
+    "sha256": "a3207186cff38220cd5f0da26e2b668d184eacfa0db9f24a1ef3a0451414f4cd"
+  },
+  "manifest_source": "yunpai-orchestrator/orchestrator/module_decls/{module}.well-known/tool.json",
+  "manifests": {
+    "m0": "34e454e65903502a615d0dcdbffc36ee206831e9b563c1b90d8db85f292410d9",
+    "m1": "4309d2fdcd445e718dd4b1f28f15593f941cb2134ff8a21c9cd3f76cbdd96ad6",
+    "m2": "c27369a34ffc29aca61a2492809fb7d0343f86512607526830528b20a5f0c704",
+    "m3": "ddb21bf112f72036b4144a5f77d38771474b990dc1e31c8d01b96a856e4b78c2",
+    "m4": "4d463f816146022f129ae8e6cd35ddfda0c24b7b52f2c661720cdfc854a4c18e",
+    "m5": "46e4792fc227219a39f5f44343226436412704fb7811de3ea484ef45778be174"
+  }
+}

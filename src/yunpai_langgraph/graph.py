@@ -1,0 +1,409 @@
+from __future__ import annotations
+
+import base64
+from copy import deepcopy
+import json
+from datetime import datetime, timezone
+from hashlib import sha256
+from typing import Any, Callable
+
+from .agents import PlannerAgent, ReviewerAgent, WorkerAgent, result_data
+from .models import RunState, new_state, summarize
+from .registry import ToolRegistry, build_default_registry
+from .repository import InMemoryRunRepository, RunRepository
+from .skills import SkillRegistry, build_default_skill_registry
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _file_object(filename: str, value: Any) -> dict[str, str]:
+    if isinstance(value, dict) and isinstance(value.get("content_b64"), str):
+        return value
+    raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    return {
+        "filename": filename,
+        "content_type": "application/json",
+        "content_b64": base64.b64encode(raw.encode()).decode(),
+    }
+
+
+def _due_time(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text if "T" in text else f"{text}T23:59:00+08:00"
+
+
+class CompatGraph:
+    def __init__(self, runner: Callable[[RunState], Any]):
+        self._runner = runner
+
+    async def ainvoke(self, state: RunState, config: dict[str, Any] | None = None) -> RunState:
+        return await self._runner(state)
+
+    def invoke(self, state: RunState, config: dict[str, Any] | None = None) -> RunState:
+        import asyncio
+        return asyncio.run(self.ainvoke(state, config))
+
+
+class YunpaiGraph:
+    """Planner/Worker/Reviewer 三 Agent 执行器和可持久化状态机。"""
+
+    def __init__(self, registry: ToolRegistry | None = None, repository: RunRepository | None = None, skills: SkillRegistry | None = None) -> None:
+        self.registry = registry or build_default_registry()
+        self.repository = repository or InMemoryRunRepository()
+        self.skills = skills or build_default_skill_registry()
+        self.planner = PlannerAgent(skills=self.skills)
+        self.worker = WorkerAgent(self.registry, self.skills)
+        self.reviewer = ReviewerAgent()
+
+    def _save(self, state: RunState) -> RunState:
+        self.repository.save(state)
+        return state
+
+    @staticmethod
+    def _public_state(state: RunState) -> RunState:
+        """Remove file bodies from streamed snapshots while retaining metadata."""
+        public = deepcopy(state)
+        request = public.get("request", {})
+        for collection_name in ("attachments", "documents"):
+            collection = request.get(collection_name)
+            if not isinstance(collection, list):
+                continue
+            for item in collection:
+                if isinstance(item, dict) and "content_b64" in item:
+                    item["content_b64"] = "[omitted]"
+        return public
+
+    @classmethod
+    def _event(cls, run_state: RunState, event_type: str, **payload: Any) -> dict[str, Any]:
+        return {
+            "type": event_type,
+            "run_id": run_state["run_id"],
+            "task_id": run_state["task_id"],
+            "at": _now(),
+            **payload,
+        }
+
+    async def planner_node(self, state: RunState) -> RunState:
+        if state.get("status") == "waiting_human":
+            return state
+        if not state.get("plan"):
+            decision = await self.planner.aplan(state["request"], self.registry)
+            state["route"], state["plan"] = decision["route"], decision["steps"]
+            state["workflow_id"] = decision.get("workflow_id", "")
+            state["workflow_version"] = decision.get("workflow_version", "")
+            state["intent"] = decision.get("intent", {})
+            state["route_decision"] = decision.get("route_decision", {})
+            state["model"] = decision.get("model", {})
+            if state.get("route") == "chat":
+                state["response"] = str(decision.get("response") or "")
+            state["trace"].append({"event": "react.thought", "agent": "planner", "reason": decision["reason"], "at": _now()})
+            state["trace"].append({"event": "agent.model", "agent": "planner", "provider": state["model"].get("provider"), "model": state["model"].get("model"), "status": state["model"].get("status"), "latency_ms": state["model"].get("latency_ms"), "at": _now()})
+            state["trace"].append({"event": "agent.intent", "agent": "planner", **state["intent"], "at": _now()})
+            state["trace"].append({"event": "agent.route", "agent": "planner", "route": state["route"], "source": state["route_decision"].get("source"), "selected_tools": [step["tool"] for step in state["plan"]], "reason": decision["reason"], "model": state["model"].get("model"), "at": _now()})
+        if not state["plan"] or int(state.get("next_step_index", 0)) >= len(state["plan"]):
+            state["status"] = "completed"
+            state["response"] = (
+                (state.get("response") or "已理解请求；当前消息不需要调用业务工具。").strip()
+                if not state["plan"]
+                else "计划内工具已执行并通过审查；所有正式副作用均受 Gate 和模块合同约束。"
+            )
+            state["trace"].append({"event": "run.completed", "at": _now()})
+        else:
+            state["status"] = "running"
+        return self._save(state)
+
+    async def worker_node(self, state: RunState) -> RunState:
+        index = int(state.get("next_step_index", 0))
+        if state.get("status") != "running" or index >= len(state.get("plan", [])):
+            return state
+        step = state["plan"][index]
+        state["current_step"] = step["tool"]
+        preflight = self.reviewer.preflight(step, state)
+        if preflight:
+            state["pending_gate"] = {**preflight, "step_index": index, "opened_at": _now()}
+            state["status"] = "waiting_human"
+            state["trace"].append({"event": "gate.opened", "tool": step["tool"], "step_index": index, "phase": "pre_execution", "at": _now()})
+            return self._save(state)
+        payload = self._payload_for(state, step["tool"])
+        record = {
+            "id": step["id"], "module": step["module"], "tool": step["tool"],
+            "status": "running", "input_summary": summarize(payload), "started_at": _now(),
+        }
+        state["steps"].append(record)
+        state["trace"].append({"event": "react.action", "agent": "worker", "tool": step["tool"], "step_index": index, "at": _now()})
+        try:
+            outcome = await self.worker.run(state, step, payload)
+        except Exception as exc:
+            error = {"code": "TOOL_ERROR", "tool": step["tool"], "message": str(exc)}
+            record.update(status="failed", error=error, finished_at=_now())
+            state["errors"].append(error)
+            state["status"] = "failed"
+            state["trace"].append({"event": "react.observation", "tool": step["tool"], "status": "failed", "at": _now()})
+            return self._save(state)
+        result = outcome["result"]
+        state["current_result"] = result
+        state["outputs"][step["tool"]] = result
+        state["outputs"][step["module"]] = result
+        state["evidence"].extend(result.get("evidence", []))
+        record.update(output_summary=outcome["output_summary"], evidence=result.get("evidence", []), finished_at=_now())
+        state["trace"].append({"event": "react.observation", "agent": "worker", "tool": step["tool"], "status": "received", "at": _now()})
+        return self._save(state)
+
+    async def reviewer_node(self, state: RunState) -> RunState:
+        if state.get("status") != "running" or not state.get("current_result"):
+            return state
+        index = int(state.get("next_step_index", 0))
+        step = state["plan"][index]
+        verdict = self.reviewer.review(step["tool"], step["module"], state["current_result"])
+        record = state["steps"][-1]
+        state["trace"].append({"event": "react.review", "agent": "reviewer", "tool": step["tool"], "approved": verdict["approved"], "at": _now()})
+        if verdict.get("terminal"):
+            record["status"] = "failed"
+            state["errors"].append(verdict["error"])
+            state["status"] = "failed"
+        elif not verdict["approved"]:
+            record["status"] = "blocked"
+            state["pending_gate"] = {**verdict["gate"], "step_index": index, "opened_at": _now()}
+            state["status"] = "waiting_human"
+            state["trace"].append({"event": "gate.opened", "tool": step["tool"], "step_index": index, "at": _now()})
+        else:
+            record["status"] = "completed"
+            state["next_step_index"] = index + 1
+            state["current_result"] = {}
+            if state["next_step_index"] >= len(state["plan"]):
+                state["status"] = "completed"
+                state["response"] = "计划内工具已执行并通过审查；所有正式副作用均受 Gate 和模块合同约束。"
+                state["trace"].append({"event": "run.completed", "at": _now()})
+        return self._save(state)
+
+    def route_after_planner(self, state: RunState) -> str:
+        return "worker" if state.get("status") == "running" else "end"
+
+    def route_after_reviewer(self, state: RunState) -> str:
+        return "worker" if state.get("status") == "running" else "end"
+
+    async def run(self, state: RunState) -> RunState:
+        if state.get("status") == "waiting_human":
+            return state
+        state = await self.planner_node(state)
+        while state.get("status") == "running":
+            state = await self.worker_node(state)
+            state = await self.reviewer_node(state)
+        return state
+
+    async def stream(self, state: RunState):
+        """Execute the same graph as ``run`` and yield persisted progress events."""
+        yield self._event(state, "run_start", state=self._public_state(state))
+        try:
+            state = await self.planner_node(state)
+            thought = next((item for item in reversed(state.get("trace", [])) if item.get("event") == "react.thought"), None)
+            if thought:
+                yield self._event(state, "assistant_delta", content=state.get("response") or thought.get("reason", "已生成执行计划"))
+            yield self._event(state, "state_snapshot", state=self._public_state(state))
+
+            if state.get("status") != "running":
+                yield self._event(state, "run_done", state=self._public_state(state))
+                return
+
+            while state.get("status") == "running":
+                index = int(state.get("next_step_index", 0))
+                step = state["plan"][index]
+                yield self._event(state, "assistant_delta", content=f"正在执行 {step['module'].upper()} · {step['tool']}")
+                yield self._event(state, "step_start", step=deepcopy(step))
+                step_count = len(state.get("steps", []))
+                state = await self.worker_node(state)
+
+                if state.get("status") == "waiting_human":
+                    yield self._event(state, "gate_opened", gate=deepcopy(state["pending_gate"]))
+                    yield self._event(state, "state_snapshot", state=self._public_state(state))
+                    return
+
+                if len(state.get("steps", [])) > step_count:
+                    record = state["steps"][-1]
+                    yield self._event(
+                        state,
+                        "step_result",
+                        step=deepcopy(record),
+                        output_summary=deepcopy(record.get("output_summary", {})),
+                    )
+
+                state = await self.reviewer_node(state)
+                if state.get("pending_gate"):
+                    yield self._event(state, "gate_opened", gate=deepcopy(state["pending_gate"]))
+                yield self._event(state, "state_snapshot", state=self._public_state(state))
+
+            yield self._event(state, "run_done", state=self._public_state(state))
+        except (KeyError, ValueError) as exc:
+            state["status"] = "failed"
+            error = {"code": "RUN_ERROR", "message": str(exc)}
+            state.setdefault("errors", []).append(error)
+            self._save(state)
+            yield self._event(state, "run_error", **error)
+            yield self._event(state, "run_done", state=self._public_state(state))
+
+    def _prepare_resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator") -> RunState:
+        if state.get("status") != "waiting_human" or not state.get("pending_gate"):
+            raise ValueError("run is not waiting_human")
+        if decision not in {"allow", "approve", "continue", "retry", "reject", "stop"}:
+            raise ValueError("unsupported gate decision")
+        gate = dict(state["pending_gate"])
+        audit = {"actor": actor, "decision": decision, "gate": gate, "at": _now(), "supplemented": bool(supplement)}
+        state["approvals"].append(audit)
+        state["trace"].append({"event": "gate.decided", "decision": decision, "actor": actor, "step_index": gate["step_index"], "at": audit["at"]})
+        state["pending_gate"] = None
+        if decision in {"reject", "stop"}:
+            state["status"] = "failed"
+            state["response"] = "人工拒绝，流程已终止并保留审计记录。"
+            return self._save(state)
+        if gate.get("pre_execution"):
+            state["authorized_steps"].append(state["plan"][int(gate["step_index"])]["id"])
+            state["status"] = "running"
+            return self._save(state)
+        record = state["steps"][-1]
+        if supplement or decision == "retry":
+            if supplement:
+                state["request"].update(supplement)
+            record["status"] = "superseded"
+            state["current_result"] = {}
+            state["status"] = "running"
+            return self._save(state)
+        record["status"] = "completed"
+        self._apply_approval(state, gate)
+        state["next_step_index"] = int(gate["step_index"]) + 1
+        state["current_result"] = {}
+        state["status"] = "running"
+        return self._save(state)
+
+    async def resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator") -> RunState:
+        state = self._prepare_resume(state, decision, supplement, actor=actor)
+        return state if state.get("status") != "running" else await self.run(state)
+
+    async def stream_resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator"):
+        state = self._prepare_resume(state, decision, supplement, actor=actor)
+        if state.get("status") == "running":
+            async for event in self.stream(state):
+                yield event
+            return
+        yield self._event(state, "state_snapshot", state=self._public_state(state))
+        yield self._event(state, "run_done", state=self._public_state(state))
+
+    def _apply_approval(self, state: RunState, gate: dict[str, Any]) -> None:
+        result = state["outputs"].get(gate["tool"], {})
+        data = result_data(result)
+        if gate["type"] == "engineering":
+            result.setdefault("bom_generation", {})["approval_status"] = "approved"
+        elif gate["type"] == "apply":
+            data["lifecycle_status"] = "released"
+        elif gate["type"] == "review":
+            result["review_status"] = "accepted"
+
+    def _payload_for(self, state: RunState, tool: str) -> dict[str, Any]:
+        request, outputs = state["request"], state.get("outputs", {})
+        explicit = request.get("payloads", {}).get(tool)
+        if isinstance(explicit, dict):
+            return explicit
+        if tool == "data_import_run":
+            files = []
+            documents = request.get("documents", [])
+            if not documents:
+                documents = [
+                    item for item in request.get("attachments", [])
+                    if isinstance(item, dict) and item.get("kind") in {"order", "master_data"}
+                ]
+            for index, document in enumerate(documents):
+                if isinstance(document, dict) and "content_b64" in document:
+                    files.append(document)
+                else:
+                    filename = str(document.get("filename", f"document-{index}.json")) if isinstance(document, dict) else f"document-{index}.json"
+                    files.append(_file_object(filename, document))
+            return {"files": files}
+        if tool == "business-data-identification":
+            return {
+                "root_path": request.get("business_data_root") or request.get("root_path"),
+                "files": request.get("documents") or request.get("attachments") or [],
+                "db_path": request.get("business_catalog_db") or "runtime/yunpai-business-catalog.sqlite",
+            }
+        if tool == "data_import_commit":
+            imported = outputs.get("data_import_run", {})
+            return {"batch_id": imported.get("batch_id") or imported.get("id")}
+        if tool == "ingest_document":
+            document = request.get("document") or request.get("order") or {}
+            order_attachment = next(
+                (
+                    item for item in request.get("attachments", [])
+                    if isinstance(item, dict) and item.get("kind") == "order"
+                ),
+                None,
+            )
+            if order_attachment:
+                # The browser stream path submits the XLSX as an attachment and
+                # does not call /runs/upload, so derive the M1 fixture here.
+                if not document and isinstance(order_attachment.get("content_b64"), str):
+                    try:
+                        raw = base64.b64decode(order_attachment["content_b64"])
+                        from .order_workbook import parse_order_workbook
+                        document = parse_order_workbook(str(order_attachment.get("filename") or "order.xlsx"), raw)
+                    except (ValueError, RuntimeError):
+                        document = {}
+                return {"file": order_attachment, "_fixture_document": document}
+            return {"file": _file_object("order.json", document), "_fixture_document": document}
+        if tool == "run_bom_sop_workflow":
+            product = dict(request.get("product") or {})
+            product.setdefault("product_name", product.get("product_code") or "")
+            return {"product_profile": product, "bom_lines": request.get("bom_lines", []), "routing_steps": request.get("routing_steps", []), "use_demo_sources": False}
+        if tool == "run_m3_procurement_requirements":
+            m1 = outputs.get("ingest_document", {})
+            order = dict(m1.get("order") or m1.get("extraction", {}).get("order") or request.get("order") or {})
+            m2 = outputs.get("run_bom_sop_workflow", {})
+            bom_lines = m2.get("bom_generation", {}).get("bom_lines") or request.get("bom_lines", [])
+            product_name = (request.get("product") or {}).get("product_name") or order.get("product_code") or ""
+            bom_id = str(request.get("bom_id") or f"BOM-{order.get('product_code', '')}")
+            return {
+                "tenant_id": state.get("tenant_id", "default"),
+                "order": {"project_id": str(request.get("project_id") or order.get("order_id") or ""), "order_id": str(order.get("order_id") or ""), "bom_id": bom_id, "product_name": product_name, "order_qty": order.get("quantity", 0), "due_date": str(order.get("due_date") or "")},
+                "bom": {"bom_id": bom_id, "product_name": product_name, "lines": [{"line_id": str(line.get("line_id") or f"line-{index}"), "material_code": str(line.get("material_code") or ""), "material_name": str(line.get("material_name") or line.get("material_code") or ""), "qty_per": line.get("qty_per", line.get("quantity_per", line.get("quantity", 0))), "uom": str(line.get("uom") or line.get("unit") or "pcs"), "loss_rate": line.get("loss_rate", 0), "requires_procurement": line.get("requires_procurement", True)} for index, line in enumerate(bom_lines, start=1)]},
+                "inventory_snapshot": [{"material_code": str(item.get("material_code") or ""), "material_name": str(item.get("material_name") or item.get("material_code") or ""), "warehouse": str(item.get("warehouse") or "local-fixture"), "lot_no": str(item.get("lot_no") or f"lot-{index}"), "available_qty": item.get("available_qty", item.get("quantity", 0)), "locked_qty": item.get("locked_qty", 0), "qc_status": str(item.get("qc_status") or "released"), "received_at": str(item.get("received_at") or _now())} for index, item in enumerate(request.get("inventory", []), start=1)],
+            }
+        if tool == "import_m4_purchase_suggestions_json":
+            data = result_data(outputs.get("run_m3_procurement_requirements", {}))
+            suppliers = request.get("supplier_by_material") or {}
+            suggestions = [{"item_code": line.get("material_code"), "item_name": line.get("material_name"), "quantity": line.get("suggest_purchase_qty", line.get("shortage_qty", 0)), "unit": line.get("uom", "pcs"), "supplier_name": suppliers.get(line.get("material_code"), ""), "required_date": data.get("due_date", ""), "project_code": data.get("project_id", "")} for line in data.get("shortage_lines", [])]
+            return {"suggestions": suggestions, "tenant_id": state.get("tenant_id", "default"), "site_id": str(request.get("site_id") or "default"), "tracking_task_id": state["task_id"], "idempotency_key": f"{state['task_id']}:m4", "source_module": "m3", "procurement_plan_id": data.get("procurement_plan_id"), "order_id": data.get("order_id")}
+        if tool == "solve_scheduling":
+            m1 = outputs.get("ingest_document", {})
+            order = dict(m1.get("order") or request.get("order") or request.get("document") or {})
+            product_id = str(order.get("product_code") or (request.get("product") or {}).get("product_code") or "")
+            resources = [{**item, "name": item.get("name") or item.get("resource_id")} for item in request.get("resources", [])]
+            resource_ids = [item["resource_id"] for item in resources]
+            routes = []
+            for item in request.get("routing_steps", []):
+                eligible = item.get("eligible_resources") or [{"resource_id": resource_id, "processing_minutes": max(1, int(item.get("processing_minutes", 1)))} for resource_id in resource_ids[:1]]
+                routes.append({**item, "product_id": item.get("product_id") or product_id, "operation_name": item.get("operation_name") or item.get("operation_id"), "eligible_resources": eligible})
+            return {"idempotency_key": f"{state['task_id']}:m5", "scenario_id": str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}"), "scenario_purpose": request.get("scenario_purpose", "production"), "planning_start": str(request.get("planning_start") or _now()), "orders": [{"order_id": str(order.get("order_id") or ""), "product_id": product_id, "quantity": order.get("quantity", 0), "due_time": _due_time(order.get("due_date")), "priority": request.get("priority", "normal"), "status": "firm"}], "routing_steps": routes, "resources": resources, "source_systems": ["manual"]}
+        return request.get(tool, {}) if isinstance(request.get(tool), dict) else {}
+
+
+def build_graph(registry: ToolRegistry | None = None, repository: RunRepository | None = None):
+    app = YunpaiGraph(registry, repository)
+    try:
+        from langgraph.graph import END, START, StateGraph
+    except ImportError:
+        return CompatGraph(app.run)
+    builder = StateGraph(RunState)
+    builder.add_node("planner", app.planner_node)
+    builder.add_node("worker", app.worker_node)
+    builder.add_node("reviewer", app.reviewer_node)
+    builder.add_edge(START, "planner")
+    builder.add_conditional_edges("planner", app.route_after_planner, {"worker": "worker", "end": END})
+    builder.add_edge("worker", "reviewer")
+    builder.add_conditional_edges("reviewer", app.route_after_reviewer, {"worker": "worker", "end": END})
+    return builder.compile()
+
+
+async def invoke(request: dict[str, Any], *, tenant_id: str = "default", registry: ToolRegistry | None = None, repository: RunRepository | None = None) -> RunState:
+    state = new_state(request, tenant_id=tenant_id)
+    return await YunpaiGraph(registry, repository).run(state)

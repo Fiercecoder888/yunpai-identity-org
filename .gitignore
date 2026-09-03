@@ -1,0 +1,25 @@
+.env
+.pytest_cache/
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+runtime/*.sqlite
+runtime/*
+
+# Local frontend dependencies and test output
+frontend/node_modules/
+frontend/playwright-report/
+frontend/test-results/
+frontend/tsconfig.tsbuildinfo
+
+# Python and editor caches
+**/__pycache__/
+*.py[cod]
+.DS_Store
+*~
+.~lock.*
+
+# Local distribution archives are generated artifacts, not source
+*.zip

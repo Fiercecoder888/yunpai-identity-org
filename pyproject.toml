@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yunpai-langgraph"
+version = "0.2.0"
+description = "云湃工业一体机：M0-M5 证据治理型 LangGraph 编排器"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7",
+  "jsonschema>=4.22",
+  "langgraph>=1.0,<2",
+  "fastapi>=0.115",
+  "httpx>=0.27",
+  "openpyxl>=3.1",
+  "python-multipart>=0.0.9",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+yunpai-mcp = "yunpai_langgraph.mcp:main"
+yunpai-api = "yunpai_langgraph.api:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+yunpai_langgraph = ["manifests/*.json", "workflows/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
