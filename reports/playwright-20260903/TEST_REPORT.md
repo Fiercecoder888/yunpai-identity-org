@@ -41,3 +41,9 @@
 初始验收目录 `E:/AIStudy/AIProjects/factory/NewWork0` 不是 Git 工作树且缺少前端源码，已改用新 GitLab 仓库 `yunpaiadmin/yunpai-gragh0903` 的完整 `dev` worktree 复核。源码检查未发现需要修改的缺陷；`npm ci`、`npm run typecheck`、`npm run build` 和 `npm test -- --run` 均已通过（2 个测试文件、4 个测试）。本报告和截图已随修复记录提交到该仓库的 `dev` 分支。
 
 运行验收发现的历史运行列表中的失败任务属于既有记录，不是本次新建运行的浏览器错误。
+
+### 2026-09-03 左右侧栏滚动条修复
+
+根据页面截图反馈，左侧任务列表和右侧执行进度栏的滚动滑块过于隐蔽，长列表时需要缩放页面才能操作。已在 `frontend/src/styles/app.css` 为 `.run-list` 和 `.progress-rail` 增加独立滚动槽、可见滑块、悬停颜色，并保留两栏原有 `height: 100%` 与 `overflow-y: auto` 约束，避免滚动跟随中间主列。
+
+修复验证：`npm run typecheck`、`npm run build`、`npm test -- --run` 全部通过（2 个测试文件、4 个测试）。
