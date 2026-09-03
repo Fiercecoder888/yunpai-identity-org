@@ -57,7 +57,7 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
             raise ValueError("业务资料 Skill 需要 root_path 或 files")
         staging = Path(payload.get("staging_dir") or "runtime/business-upload-staging") / str(context.get("task_id", "skill"))
         staging.mkdir(parents=True, exist_ok=True)
-        for item in files:
+        for index, item in enumerate(files, start=1):
             if not isinstance(item, dict):
                 continue
             encoded = item.get("content_b64")
@@ -65,7 +65,9 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
                 continue
             raw = base64.b64decode(encoded, validate=True)
             digest = hashlib.sha256(raw).hexdigest()[:16]
-            (staging / f"{digest}-{_safe_name(str(item.get('filename') or 'upload.bin'))}").write_bytes(raw)
+            # Include the upload index so same-name/same-content files do not
+            # overwrite one another in the staging batch.
+            (staging / f"{digest}-{index:03d}-{_safe_name(str(item.get('filename') or 'upload.bin'))}").write_bytes(raw)
         result = ingest_tree(staging, db_path, batch_id=f"batch-{context.get('task_id', 'skill')}", parse_xlsx=True, deep_limit_bytes=12_000_000)
     return {
         "skill": "business-data-identification",

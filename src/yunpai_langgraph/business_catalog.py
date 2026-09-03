@@ -18,7 +18,7 @@ IGNORED_NAMES = {".DS_Store"}
 IGNORED_PREFIXES = ("._", "~$")
 SUPPORTED_EXTENSIONS = {
     ".xlsx", ".xls", ".csv", ".tsv", ".json", ".pdf", ".docx", ".txt", ".md",
-    ".dwg", ".et", ".zip", ".rar", ".7z",
+    ".dwg", ".et", ".zip", ".rar", ".7z", ".py", ".ps1",
 }
 
 
@@ -110,6 +110,95 @@ def _extract_xlsx(path: Path, kind: str) -> dict[str, Any]:
     return result
 
 
+_BOM_HEADER_ALIASES = {
+    "material_code": ("物料编码", "料号", "物料编号", "材料编码"),
+    "material_name": ("材料名称", "原材料名称", "包材名称", "物料名称", "线材名称", "品名"),
+    "specification": ("规格", "规格型号"),
+    "quantity": ("用量", "数量", "用量/装箱数量"),
+    "unit": ("单位",),
+    "unit_price": ("单价", "含税单价", "不含税单价"),
+    "cost": ("成本", "成本价格", "成本总价"),
+    "supplier": ("供应商",),
+}
+
+
+def _looks_like_material_code(value: Any) -> bool:
+    if value is None:
+        return False
+    text = str(value).strip()
+    return bool(re.match(r"^(?:YA(?:\.[A-Z0-9]+)+|XC\d{3,}|[A-Z]{1,5}[._-][A-Z0-9._-]{2,})$", text, re.I))
+
+
+def _header_key(value: Any) -> str | None:
+    text = str(value or "").replace("\n", "").replace(" ", "").strip()
+    if not text:
+        return None
+    for key, aliases in _BOM_HEADER_ALIASES.items():
+        if any(alias.replace(" ", "") in text for alias in aliases):
+            return key
+    return None
+
+
+def _extract_bom_xlsx(path: Path) -> dict[str, Any]:
+    """Extract every populated BOM row from every sheet, retaining its locator."""
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    sheets: list[dict[str, Any]] = []
+    bom_lines: list[dict[str, Any]] = []
+    try:
+        for sheet in workbook.worksheets:
+            rows: list[tuple[int, list[Any]]] = []
+            max_nonempty_column = 0
+            for row_number, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+                values = [value for value in row]
+                nonempty_columns = [index for index, value in enumerate(values, start=1) if value not in (None, "")]
+                if not nonempty_columns:
+                    continue
+                max_nonempty_column = max(max_nonempty_column, max(nonempty_columns))
+                rows.append((row_number, values))
+            rows = [(number, values[:max_nonempty_column]) for number, values in rows]
+            header_maps: list[tuple[int, dict[str, int]]] = []
+            for number, values in rows[:20]:
+                mapping = {key: index for index, value in enumerate(values) if (key := _header_key(value))}
+                if "material_code" in mapping and ("material_name" in mapping or "quantity" in mapping):
+                    header_maps.append((number, mapping))
+            lines: list[dict[str, Any]] = []
+            for row_number, values in rows:
+                for header_row, mapping in header_maps:
+                    if row_number <= header_row:
+                        continue
+                    code_index = mapping.get("material_code")
+                    code = values[code_index] if code_index is not None and code_index < len(values) else None
+                    if not _looks_like_material_code(code):
+                        continue
+                    line = {
+                        "sheet_name": sheet.title,
+                        "row_number": row_number,
+                        "material_code": str(code).strip(),
+                        "raw_cells": {str(index + 1): value for index, value in enumerate(values) if value not in (None, "")},
+                    }
+                    for key, index in mapping.items():
+                        if index < len(values) and values[index] not in (None, ""):
+                            line[key] = values[index]
+                    lines.append(line)
+                    break
+            sheets.append({
+                "name": sheet.title,
+                "max_row": sheet.max_row,
+                "max_column": sheet.max_column,
+                "actual_max_column": max_nonempty_column,
+                "nonempty_row_count": len(rows),
+                "header_rows": [number for number, _ in header_maps],
+                "bom_line_count": len(lines),
+                "rows": [{"row_number": number, "values": values} for number, values in rows],
+            })
+            bom_lines.extend(lines)
+    finally:
+        workbook.close()
+    return {"sheet_count": len(sheets), "sheets": sheets, "bom_lines": bom_lines, "bom_line_count": len(bom_lines)}
+
+
 def _extract_delimited(path: Path) -> dict[str, Any]:
     encoding = "utf-8-sig"
     try:
@@ -180,7 +269,7 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
     elif size > deep_limit_bytes and suffix in {".pdf", ".docx"}:
         extraction = {"extraction_skipped": "large_file", "size_bytes": size}
     elif suffix == ".xlsx":
-        extraction = _extract_xlsx(path, kind)
+        extraction = _extract_bom_xlsx(path) if kind == "bom" else _extract_xlsx(path, kind)
     elif suffix in {".csv", ".tsv"}:
         extraction = _extract_delimited(path)
     elif suffix == ".json":
@@ -201,6 +290,24 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
         for field, value in line.items():
             if value not in (None, ""):
                 field_observations.append({"field_path": f"$.lines[{line_index - 1}].{field}", "raw_value": value, "normalized_value": value, "physical_type": _text_type(value), "semantic_type": field, "confidence": order.get("confidence", classification_confidence), "status": "candidate"})
+    if kind == "bom" and isinstance(extraction, dict):
+        document = {
+            "schema_version": "m0.bom.v1",
+            "document_type": "bom",
+            "document_subtype": "engineering_bom",
+            "confidence": 0.95 if extraction.get("bom_line_count") else 0.60,
+            "review_status": "needs_review" if not extraction.get("bom_line_count") else "candidate",
+            "sheet_count": extraction.get("sheet_count", 0),
+            "bom_line_count": extraction.get("bom_line_count", 0),
+        }
+        for line_index, line in enumerate(extraction.get("bom_lines", [])):
+            for field in ("material_code", "material_name", "specification", "quantity", "unit", "unit_price", "cost", "supplier"):
+                if line.get(field) not in (None, ""):
+                    field_observations.append({
+                        "field_path": f"$.sheets[{line['sheet_name']!r}].rows[{line['row_number']}].{field}",
+                        "raw_value": line[field], "normalized_value": line[field], "physical_type": _text_type(line[field]),
+                        "semantic_type": field, "confidence": document["confidence"], "status": "candidate",
+                    })
     return {
         "schema_version": SCHEMA_VERSION,
         "relative_path": str(path.relative_to(root)),
@@ -209,13 +316,14 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
         "classification_confidence": classification_confidence,
         "extraction": extraction,
         "document": {
-            "schema_version": "m1.document.v2" if order else None,
-            "document_type": order.get("document_type") if order else kind,
-            "document_subtype": order.get("document_subtype") if order else subtype,
+            "schema_version": document.get("schema_version") if isinstance(document, dict) and document.get("schema_version") else ("m1.document.v2" if order else None),
+            "document_type": document.get("document_type") if isinstance(document, dict) and document.get("document_type") else (order.get("document_type") if order else kind),
+            "document_subtype": document.get("document_subtype") if isinstance(document, dict) and document.get("document_subtype") else (order.get("document_subtype") if order else subtype),
             "order_id": order.get("order_id"),
             "product_code": order.get("product_code"),
-            "confidence": order.get("confidence", classification_confidence),
-            "review_status": "needs_review" if order else "unclassified",
+            "confidence": document.get("confidence") if isinstance(document, dict) and document.get("confidence") is not None else order.get("confidence", classification_confidence),
+            "review_status": document.get("review_status") if isinstance(document, dict) and document.get("review_status") else ("needs_review" if order else "unclassified"),
+            **({"sheet_count": document.get("sheet_count"), "bom_line_count": document.get("bom_line_count")} if kind == "bom" and isinstance(document, dict) else {}),
         },
         "field_observations": field_observations,
     }

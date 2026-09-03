@@ -90,3 +90,28 @@ async def test_qwen_disabled_is_explicit_fallback():
     router = QwenRouter(QwenConfig(enabled=False, api_key="test-key"))
     result = await router.classify({"message": "hello"}, build_default_registry())
     assert result["status"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_planner_falls_back_from_preview_chain_for_unparsed_order_attachment():
+    class FakeRouter:
+        async def classify(self, request, registry):
+            return {
+                "ok": True,
+                "status": "ok",
+                "decision": {
+                    "intent": "解析订单数据", "route": "free",
+                    "tools": ["data_import_preview", "data_import_resolve", "data_import_run"],
+                    "confidence": 0.9, "reason": "preview first",
+                },
+                "model": {"provider": "qwen", "status": "ok"},
+            }
+
+    planner = PlannerAgent(FakeRouter())
+    decision = await planner.aplan({
+        "message": "请解析并校验这份订单",
+        "attachments": [{"kind": "order", "filename": "order.xlsx", "content_b64": "AA=="}],
+    }, build_default_registry())
+    assert decision["route"] == "free"
+    assert [step["tool"] for step in decision["steps"]] == ["ingest_document"]
+    assert decision["route_decision"]["source"] == "deterministic_fallback"

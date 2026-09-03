@@ -138,6 +138,29 @@ class YunpaiGraph:
         try:
             outcome = await self.worker.run(state, step, payload)
         except Exception as exc:
+            if step["tool"] in {"run_bom_sop_workflow", "run_m3_procurement_requirements", "solve_scheduling"} and isinstance(exc, ValueError) and str(exc).startswith("invalid input"):
+                # Contract validation failures for required BOM/SOP/route
+                # facts are recoverable business-data gaps, not agent crashes.
+                raw_message = str(exc)
+                if step["tool"] in {"run_bom_sop_workflow", "run_m3_procurement_requirements"} and any(token in raw_message for token in ("bom", "BOM", "m2_package")):
+                    business_code, business_message = "MISSING_BOM", "缺少或不匹配的 BOM 业务数据"
+                elif step["tool"] == "solve_scheduling" and any(token in raw_message for token in ("routing_steps", "route", "SOP")):
+                    business_code, business_message = "MISSING_SOP", "缺少或不匹配的 SOP/工艺路线业务数据"
+                else:
+                    business_code, business_message = "BUSINESS_INPUT_INVALID", "业务输入不完整或与工具合同不匹配"
+                result = {
+                    "success": False, "code": "BLOCKED_INPUT",
+                    "errors": [{"code": business_code, "message": business_message, "details": [raw_message]}],
+                    "evidence": [{"module": step["module"], "source_ref": step["tool"], "evidence_ref": f"{step['module']}:{step['tool']}", "detail": "工具合同校验发现业务输入不完整"}],
+                    "trace_id": f"{state['task_id']}:{step['tool']}",
+                }
+                state["current_result"] = result
+                state["outputs"][step["tool"]] = result
+                state["outputs"][step["module"]] = result
+                state["evidence"].extend(result["evidence"])
+                record.update(output_summary=summarize(result), evidence=result["evidence"], finished_at=_now())
+                state["trace"].append({"event": "react.observation", "agent": "worker", "tool": step["tool"], "status": "blocked_input", "at": _now()})
+                return self._save(state)
             error = {"code": "TOOL_ERROR", "tool": step["tool"], "message": str(exc)}
             record.update(status="failed", error=error, finished_at=_now())
             state["errors"].append(error)
@@ -245,11 +268,21 @@ class YunpaiGraph:
             yield self._event(state, "run_error", **error)
             yield self._event(state, "run_done", state=self._public_state(state))
 
-    def _prepare_resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator") -> RunState:
+    @staticmethod
+    def validate_resume_decision(state: RunState, decision: str, supplement: dict[str, Any] | None = None) -> None:
         if state.get("status") != "waiting_human" or not state.get("pending_gate"):
             raise ValueError("run is not waiting_human")
         if decision not in {"allow", "approve", "continue", "retry", "reject", "stop"}:
             raise ValueError("unsupported gate decision")
+        gate = state["pending_gate"]
+        if gate.get("type") == "data":
+            if decision == "approve":
+                raise ValueError("data gate cannot be approved; provide business-data supplement or reject")
+            if decision not in {"allow", "continue", "retry", "reject", "stop"} or (decision not in {"reject", "stop"} and not supplement):
+                raise ValueError("data gate requires business-data supplement or rejection")
+
+    def _prepare_resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator") -> RunState:
+        self.validate_resume_decision(state, decision, supplement)
         gate = dict(state["pending_gate"])
         audit = {"actor": actor, "decision": decision, "gate": gate, "at": _now(), "supplemented": bool(supplement)}
         state["approvals"].append(audit)
@@ -330,6 +363,15 @@ class YunpaiGraph:
         if tool == "data_import_commit":
             imported = outputs.get("data_import_run", {})
             return {"batch_id": imported.get("batch_id") or imported.get("id")}
+        if tool == "data_import_preview":
+            imported = outputs.get("data_import_run", {})
+            return {"batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id")}
+        if tool == "data_import_resolve":
+            imported = outputs.get("data_import_run", {})
+            return {
+                "batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id"),
+                "kind": request.get("kind", "mapping"), "id": request.get("id", 0), "action": request.get("action", "approve"),
+            }
         if tool == "ingest_document":
             document = request.get("document") or request.get("order") or {}
             order_attachment = next(
@@ -362,12 +404,20 @@ class YunpaiGraph:
             bom_lines = m2.get("bom_generation", {}).get("bom_lines") or request.get("bom_lines", [])
             product_name = (request.get("product") or {}).get("product_name") or order.get("product_code") or ""
             bom_id = str(request.get("bom_id") or f"BOM-{order.get('product_code', '')}")
-            return {
+            payload = {
                 "tenant_id": state.get("tenant_id", "default"),
                 "order": {"project_id": str(request.get("project_id") or order.get("order_id") or ""), "order_id": str(order.get("order_id") or ""), "bom_id": bom_id, "product_name": product_name, "order_qty": order.get("quantity", 0), "due_date": str(order.get("due_date") or "")},
                 "bom": {"bom_id": bom_id, "product_name": product_name, "lines": [{"line_id": str(line.get("line_id") or f"line-{index}"), "material_code": str(line.get("material_code") or ""), "material_name": str(line.get("material_name") or line.get("material_code") or ""), "qty_per": line.get("qty_per", line.get("quantity_per", line.get("quantity", 0))), "uom": str(line.get("uom") or line.get("unit") or "pcs"), "loss_rate": line.get("loss_rate", 0), "requires_procurement": line.get("requires_procurement", True)} for index, line in enumerate(bom_lines, start=1)]},
                 "inventory_snapshot": [{"material_code": str(item.get("material_code") or ""), "material_name": str(item.get("material_name") or item.get("material_code") or ""), "warehouse": str(item.get("warehouse") or "local-fixture"), "lot_no": str(item.get("lot_no") or f"lot-{index}"), "available_qty": item.get("available_qty", item.get("quantity", 0)), "locked_qty": item.get("locked_qty", 0), "qc_status": str(item.get("qc_status") or "released"), "received_at": str(item.get("received_at") or _now())} for index, item in enumerate(request.get("inventory", []), start=1)],
             }
+            if not bom_lines:
+                # The M3 contract requires one BOM line for calculation. Use
+                # its compatibility package so the worker can return a
+                # contract-valid BLOCKED_INPUT business gate instead of a
+                # schema-validation/tool error.
+                payload.pop("bom")
+                payload["m2_package"] = {}
+            return payload
         if tool == "import_m4_purchase_suggestions_json":
             data = result_data(outputs.get("run_m3_procurement_requirements", {}))
             suppliers = request.get("supplier_by_material") or {}
