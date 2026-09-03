@@ -79,3 +79,13 @@ def test_api_uploads_xlsx_and_records_intent_route(tmp_path):
     assert state["route_decision"]["source"] == "deterministic_fallback"
     assert state["model"]["status"] == "not_configured"
     assert state["plan"][0]["tool"] == "ingest_document"
+
+
+def test_api_rejects_non_xlsx_upload_with_controlled_status(tmp_path):
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "csv.sqlite")))
+    response = client.post(
+        "/runs/upload",
+        files={"file": ("order.csv", b"order_id,quantity\nSO-1,1\n", "text/csv")},
+    )
+    assert response.status_code == 415
+    assert response.json()["detail"]["code"] == "UNSUPPORTED_FILE_TYPE"

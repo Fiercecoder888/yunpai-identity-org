@@ -105,7 +105,8 @@ class QwenRouter:
     @staticmethod
     def _prompt(request: dict[str, Any], catalog: list[dict[str, Any]]) -> str:
         message = str(request.get("message") or request.get("task") or "")
-        file_names = [str(item.get("filename", "")) for item in request.get("documents", []) if isinstance(item, dict)]
+        file_items = list(request.get("documents", [])) + list(request.get("attachments", []))
+        file_names = [str(item.get("filename", "")) for item in file_items if isinstance(item, dict)]
         return json.dumps({
             "message": message,
             "uploaded_files": file_names,

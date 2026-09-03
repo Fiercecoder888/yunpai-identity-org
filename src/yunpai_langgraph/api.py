@@ -75,11 +75,14 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         raw = await file.read()
         if not raw:
             raise HTTPException(400, "uploaded file is empty")
+        filename = str(file.filename or "order.xlsx")
+        if Path(filename).suffix.lower() != ".xlsx":
+            raise HTTPException(415, {"code": "UNSUPPORTED_FILE_TYPE", "message": "订单上传当前仅支持 XLSX"})
         try:
-            document = parse_order_workbook(file.filename or "order.xlsx", raw)
+            document = parse_order_workbook(filename, raw)
             request: dict[str, Any] = {
                 "message": message,
-                "documents": [{"filename": file.filename or "order.xlsx", "content_type": file.content_type or "application/octet-stream", "content_b64": base64.b64encode(raw).decode("ascii")}],
+                "documents": [{"filename": filename, "content_type": file.content_type or "application/octet-stream", "content_b64": base64.b64encode(raw).decode("ascii")}],
                 "document": document,
             }
             if workflow:
@@ -119,6 +122,10 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(409, "run is not waiting_human")
         if decision not in {"allow", "approve", "continue", "retry", "reject", "stop"}:
             raise HTTPException(409, "unsupported gate decision")
+        try:
+            graph.validate_resume_decision(state, decision, body.get("supplement"))
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         return ndjson_response(
             graph.stream_resume(
                 state,

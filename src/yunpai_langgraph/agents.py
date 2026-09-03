@@ -50,6 +50,24 @@ class PlannerAgent:
             source = "explicit" if explicit else "deterministic_fallback"
             intent = {"name": fallback.get("route", "chat"), "confidence": 1.0 if explicit else 0.0, "source": source}
             return {**fallback, "intent": intent, "route_decision": {"source": source, "model_status": model_result.get("status"), "model_error": model_result.get("error")}, "model": model_result.get("model", {})}
+        has_unparsed_order_attachment = (
+            not request.get("document")
+            and any(isinstance(item, dict) and item.get("kind") == "order" for item in request.get("attachments", []))
+        )
+        if decision.get("route") == "free" and has_unparsed_order_attachment and any(
+            tool in {"data_import_preview", "data_import_resolve"} for tool in decision.get("tools", [])
+        ):
+            return {
+                **fallback,
+                "intent": {"name": decision.get("intent", "订单解析"), "confidence": decision.get("confidence", 0.0), "source": "qwen_rejected"},
+                "route_decision": {
+                    "source": "deterministic_fallback",
+                    "model_status": "invalid_attachment_plan",
+                    "model_proposal": decision,
+                    "fallback_reason": "订单附件尚未生成 M0 batch，无法调用 preview/resolve",
+                },
+                "model": model_result.get("model", {}),
+            }
         proposed = self._model_plan(decision, registry, self.skills)
         if proposed is None:
             return {**fallback, "intent": {"name": decision.get("intent", "unknown"), "confidence": decision.get("confidence", 0.0), "source": "qwen_rejected"}, "route_decision": {"source": "deterministic_fallback", "model_status": "invalid_decision", "model_proposal": decision}, "model": model_result.get("model", {})}
@@ -67,6 +85,8 @@ class PlannerAgent:
             return {"route": "workflow", "steps": [{**step, "mode": "workflow"} for step in workflow["steps"]], "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": decision.get("reason") or "Qwen 判定为 M0→M5 受控业务目标"}
         if route == "free":
             tools = [name for name in decision.get("tools", []) if name in registry.specs]
+            if any(name not in registry.handlers for name in tools):
+                return None
             skill_names = [name for name in decision.get("skills", []) if skills and name in skills.specs]
             if not tools and not skill_names:
                 return None
@@ -196,6 +216,8 @@ class ReviewerAgent:
                 return self._gate("data", module, tool, "M2 缺少产品/BOM 权威输入", ["补充数据", "终止"])
             if result.get("status") == "draft_created":
                 return self._gate("engineering", module, tool, "BOM/SOP 草稿必须由工程人员批准", ["批准 BOM/SOP", "修改后重试", "终止"])
+        if tool == "run_m3_procurement_requirements" and not data.get("lines") and not data.get("shortage_lines"):
+            return self._gate("data", module, tool, "M3 缺少可计算的 BOM 行", ["补充 BOM 后重试", "终止"])
         if tool == "import_m4_purchase_suggestions_json":
             suggestions = result.get("suggestions") or result.get("items") or []
             missing_supplier = any(not item.get("supplier_name") for item in suggestions if isinstance(item, dict))
