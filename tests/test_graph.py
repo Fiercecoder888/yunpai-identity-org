@@ -175,6 +175,59 @@ async def test_low_confidence_can_retry_with_corrected_document():
     assert [step["status"] for step in state["steps"]] == ["superseded", "completed"]
 
 
+@pytest.mark.asyncio
+async def test_data_gate_requires_business_supplement_and_blocks_empty_bom():
+    graph = YunpaiGraph()
+    request = workflow_request()
+    request["bom_lines"] = []
+    state = await graph.run(new_state(request))
+    state = await graph.resume(state, "approve")
+    assert state["pending_gate"]["type"] == "data"
+    with pytest.raises(ValueError, match="data gate cannot be approved"):
+        await graph.resume(state, "approve")
+    assert state["status"] == "waiting_human"
+
+    state = await graph.resume(state, "retry", {"bom_lines": [{"material_code": "MAT-1", "quantity_per": 1}]})
+    assert state["pending_gate"]["type"] == "engineering"
+
+
+@pytest.mark.asyncio
+async def test_m3_and_m5_missing_business_inputs_are_contract_valid_blockers():
+    graph = YunpaiGraph()
+    m3 = await graph.registry.call("run_m3_procurement_requirements", {
+        "order": {"project_id": "SO-1", "order_id": "SO-1", "bom_id": "BOM-P-1", "product_name": "P-1", "order_qty": 1, "due_date": "2026-09-10"},
+        "m2_package": {}, "inventory_snapshot": [],
+    }, {"task_id": "TASK-1"})
+    assert m3["success"] is False
+    assert m3["code"] == "BLOCKED_INPUT"
+    assert m3["errors"][0]["code"] == "MISSING_BOM"
+
+    from yunpai_langgraph.workers import m5_schedule
+    m5 = await m5_schedule({
+        "idempotency_key": "KEY-1", "scenario_id": "SC-1", "planning_start": "2026-09-01T00:00:00+08:00",
+        "orders": [{"order_id": "SO-1", "product_id": "P-1", "quantity": 1, "due_time": "2026-09-10T23:59:00+08:00"}],
+        "routing_steps": [], "resources": [], "scenario_purpose": "production",
+    }, {"task_id": "TASK-1"})
+    assert m5["success"] is False
+    assert m5["errors"][0]["code"] == "MISSING_SOP"
+
+
+@pytest.mark.asyncio
+async def test_graph_converts_missing_sop_contract_validation_to_data_gate():
+    graph = YunpaiGraph()
+    request = workflow_request()
+    request["routing_steps"] = []
+    state = await graph.run(new_state(request))
+    state = await graph.resume(state, "approve")
+    state = await graph.resume(state, "approve")
+    assert state["pending_gate"]["type"] == "procurement"
+    state = await graph.resume(state, "retry", {"supplier_by_material": {"MAT-1": "SUP-1"}})
+    assert state["status"] == "waiting_human"
+    assert state["pending_gate"]["type"] == "data"
+    assert "SOP" in state["pending_gate"]["message"] or "输入" in state["pending_gate"]["message"]
+    assert state["errors"] == []
+
+
 def test_compiled_graph_has_three_agent_nodes():
     graph = build_graph()
     if hasattr(graph, "get_graph"):

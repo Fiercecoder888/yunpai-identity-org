@@ -74,6 +74,7 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
     fixture = payload.get("_fixture_document") or _json_content(raw)
     lines = fixture.get("lines") or fixture.get("records") or []
     confidence = float(fixture.get("confidence", 1.0 if lines else 0.0))
+    source_issues = fixture.get("validation_issues") if isinstance(fixture.get("validation_issues"), list) else []
     header = {
         "order_id": fixture.get("order_id"), "product_code": fixture.get("product_code"),
         "quantity": fixture.get("quantity"), "due_date": fixture.get("due_date"),
@@ -84,9 +85,10 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
         "source": {"original_filename": filename, "sha256": sha256(raw).hexdigest()},
         "document_type": "order", "document_subtype": "customer_order",
         "header": header, "lines": lines, "totals": {}, "field_meta": {},
-        "validation_issues": [{"code": "MISSING_FIELD", "message": f"缺少字段: {key}", "paths": [f"$.header.{key}"]} for key in missing],
+        "validation_issues": [*source_issues, *({"code": "MISSING_FIELD", "message": f"缺少字段: {key}", "paths": [f"$.header.{key}"]} for key in missing)],
     }
-    needs_review = confidence < 0.8 or bool(missing)
+    validation_issues = document["validation_issues"]
+    needs_review = confidence < 0.8 or bool(validation_issues)
     return {
         "task_id": f"m1-{ctx['task_id'][-10:]}", "status": "needs_review" if needs_review else "done",
         "processing_stage": "review" if needs_review else "complete",
@@ -122,6 +124,21 @@ async def m2_bom(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]
 
 async def m3_mrp(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     order, bom = payload.get("order") or {}, payload.get("bom") or {}
+    if not bom.get("lines"):
+        order_id = str(order.get("order_id") or "")
+        bom_id = str(order.get("bom_id") or bom.get("bom_id") or "")
+        return {
+            "success": False, "code": "BLOCKED_INPUT", "errors": [{"code": "MISSING_BOM", "message": "缺少可计算的 BOM 行", "details": []}],
+            "data": {
+                "procurement_plan_id": f"blocked-{ctx['task_id'][-10:]}", "project_id": str(order.get("project_id") or order_id),
+                "order_id": order_id, "bom_id": bom_id, "product_name": str(order.get("product_name") or bom.get("product_name") or ""),
+                "order_qty": _number(order.get("order_qty")), "due_date": str(order.get("due_date") or ""),
+                "status": "requires_material_review", "availability_status": "no_procurement_materials", "lines": [], "shortage_lines": [],
+                "warnings": ["缺少 BOM 行"], "material_matching": [], "quality_issues": [],
+                "supply_source": {"owner": "m3", "provider": "local_fixture", "upstream_supply_ignored": False},
+            },
+            "evidence": [_evidence("m3", "bom", "未提供 BOM 行，停止需求计算")], "trace_id": _trace(ctx, "m3"),
+        }
     inventory = {str(x.get("material_code")): _number(x.get("available_qty")) for x in payload.get("inventory_snapshot", [])}
     output_lines = []
     for index, line in enumerate(bom.get("lines", []), start=1):
@@ -171,6 +188,17 @@ async def m4_purchase(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
 
 async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     resources = {str(item["resource_id"]): item for item in payload["resources"]}
+    if payload.get("orders") and not payload.get("routing_steps"):
+        return {
+            "success": False, "code": "BLOCKED_INPUT", "errors": [{"code": "MISSING_SOP", "message": "缺少可执行的 SOP/工艺路线", "details": []}],
+            "data": {
+                "idempotency_key": str(payload.get("idempotency_key") or ""),
+                "schedule": {"scenario_purpose": payload.get("scenario_purpose", "production"), "operations": [], "metrics": {"makespan_minutes": 0, "operation_count": 0}},
+                "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": "",
+                "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id"),
+            },
+            "evidence": [_evidence("m5", "routing_steps", "未提供 SOP/工艺路线，停止排程")], "trace_id": _trace(ctx, "m5"),
+        }
     operations, cursor = [], 0
     for order in payload["orders"]:
         product_id = str(order["product_id"])
