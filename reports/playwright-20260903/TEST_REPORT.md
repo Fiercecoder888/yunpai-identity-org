@@ -47,3 +47,7 @@
 根据页面截图反馈，左侧任务列表和右侧执行进度栏的滚动滑块过于隐蔽，长列表时需要缩放页面才能操作。已在 `frontend/src/styles/app.css` 为 `.run-list` 和 `.progress-rail` 增加独立滚动槽、可见滑块、悬停颜色，并保留两栏原有 `height: 100%` 与 `overflow-y: auto` 约束，避免滚动跟随中间主列。
 
 修复验证：`npm run typecheck`、`npm run build`、`npm test -- --run` 全部通过（2 个测试文件、4 个测试）。
+
+### GB10 发布验证
+
+已使用 `zhb` 账号将前端静态产物发布到 `/home/wjc/yunpai-langgraph/releases/20260903162000` 并切换 `current`，补齐静态代理脚本后重启 39092。线上 HTML 当前加载 `index-BsJpnkQs.js` 与 `index-C6ILRoYD.css`；线上计算样式确认 `.run-list` 和 `.progress-rail` 均为 `overflow-y: auto`，并分别使用可见 scrollbar 颜色。
