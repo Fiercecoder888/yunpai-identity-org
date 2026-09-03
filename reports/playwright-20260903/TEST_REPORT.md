@@ -55,3 +55,7 @@
 ### 2026-09-03 自适应滚动修复
 
 进一步测量发现原布局中两侧 rail 被长内容撑到约 2145px，列表 `scrollHeight` 等于 `clientHeight`，所以看似有 `overflow-y: auto` 实际无法滑动。已增加 `.panel-wrap`/rail 的 `min-height: 0` 和 `.run-list { flex: 1 1 auto }`，并将桌面列宽改为 `minmax(220px, 18vw)`、`minmax(260px, 21vw)`，中间列自适应剩余宽度。右栏滑块恢复为细窄浅色风格。修复后的静态资源已重新发布到同一 release。
+
+### 2026-09-03 线上最终验证
+
+发现旧构建 CSS 中后置规则覆盖了先前临时覆盖项，已在静态目录增加 `assets/overrides.css` 并让 HTML 在主 CSS 后加载。真实浏览器视口验证：右栏 `clientHeight=698`、`scrollHeight=857`，滚轮操作后 `scrollTop=159.2`；左栏滚轮操作后 `scrollTop=820`。两栏均可独立滚动，主列不跟随移动。
