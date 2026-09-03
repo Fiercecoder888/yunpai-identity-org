@@ -70,6 +70,24 @@
 - 风险/阻塞：需要提交前 `git diff --check`，线上发布前登记 `DEPLOY_LOCK`。
 - 证据：压缩包右栏比对命令输出；构建产物将随 release hash 记录。
 
+### 2026-09-03 18:05
+
+- 计划修改：发布 `b1092369` 对应的前端静态资源到 GB10 新 release，切换后只重启 39092 代理。
+- 实际修改：已提交并推送修复分支到 `neworigin/dev-s-progress-restore-20260903`；登记 `DEPLOY_LOCK`，尚未改变服务器状态。
+- 文件：本地发布包临时文件（不入库）；服务器目标为新 release 的 `frontend/dist`。
+- 验证：commit `b1092369`；typecheck/build/Vitest 通过；远端分支创建成功。
+- 风险/阻塞：发布前必须确认旧代理 cwd、current 和 runtime 哈希；若远端状态不符合预期，停止发布并记录。
+- 证据：GitLab push 输出；claim 文件中的发布锁。
+
+### 2026-09-03 18:18
+
+- 计划修改：在 GB10 创建新 release，基于当前完整 release 保留后端/runtime，仅替换 `frontend/dist`，再切换 `current` 并重启 39092 静态代理。
+- 实际修改：本地构建包已生成并通过 SCP 上传到 `/tmp`；包内仅有 `dist/index.html`、一个 CSS 和一个 JS。尚未停止或启动远端进程。
+- 文件：临时包 `yunpai-gb10-progress-restore-b1092369.tar.gz`；包 SHA-256 `133f5170469ce78f22cc9e197f8086616170e9d7b1860b8155e28db429ec2554`。
+- 验证：远端预检确认 `current` 为 `releases/20260903170400`（该版本无 dist）、39092 PID 4804 cwd 为旧 `20260903162000/frontend/dist`，9000 为独立 PID 985735；未触碰其他服务。
+- 风险/阻塞：发布脚本必须先复制完整旧 release/runtime，并校验目标路径与 CSS/HTML 存在；任何预检失败立即中止。
+- 证据：远端只读 `ps/readlink/ss` 输出；本地包清单和哈希。
+
 ## 交接
 
 - 最终 commit：未完成

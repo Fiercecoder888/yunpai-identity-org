@@ -8,4 +8,6 @@ started_at: 2026-09-03 17:00 Asia/Shanghai
 expected_end: 2026-09-03 19:00 Asia/Shanghai
 status: active
 
+deploy_lock: requested 2026-09-03 18:05 Asia/Shanghai; owner: zhb / Codex; scope: GB10 frontend static release on port 39092 only
+
 备注：规则示例要求 dev/<session-id>，但仓库已有 refs/heads/dev，Git 不允许同时创建 dev/*；本分支使用 dev- 前缀，最终由集成负责人 cherry-pick 到 dev。
