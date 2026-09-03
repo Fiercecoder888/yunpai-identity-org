@@ -27,4 +27,4 @@
 
 - 2026-09-03：初始化项目治理账本，新增多 session 协作规则和实时报告模板；证据 `E-SESSION-001`；下一步按规则登记首个并行任务；确认来源：用户请求。
 - 2026-09-03：完成后端修复与前端右栏 session 集成，线上 `39092` 新 release 通过关键点击/滚动验收；证据 `E-INTEGRATION-002`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。
-- 2026-09-03：`dev` 推送至 `neworigin/dev`（`d48ce911`），完成集成 session 交接和 claim 释放；证据 `E-INTEGRATION-003`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。
+- 2026-09-03：`dev` 推送至 `neworigin/dev`（最终交接提交 `ee8541cc`，交付基线 `d48ce911`），完成集成 session 交接和 claim 释放；证据 `E-INTEGRATION-003`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。
