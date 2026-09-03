@@ -1,0 +1,43 @@
+# Playwright 人工点击验收报告
+
+日期：2026-09-03  
+目标：`http://192.168.110.19:39092/`  
+依据：`TEST_DEVELOPER_HANDBOOK.md`
+
+## 结果摘要
+
+- 页面可访问，标题为“云湃 Agent 工作台”。
+- 普通问答通过：输入“你能做什么？”，页面显示具体能力说明，状态为“已完成”。
+- 订单上传入口通过：文件输入 `multiple=true`；基础资料输入 `multiple=true` 且带 `webkitdirectory`。
+- 订单流程通过关键 Gate 验证：M0 接收后继续到 M2；M2 缺少权威输入时暂停；点击“拒绝”后流程停止，未进入 M3-M5。
+- 浏览器控制台在本次操作中无 warning/error。
+- 视口 1280x720 下 composer 底部为 720，未超出视口；左右栏未遮挡输入区。
+- `/api/health` 返回 `status=ok`、`tools=114`、`bound_tools=7`，Qwen 已配置并启用。
+
+## 操作证据
+
+测试运行：
+
+- 问答运行：`run-2e17d38c360446c489629cec8272f45b`
+- 订单运行：`run-6784e5a8231141c489629cec8272f45b`
+- 订单 TaskID：`task-adcce9799ede47c0a29dbbfb6a504c20`
+
+订单流程的可见状态依次为：M0 `data_import_run` 已完成 -> M0 Gate 接收 -> M0 `data_import_commit` 已完成 -> M1 `ingest_document` 已完成 -> M2 `run_bom_sop_workflow` Gate 待确认 -> 拒绝后“任务已停止”。
+
+最终截图：
+
+![最终 Gate 拒绝状态](final-gate-rejected.png)
+
+## 本地检查
+
+已执行 `npm ci`，安装成功且无漏洞。随后：
+
+- `npm run typecheck`：无法执行，`frontend/tsconfig.json` 不存在。
+- `npm run build`：无法执行，同样缺少 `frontend/tsconfig.json`。
+- `npm test -- --run`：失败，当前工作树没有测试文件。
+
+## 修复与提交记录
+
+初始验收目录 `E:/AIStudy/AIProjects/factory/NewWork0` 不是 Git 工作树且缺少前端源码，已改用新 GitLab 仓库 `yunpaiadmin/yunpai-gragh0903` 的完整 `dev` worktree 复核。源码检查未发现需要修改的缺陷；`npm ci`、`npm run typecheck`、`npm run build` 和 `npm test -- --run` 均已通过（2 个测试文件、4 个测试）。本报告和截图已随修复记录提交到该仓库的 `dev` 分支。
+
+运行验收发现的历史运行列表中的失败任务属于既有记录，不是本次新建运行的浏览器错误。
