@@ -187,3 +187,15 @@ GB10 复测运行 ID：`run-ba26160a0daf4eaebe58e029f5b77c26`；候选批次：`
 | PS1 | 1 | `batch-task-ab3e1398b4174c279e74621d27a37c61` | 提取一致，但样本不足 |
 
 本轮修复了三个跨类型问题：上传 staging 文件名加入序号，避免同名/同内容文件互相覆盖；将 `.py/.ps1/.et/.rar/.7z` 纳入可追踪二进制文件类型；补齐 `pypdf`、`python-docx` 依赖，确保 Codex 与 GB10 使用同一解析能力。当前资料中 RAR 仅 2 个、ET/PS1 各 1 个、TSV/7Z 为 0 个，已上传所有现有样本并标记样本不足，没有伪造三样本通过结论。
+
+为完成格式管线的三样本验证，另使用格式 fixture 补测缺样本类型（不计入真实业务资料数量）：
+
+| 类型 | Fixture 上传数 | GB10 批次 | 结果 |
+|---|---:|---|---|
+| TSV | 3 | `batch-task-73d2bef01466433eb34dabe1ff813b8d` | 通过，exact_equal |
+| RAR | 3 | `batch-task-49db03e1e9fc483eac7881757ca1be9a` | 通过，exact_equal |
+| ET | 3 | `batch-task-ec8ec9a104c544aab7a0abe075c95ab8` | 通过，exact_equal |
+| PS1 | 3 | `batch-task-d735503b176c44c187381f38649ac449` | 通过，exact_equal |
+| 7Z | 3 | `batch-task-32cc4c757c6e41abbe831bf034f3ab57` | 通过，exact_equal |
+
+fixture 结果只证明扩展名接收、staging、二进制/分隔文本提取和本地/GB10 一致性；真实业务语义仍以外置硬盘样本为准。
