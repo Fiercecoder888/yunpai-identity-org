@@ -88,6 +88,33 @@
 - 风险/阻塞：发布脚本必须先复制完整旧 release/runtime，并校验目标路径与 CSS/HTML 存在；任何预检失败立即中止。
 - 证据：远端只读 `ps/readlink/ss` 输出；本地包清单和哈希。
 
+### 2026-09-03 18:40
+
+- 计划修改：对新 release 执行线上多视口 Playwright 点击、滚动和错误检查，保存截图与 OCR/DOM 摘要。
+- 实际修改：已创建并切换 GB10 release `20260903173855`；39092 静态代理由 PID `4804` 切换为 PID `1330240`，cwd 为新 release 的 `frontend/dist`。9000 未重启。
+- 文件：服务器新 release 的 `frontend/dist`；本地报告目录将追加线上截图和验收摘要。
+- 验证：页面、CSS、`/api/health` 均 HTTP 200；新旧 runtime 两个 SQLite SHA-256 均一致。新 CSS 为 `index-B2tNpWvf.css`，包含右栏选择器。
+- 风险/阻塞：浏览器截图接口此前受资源压力超时；本轮按小裁剪、分视口执行，并记录任何控制台错误或交互失败。
+- 证据：release `20260903173855`、包 SHA-256 `133f5170469ce78f22cc9e197f8086616170e9d7b1860b8155e28db429ec2554`、远端发布命令输出。
+
+### 2026-09-03 19:05
+
+- 计划修改：记录线上 1280/1440/390 视口证据，并把移动抽屉测试改为等待状态后再切换，避免连续点击的 React 状态竞态。
+- 实际修改：线上 1280x720、1440x900 与 390x844 已加载新 `B2tNpWvf/CVC8jVpm` 资源；桌面导入菜单、右栏滚动、移动左/右抽屉均复核，控制台错误/警告为 0。首次无等待的组合点击只导致测试动作未命中，随后按可见状态重新点击成功，页面代码无异常。
+- 文件：即将修改 `frontend/e2e/acceptance.spec.ts`；截图已保存到 `reports/s-progress-restore-20260903/`。
+- 验证：1280 右栏 `top=0,bottom=720,scrollTop=57.6`；1440 `top=0,bottom=900,pageOverflow=false`；390 右栏展开 `top=0,bottom=844,width=310,transform=0`，composer bottom 等于视口底部。
+- 风险/阻塞：CLI Playwright 仍受本机 Node 内存限制，需使用受限并发或浏览器 API 证据；不影响已完成的线上交互采集。
+- 证据：`after-online-1280x720.png`、`after-online-1280x720-scrolled.png`、`after-online-1440x900.png`、`after-online-mobile-390x844-right-open.png`。
+
+### 2026-09-03 19:22
+
+- 计划修改：补齐线上点击矩阵、可读文本/OCR 说明、release/hash 和最终交接记录，随后合并到集成 `dev`。
+- 实际修改：完成 1280x720、1440x900、1024x768、390x844 浏览器验收；点击导入菜单、任务选择、新建任务、普通问答、移动左右抽屉和右栏滚动均得到预期结果，控制台 error/warning 均为 0。普通问答返回具体 Planner 能力说明并完成。
+- 文件：`reports/s-progress-restore-20260903/` 新增线上截图与 `browser-evidence.json`；`REPORT.md` 更新验收矩阵；`frontend/e2e/acceptance.spec.ts` 固化移动等待逻辑。
+- 验证：线上 release `20260903173855`；静态代理 PID `1330240` cwd 正确；HTML 无 `overrides.css`；CSS SHA-256 `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；health `status=ok, tools=114, bound_tools=7`；9000 PID `985735` 未变；runtime 哈希在发布复制阶段一致。
+- 风险/阻塞：CLI Playwright 因缺少本机 Chromium 可执行文件未能启动；浏览器控制 API 已完成真实线上点击和截图。中文 OCR 引擎未安装，报告明确采用截图视觉 + DOM 可读文本复核，未伪造 OCR 结论。
+- 证据：`reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张线上截图、远端发布输出。
+
 ## 交接
 
 - 最终 commit：未完成

@@ -123,8 +123,13 @@ test('keeps panels usable on mobile', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-mobile', 'Mobile drawer checks run in the mobile project.');
   await mockApi(page); await page.goto('/');
   await page.getByRole('button', { name: '打开任务列表' }).click(); await expect(page.getByTestId('left-rail')).toBeVisible();
-  await page.locator('.mobile-scrim').click({ position: { x: 380, y: 20 } });
-  await page.getByRole('button', { name: '打开执行进度' }).click(); await expect(page.getByTestId('progress-rail')).toBeVisible();
+  const scrim = page.locator('.mobile-scrim');
+  await expect(scrim).toBeVisible();
+  await scrim.click({ position: { x: 195, y: 400 } });
+  await expect(scrim).toBeHidden();
+  await page.getByRole('button', { name: '打开执行进度' }).click();
+  await expect(page.locator('.right-panel-wrap')).toHaveClass(/panel-open/);
+  await expect(page.getByTestId('progress-rail')).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow).toBe(false);
   await page.screenshot({ path: screenshotPath('03-mobile', testInfo.project.name), fullPage: true });
