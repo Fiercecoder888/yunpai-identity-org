@@ -50,7 +50,7 @@ class QwenRouter:
     def __init__(self, config: QwenConfig | None = None) -> None:
         self.config = config or QwenConfig.from_env()
 
-    async def classify(self, request: dict[str, Any], registry: Any) -> dict[str, Any]:
+    async def classify(self, request: dict[str, Any], registry: Any, skills: Any = None) -> dict[str, Any]:
         started = time.perf_counter()
         metadata = self.config.public()
         if not self.config.enabled:
@@ -61,10 +61,13 @@ class QwenRouter:
             import httpx
 
             catalog = [
-                {"name": spec.name, "module": spec.module, "method": spec.method}
+                {"name": spec.name, "module": spec.module, "method": spec.method, "version": getattr(spec, "version", "")}
                 for spec in registry.specs.values()
             ]
-            prompt = self._prompt(request, catalog)
+            if skills is None:
+                skills = getattr(self, "skills", None)
+            skill_catalog = skills.catalog() if skills is not None and hasattr(skills, "catalog") else []
+            prompt = self._prompt(request, catalog, skill_catalog)
             headers = {"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"}
             body = {
                 "model": self.config.model,
@@ -98,20 +101,24 @@ class QwenRouter:
         return (
             "你是云湃制造系统的 Planner 路由器。只负责识别用户意图和选择执行路径，不执行工具。"
             "必须只输出一个 JSON 对象，不要 Markdown 或思维过程。route 必须是字面值 workflow、free、chat，绝对不能使用 production_planning、erp 或其他自定义路由名。"
-            "workflow 仅用于完整 M0 到 M5 订单/采购/排程主链；free 用于一个或多个已注册工具；chat 用于解释性对话。"
-            "JSON 字段必须为 intent、route、tools、confidence、reason；route=chat 时必须额外返回 answer，用中文直接回答用户问题。可选 skills 字段用于选择高阶 Skill。tools 只能从给定 catalog 选择。"
+            "workflow 仅用于完整 M0 到 M5 订单/采购/排程主链；free 用于一个或多个已注册工具或已注册高阶 Skill；chat 用于解释性对话。"
+            "JSON 字段必须为 intent、route、tools、confidence、reason；route=chat 时必须额外返回 answer，用中文直接回答用户问题。可选 skills 字段用于选择高阶 Skill，只能从给定 skill catalog 中按 name 精确选择。"
+            "tools 只能从给定 catalog 选择。skill 名称必须与 catalog 中的 name 完全一致，不能自造或拼接版本号。"
+            "上传订单文件时优先 workflow 或 ingest_document；上传基础资料/业务资料（BOM、SOP、设备、工位、人员、库存、供应商、财务、目录批量）时必须在 skills 中给出 business-data-identification。"
         )
 
     @staticmethod
-    def _prompt(request: dict[str, Any], catalog: list[dict[str, Any]]) -> str:
+    def _prompt(request: dict[str, Any], catalog: list[dict[str, Any]], skill_catalog: list[dict[str, Any]] | None = None) -> str:
         message = str(request.get("message") or request.get("task") or "")
         file_items = list(request.get("documents", [])) + list(request.get("attachments", []))
         file_names = [str(item.get("filename", "")) for item in file_items if isinstance(item, dict)]
+        skill_names = [str(skill) for skill in (request.get("skills") or [])] if isinstance(request.get("skills"), list) else []
         return json.dumps({
             "message": message,
             "uploaded_files": file_names,
             "catalog": catalog,
-            "skills": [{"name": "business-data-identification", "description": "识别业务资料并写入可审核候选库；不直接发布 M0 canonical 事实"}],
+            "skills": skill_catalog or [{"name": "business-data-identification", "description": "识别业务资料并写入可审核候选库；不直接发布 M0 canonical 事实"}],
+            "requested_skills": skill_names,
         }, ensure_ascii=False)
 
     @staticmethod

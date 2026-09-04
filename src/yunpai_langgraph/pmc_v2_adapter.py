@@ -15,10 +15,21 @@ from .pmc_v2_scheduler import schedule_operations
 from .pmc_wip_projection import project_wip_pmc
 from .pmc_v2_snapshots import (
     PmcError, build_constraint_snapshot, build_order_snapshot,
-    build_supply_snapshot, finalize_snapshot, validate_bundle,
+    build_supply_snapshot, canonical_bytes, finalize_snapshot, validate_bundle,
 )
 
 TZ = timezone(timedelta(hours=8))
+
+# Strict production path: no implicit calendar/capacity/efficiency/approval
+# defaults are injected here.  Requests not explicitly marked as a legacy
+# preview must carry every hard fact explicitly (0902 PMC v2 contract).
+def _strict_production(payload: dict[str, Any]) -> bool:
+    purpose = str(payload.get("scenario_purpose") or "production").lower()
+    return purpose == "production" and not bool(payload.get("legacy_preview"))
+
+
+def _blocked(code: str, message: str) -> "PmcError":
+    return PmcError("BLOCKED_INPUT", f"{code} {message}")
 
 
 def _status(value: Any) -> str:
@@ -28,14 +39,12 @@ def _status(value: Any) -> str:
 
 def _iso(value: Any, fallback: datetime) -> str:
     if value:
-        text = str(value)
-        if "T" not in text:
-            text = f"{text}T08:00:00+08:00"
-        return text
+        return str(value)
     return fallback.isoformat()
 
 
 def _calendar(payload: dict[str, Any]) -> dict[str, Any]:
+    strict = _strict_production(payload)
     windows = payload.get("calendar_windows") or payload.get("calendar") or []
     if isinstance(windows, dict):
         windows = windows.get("working_intervals") or windows.get("windows") or []
@@ -46,10 +55,19 @@ def _calendar(payload: dict[str, Any]) -> dict[str, Any]:
         start = item.get("start_at")
         end = item.get("end_at")
         if not start and item.get("date"):
+            # Date-only calendar rows would silently synthesize a default
+            # 08:00-17:00 shift, which changes plan results (P0-2).  That is
+            # only tolerated on the explicitly marked legacy/preview path.
+            if strict:
+                raise _blocked("MISSING_CALENDAR_TIME",
+                               "date-only calendar rows are not allowed in production; provide start_at/end_at")
             start = f"{item['date']}T{item.get('start', '08:00')}:00+08:00"
             end = f"{item['date']}T{item.get('end', '17:00')}:00+08:00"
-        if start and end:
-            intervals.append({"calendar_ref": str(item.get("calendar_ref") or "CAL-DEFAULT"), "start_at": str(start), "end_at": str(end), "shift_code": str(item.get("shift_code") or item.get("shift") or "DAY")})
+        if not start or not end:
+            raise _blocked("MISSING_CALENDAR", "working intervals require start_at and end_at")
+        if strict and not item.get("calendar_ref"):
+            raise _blocked("MISSING_CALENDAR_REF", "production calendar windows require an explicit calendar_ref")
+        intervals.append({"calendar_ref": str(item.get("calendar_ref") or "CAL-DEFAULT"), "start_at": str(start), "end_at": str(end), "shift_code": str(item.get("shift_code") or item.get("shift") or "DAY")})
     if not intervals:
         raise PmcError("BLOCKED_INPUT", "MISSING_CALENDAR working intervals are required for PMC v2")
     unavailable = payload.get("resource_unavailability") or []
@@ -57,6 +75,7 @@ def _calendar(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resources(payload: dict[str, Any], calendar: dict[str, Any]) -> dict[str, Any]:
+    strict = _strict_production(payload)
     items = payload.get("resources") or []
     explicit = payload.get("resource_snapshot")
     if isinstance(explicit, dict):
@@ -69,17 +88,39 @@ def _resources(payload: dict[str, Any], calendar: dict[str, Any]) -> dict[str, A
             continue
         kind = str(item.get("resource_type") or item.get("type") or "equipment").upper()
         if kind in {"PERSON", "OPERATOR", "LABOR"}:
+            if strict and not item.get("calendar_ref"):
+                raise _blocked("MISSING_RESOURCE_BINDING",
+                               f"person {code} requires an explicit calendar_ref in production")
             persons.append({"person_code": code, "skill_codes": list(item.get("skills") or item.get("skill_codes") or []), "qualified_operation_codes": list(item.get("qualified_operation_codes") or []), "max_parallel_tasks": int(item.get("max_parallel_tasks") or 1), "status": _status(item.get("status")), "calendar_ref": str(item.get("calendar_ref") or cal_ref)})
         elif kind == "TOOLING":
+            if strict and not item.get("calendar_ref"):
+                raise _blocked("MISSING_RESOURCE_BINDING",
+                               f"tooling {code} requires an explicit calendar_ref in production")
             tooling.append({"tooling_code": code, "tooling_type": str(item.get("tooling_type") or "fixture"), "capability_codes": list(item.get("capability_codes") or []), "compatible_product_codes": list(item.get("compatible_product_codes") or []), "quantity_available": int(item.get("quantity_available") or item.get("capacity") or 1), "status": _status(item.get("status")), "calendar_ref": str(item.get("calendar_ref") or cal_ref)})
         elif kind == "STATION":
+            if strict and not item.get("calendar_ref"):
+                raise _blocked("MISSING_RESOURCE_BINDING",
+                               f"station {code} requires an explicit calendar_ref in production")
             stations.append({"station_code": code, "work_center_code": str(item.get("work_center_code") or code), "parallel_slots": int(item.get("parallel_slots") or 1), "status": _status(item.get("status")), "calendar_ref": str(item.get("calendar_ref") or cal_ref)})
         else:
-            equipment.append({"equipment_code": code, "equipment_type": str(item.get("equipment_type") or item.get("name") or "machine"), "capability_codes": list(item.get("capability_codes") or item.get("capabilities") or []), "capacity_per_hour": str(item.get("capacity_per_hour") or item.get("capacity") or 60), "efficiency_factor": str(item.get("efficiency_factor") or item.get("efficiency") or 1), "status": _status(item.get("status")), "calendar_ref": str(item.get("calendar_ref") or cal_ref)})
+            capacity = item.get("capacity_per_hour") or item.get("capacity")
+            efficiency = item.get("efficiency_factor") or item.get("efficiency")
+            equipment_type = item.get("equipment_type") or item.get("name")
+            if strict and not item.get("calendar_ref"):
+                raise _blocked("MISSING_RESOURCE_BINDING",
+                               f"equipment {code} requires an explicit calendar_ref in production")
+            if strict and (capacity is None or capacity == ""):
+                raise _blocked("MISSING_CAPACITY", f"equipment {code} requires capacity_per_hour in production")
+            if strict and (efficiency is None or efficiency == ""):
+                raise _blocked("MISSING_EFFICIENCY", f"equipment {code} requires efficiency_factor in production")
+            if strict and not equipment_type:
+                raise _blocked("MISSING_EQUIPMENT_TYPE", f"equipment {code} requires equipment_type in production")
+            equipment.append({"equipment_code": code, "equipment_type": str(equipment_type or "machine"), "capability_codes": list(item.get("capability_codes") or item.get("capabilities") or []), "capacity_per_hour": str(capacity or 60), "efficiency_factor": str(efficiency or 1), "status": _status(item.get("status")), "calendar_ref": str(item.get("calendar_ref") or cal_ref)})
     return finalize_snapshot({"snapshot_id": f"SNAP-RES-{payload.get('scenario_id', 'M5')}", "revision": 1, "equipment": equipment, "tooling": tooling, "persons": persons, "stations": stations})
 
 
 def _routes(payload: dict[str, Any], orders: list[dict[str, Any]]) -> dict[str, Any]:
+    strict = _strict_production(payload)
     grouped: dict[str, list[dict[str, Any]]] = {}
     for raw in payload.get("routing_steps") or []:
         product = str(raw.get("product_id") or raw.get("product_code") or "")
@@ -121,12 +162,21 @@ def _routes(payload: dict[str, Any], orders: list[dict[str, Any]]) -> dict[str, 
             }
             if not any(groups.values()):
                 raise PmcError("BLOCKED_INPUT", f"MISSING_RESOURCE_REQUIREMENT op_code={code}")
-            op = {"op_code": code, "name": str(raw.get("operation_name") or raw.get("name") or code), "sequence_no": index, "predecessors": predecessors, "standard_minutes": float(std), "quantity_basis": int(raw.get("quantity_basis") or raw.get("batch_size") or 1), "batch_size": int(raw.get("batch_size") or raw.get("quantity_basis") or 1), "setup_minutes": int(raw.get("setup_minutes") or 0), "setup_family": raw.get("setup_family"), "parallel_allowed": bool(raw.get("parallel_allowed", False)), "yield_rate": float(yield_rate), **groups, "approval_ref": str(raw.get("approval_ref") or payload.get("route_approval_ref") or "APPROVED-ROUTE")}
+            approval_ref = raw.get("approval_ref") or payload.get("route_approval_ref")
+            if strict and not approval_ref:
+                raise PmcError("BLOCKED_INPUT", f"MISSING_APPROVAL_REF op_code={code}")
+            op = {"op_code": code, "name": str(raw.get("operation_name") or raw.get("name") or code), "sequence_no": index, "predecessors": predecessors, "standard_minutes": float(std), "quantity_basis": int(raw.get("quantity_basis") or raw.get("batch_size") or 1), "batch_size": int(raw.get("batch_size") or raw.get("quantity_basis") or 1), "setup_minutes": int(raw.get("setup_minutes") or 0), "setup_family": raw.get("setup_family"), "parallel_allowed": bool(raw.get("parallel_allowed", False)), "yield_rate": float(yield_rate), **groups, "approval_ref": str(approval_ref or "APPROVED-ROUTE")}
             if raw.get("transfer_batch_size") is not None:
                 op["transfer_batch_size"] = int(raw["transfer_batch_size"])
             ops.append(op)
         flow_mode = str(payload.get("execution_model") or payload.get("flow_mode") or "").upper()
-        route = {"snapshot_id": f"SNAP-RT-{product}", "revision": 1, "product_code": product, "route_code": str(payload.get("route_code") or f"ROUTE-{product}"), "route_version": str(payload.get("route_version") or "approved-v2"), "approval_ref": str(payload.get("route_approval_ref") or "APPROVED-ROUTE"), "operations": ops}
+        route_version = payload.get("route_version")
+        route_code = payload.get("route_code")
+        if strict and not route_version:
+            raise PmcError("BLOCKED_INPUT", f"MISSING_ROUTE_VERSION product_code={product}")
+        if strict and not route_code:
+            raise PmcError("BLOCKED_INPUT", f"MISSING_ROUTE_CODE product_code={product}")
+        route = {"snapshot_id": f"SNAP-RT-{product}", "revision": 1, "product_code": product, "route_code": str(route_code or f"ROUTE-{product}"), "route_version": str(route_version or "approved-v2"), "approval_ref": str(approval_ref or "APPROVED-ROUTE"), "operations": ops}
         if flow_mode:
             route["execution_model"] = flow_mode
         if payload.get("transfer_batch_size") is not None:
@@ -138,6 +188,7 @@ def _routes(payload: dict[str, Any], orders: list[dict[str, Any]]) -> dict[str, 
 
 
 def build_bundle(payload: dict[str, Any]) -> dict[str, Any]:
+    strict = _strict_production(payload)
     supplied = payload.get("pmc_v2_bundle")
     if isinstance(supplied, dict):
         return supplied
@@ -145,7 +196,10 @@ def build_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     for raw in payload.get("orders") or []:
         orders.append(build_order_snapshot({"order_id": str(raw.get("order_id") or ""), "order_no": str(raw.get("order_no") or raw.get("order_id") or ""), "lines": [{"order_line_id": raw.get("order_line_id") or f"{raw.get('order_id')}::L1", "product_code": str(raw.get("product_id") or raw.get("product_code") or ""), "qty": raw.get("quantity"), "uom": raw.get("uom") or "PCS", "due_date": raw.get("due_time"), "priority": raw.get("priority")}]}, snapshot_id=f"SNAP-ORD-{raw.get('order_id')}"))
     calendar = _calendar(payload)
-    bundle = {"bundle_version": "pmc-input-bundle.v2", "order_snapshots": orders, "routes": _routes(payload, orders), "resource_snapshot": _resources(payload, calendar), "calendar_snapshot": calendar, "supply_snapshot": build_supply_snapshot(payload.get("supply_entries") or _supply_entries(payload)), "constraint_snapshot": build_constraint_snapshot(payload.get("changeover_rules") or payload.get("setup_matrix") or {}, constraint_version="wip-v2")}
+    supply_entries = payload.get("supply_entries") or _supply_entries(payload)
+    if strict and not supply_entries and not payload.get("order_kitting"):
+        raise _blocked("MISSING_SUPPLY", "production 排程必须携带 supply/readiness 或 order_kitting 事实")
+    bundle = {"bundle_version": "pmc-input-bundle.v2", "order_snapshots": orders, "routes": _routes(payload, orders), "resource_snapshot": _resources(payload, calendar), "calendar_snapshot": calendar, "supply_snapshot": build_supply_snapshot(supply_entries), "constraint_snapshot": build_constraint_snapshot(payload.get("changeover_rules") or payload.get("setup_matrix") or {}, constraint_version="wip-v2")}
     return bundle
 
 
@@ -173,7 +227,7 @@ def run_pmc_v2(payload: dict[str, Any]) -> dict[str, Any]:
         enriched.append({**op, "operation_name": meta.get("name", op["op_code"]), "sequence_no": meta.get("sequence_no"), "standard_minutes": meta.get("standard_minutes"), "quantity_basis": meta.get("quantity_basis"), "yield_rate": meta.get("yield_rate", 1), "loss_rate": round(1 - float(meta.get("yield_rate", 1)), 6), "setup_family": meta.get("setup_family"), "wip_state": "released"})
     starts = [op["plan_start"] for op in enriched]
     ends = [op["plan_end"] for op in enriched]
-    digest = sha256(str(bundle).encode("utf-8")).hexdigest()
+    digest = sha256(canonical_bytes(bundle, skip=())).hexdigest()
     processing = sum(float(op["processing_minutes"]) for op in enriched)
     setup = sum(float(op["setup_minutes"]) for op in enriched)
     schedule_start = starts[0] if starts else None

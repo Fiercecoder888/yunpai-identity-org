@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, emptyAgentState, moduleProgress, summarizeResult } from './agentState';
+import { applyEvent, deriveUploadSummary, emptyAgentState, mergeRunState, moduleProgress, summarizeResult } from './agentState';
 
 const event = (type: any, payload: any = {}) => ({ type, run_id: 'run-1', task_id: 'task-1', at: '2026-09-03T00:00:00Z', ...payload });
 
@@ -21,5 +21,24 @@ describe('agent state reducer', () => {
       solve_scheduling: { data: { lifecycle_status: 'released', schedule: { metrics: { makespan_minutes: 10 } } } },
     } } }));
     expect(summarizeResult(state)).toEqual({ shortage: 4, purchaseCount: 1, scheduleMinutes: 10, lifecycle: 'released' });
+  });
+
+  it('merges upload summary and derives it from skill outputs', () => {
+    let state = mergeRunState(emptyAgentState(), { run_id: 'run-1', task_id: 'task-1', status: 'completed', upload_summary: { mode: 'master_data', total: 3, accepted: 2, skipped: 1, needs_review: 0, parse_failed: 0 } });
+    expect(state.uploadSummary?.total).toBe(3);
+    expect(deriveUploadSummary(state)?.skipped).toBe(1);
+
+    const fromOutputs = mergeRunState(emptyAgentState(), { run_id: 'run-2', task_id: 'task-2', status: 'completed', outputs: { 'business-data-identification': { upload_summary: { mode: 'directory', total: 1, accepted: 1 } } } });
+    expect(deriveUploadSummary(fromOutputs)?.accepted).toBe(1);
+  });
+
+  it('summarizes M0 sandbox batch state without canonical claim', () => {
+    const state = applyEvent(emptyAgentState(), event('run_done', { state: { run_id: 'run-1', task_id: 'task-1', status: 'waiting_human', outputs: {
+      data_import_run: { batch_id: 'batch-TASK-M0-1', environment: 'sandbox', canonical: false },
+    } } }));
+    const result = summarizeResult(state);
+    expect(result.m0BatchId).toBe('batch-TASK-M0-1');
+    expect(result.m0Environment).toBe('sandbox');
+    expect(result.m0Canonical).toBe(false);
   });
 });

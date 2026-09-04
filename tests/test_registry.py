@@ -16,7 +16,7 @@ def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
     assert len(registry.specs) == 114
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
-    assert len(registry.handlers) == 45
+    assert len(registry.handlers) == 65
     assert all(name in registry.handlers for name in M3_ADAPTER_TOOL_NAMES)
     assert all(name in registry.handlers for name in M4_ADAPTER_TOOL_NAMES)
     assert "receive_m3_material_demand" not in registry.handlers

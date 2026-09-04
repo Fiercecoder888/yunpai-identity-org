@@ -51,6 +51,7 @@ export type RunState = {
   errors?: Array<Record<string, unknown>>;
   response?: string;
   trace?: Array<Record<string, unknown>>;
+  upload_summary?: Record<string, unknown>;
 };
 
 export type PmcOperation = {

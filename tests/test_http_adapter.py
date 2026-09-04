@@ -217,3 +217,25 @@ async def test_http_binding_maps_timeout_to_stable_tool_error(monkeypatch):
     with pytest.raises(ToolHTTPError) as error:
         await registry.call("list_m4_tracking", {}, {"task_id": "TASK-1"})
     assert error.value.code == "HTTP_TIMEOUT"
+
+
+def test_build_runtime_registry_requires_http_in_production_env(monkeypatch):
+    from yunpai_langgraph.registry import build_runtime_registry
+
+    monkeypatch.setenv("YUNPAI_ENV", "production")
+    monkeypatch.setenv("YUNPAI_TOOL_TRANSPORT", "local")
+    with pytest.raises(RuntimeError, match="production"):
+        build_runtime_registry()
+    monkeypatch.delenv("YUNPAI_ENV")
+    monkeypatch.delenv("YUNPAI_TOOL_TRANSPORT")
+
+
+def test_build_runtime_registry_sandbox_marks_local_fixture(monkeypatch):
+    from yunpai_langgraph.registry import build_runtime_registry
+
+    monkeypatch.delenv("YUNPAI_ENV", raising=False)
+    monkeypatch.setenv("YUNPAI_TOOL_TRANSPORT", "local")
+    registry = build_runtime_registry()
+    assert registry.environment["local_fixture"] is True
+    assert registry.environment["transport"] == "local"
+    monkeypatch.delenv("YUNPAI_TOOL_TRANSPORT")

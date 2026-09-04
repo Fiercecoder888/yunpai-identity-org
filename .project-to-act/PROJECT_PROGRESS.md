@@ -12,6 +12,8 @@
 | P-004 | 已阻塞 | zhb / 集成负责人 | 逐类核对 M0 -> GB10 39092 的来源 SHA、候选审核、canonical 表和写入回读；具备 M0 受控写入条件后补传并逐笔复核 | E-0904-M0-GB10-RECON-001 | 2026-09-04 |
 | P-005 | 已规划 | zhb / DeepSeek Harness | 按任务书完成上传识别、M0 canonical、下游 M1-M5/PMC 实施；从最新 main 同步 dev，在 GB10 测试，通过后推送并发起合并 | E-PLAN-DEEPSEEK-HARNESS-001 | 2026-09-04 |
 | P-006 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过 | E-M3M4-TOOLS-001 | 2026-09-04 |
+| P-007 | 已完成 | Codex / M1 接包开发者 | 独立 M1 Tool/Skill 任务包包含基线、17 个工具/Skill 差距、逐项源码映射、净化源码、实施合同及分层验收要求；包完整性和项目回归通过 | E-HANDOFF-M1-001 | 2026-09-04 |
+| P-008 | 已规划 | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate，在 GB10 用真实订单完成 M1-M5 发布回读 | E-PLAN-M1M5-ORCH-001 | 2026-09-04 |
 
 ## 阻塞项
 
@@ -34,9 +36,11 @@
 - 2026-09-04：完成 P-006 代码实现和本地验收；补齐 M3/M4 HTTP Adapter、39 个目标工具映射、Skill operation、授权 Gate、错误映射和 M3→M4 集成测试；完整 pytest 69 项通过，本地 FastAPI 运行态为 114/45 bound；遗留为真实 M3/M4 服务不可达；证据 E-M3M4-TOOLS-001；确认来源：本次实施与验证。
 
 - 2026-09-04：启动 M3/M4 Tool 与 Skill 补全，基线为远端最新 `main` 提交 `1829888a58855b0fd6064fa5b8ee4a858823c191`，个人分支 `codex/m3-m4-tool-skill-completion-20260904` 已推送；证据 `E-M3M4-TOOLS-001`；下一步实现公共适配层和领域 provider；确认来源：用户请求。
+- 2026-09-04：生成不依赖聊天历史的 M1-M5 Orchestrator 直接执行任务书；证据 `E-PLAN-M1M5-ORCH-001`；任务书列明当前工具分支、全部基础资料位置、GB10/Qwen、九个流程断点、六项实施任务、真实 E2E 门槛和最终回执；当前只完成规划与任务交接，尚未实施或声明生产闭环完成；确认来源：用户请求。
 - 2026-09-03：初始化项目治理账本，新增多 session 协作规则和实时报告模板；证据 `E-SESSION-001`；下一步按规则登记首个并行任务；确认来源：用户请求。
 - 2026-09-03：完成后端修复与前端右栏 session 集成，线上 `39092` 新 release 通过关键点击/滚动验收；证据 `E-INTEGRATION-002`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。
 - 2026-09-03：`dev` 推送至 `neworigin/dev`（最终交接提交 `ee8541cc`，交付基线 `d48ce911`），完成集成 session 交接和 claim 释放；证据 `E-INTEGRATION-003`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。
 - 2026-09-04：完成微信/企业微信、`~/Downloads`、导出目录及业务压缩包全量只读复核；证据 `E-0904-WECHAT-AUDIT-001`；修正“数据不存在”的宽泛判断，确认真实制造原始资料存在但生产 snapshot 仍不完整；下一步补齐人员/技能/绑定、生产日历、当前 WIP、能力和执行事件；确认来源：本次只读审计。
 - 2026-09-04：完成 M0 -> GB10 39092 逐类只读对账；证据 `E-0904-M0-GB10-RECON-001`；确认设备/库存来源已进候选目录但未批准，供应商/成本财务/人员主数据没有对应来源 SHA，39092 local transport 无可达 M0 canonical API；下一步等待受控 M0 写入条件后按顺序补传；确认来源：本次运行态核验。
 - 2026-09-04：生成 DeepSeek Harness 实施任务书，证据 `E-PLAN-DEEPSEEK-HARNESS-001`；范围覆盖 main/dev 基线同步、上传识别、M0 canonical、M1-M5/PMC、GB10 新 release、测试、推送和 MR 合并；当前仅完成规划，未执行代码、数据或线上变更；确认来源：用户请求。
+- 2026-09-04：生成可直接交给其他 Agent 的 M1 Tool/Skill 完善任务包，证据 `E-HANDOFF-M1-001`；随包封装当前 main 合同、T8 M1 与 yunpai0902 M1 净化源码，列明 17 个工具逐项迁移、Skill 补全、HTTP/异步任务/租户头适配及真实文件和持久化验收要求；本次未实施 M1 业务代码或生产联调；确认来源：用户请求。

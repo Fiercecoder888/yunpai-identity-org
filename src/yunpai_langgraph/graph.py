@@ -357,10 +357,12 @@ class YunpaiGraph:
                     files.append(_file_object(filename, document))
             return {"files": files}
         if tool == "business-data-identification":
+            upload_mode = str(request.get("upload_mode") or request.get("mode") or "master_data")
             return {
                 "root_path": request.get("business_data_root") or request.get("root_path"),
                 "files": request.get("documents") or request.get("attachments") or [],
                 "db_path": request.get("business_catalog_db") or "runtime/yunpai-business-catalog.sqlite",
+                "mode": upload_mode,
             }
         if tool in self.skills.specs:
             skill_payload = request.get("skill_payload")
@@ -379,9 +381,15 @@ class YunpaiGraph:
             return {"batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id")}
         if tool == "data_import_resolve":
             imported = outputs.get("data_import_run", {})
+            kind = request.get("kind")
+            action = request.get("action")
+            if kind not in {"entity", "mapping", "field"}:
+                raise ValueError("data_import_resolve 需要显式 kind(entity|mapping|field)，禁止伪造裁决")
+            if action not in {"approve", "reject"}:
+                raise ValueError("data_import_resolve 需要显式 action(approve|reject)，禁止伪造裁决")
             return {
                 "batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id"),
-                "kind": request.get("kind", "mapping"), "id": request.get("id", 0), "action": request.get("action", "approve"),
+                "kind": kind, "id": request.get("id", 0), "action": action,
             }
         if tool == "ingest_document":
             document = request.get("document") or request.get("order") or {}
@@ -499,7 +507,7 @@ class YunpaiGraph:
             for item in request.get("routing_steps", []):
                 eligible = item.get("eligible_resources") or [{"resource_id": resource_id, "processing_minutes": max(1, int(item.get("processing_minutes", 1)))} for resource_id in resource_ids[:1]]
                 routes.append({**item, "product_id": item.get("product_id") or product_id, "operation_name": item.get("operation_name") or item.get("operation_id"), "eligible_resources": eligible})
-            advanced = {key: request[key] for key in ("pmc_v2", "pmc_v2_bundle", "wip_pmc", "wip_pmc_mode", "production_use_allowed", "calendar_windows", "calendar", "resource_snapshot", "resource_unavailability", "supply_entries", "wip_status", "material_availability", "changeover_rules", "setup_matrix", "route_approval_ref", "route_version", "route_code") if key in request}
+            advanced = {key: request[key] for key in ("pmc_v2", "pmc_v2_bundle", "wip_pmc", "wip_pmc_mode", "production_use_allowed", "calendar_windows", "calendar", "resource_snapshot", "resource_unavailability", "supply_entries", "wip_status", "material_availability", "changeover_rules", "setup_matrix", "route_approval_ref", "route_version", "route_code", "legacy_preview") if key in request}
             # M1 order workbooks may contain multiple product lines. Preserve
             # those lines as separate M5 orders so routing and capacity are not
             # silently reduced to the first header product.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from io import BytesIO
 from hashlib import sha256
 from math import ceil
@@ -37,6 +38,15 @@ def _number(value: Any, default: float = 0.0) -> float:
     if value is None or value == "":
         return default
     return float(value)
+
+
+def _m0_store(ctx: dict[str, Any]):
+    import os
+
+    from .m0_sandbox import M0SandboxStore
+
+    db_path = ctx.get("m0_sandbox_db") or os.getenv("YUNPAI_M0_SANDBOX_DB") or "runtime/yunpai-m0-sandbox.sqlite"
+    return M0SandboxStore(db_path)
 
 
 def _extract_uploaded_bom(files: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -103,33 +113,121 @@ def _extract_uploaded_bom(files: Any) -> tuple[list[dict[str, Any]], list[dict[s
 
 
 async def m0_import(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-    candidates, quarantined = [], []
-    for item in payload["files"]:
-        name, raw = _decode_file(item)
-        if not raw:
-            quarantined.append({"filename": name, "reason": "empty_content"})
-            continue
-        digest = sha256(raw).hexdigest()
-        candidates.append({
-            "candidate_id": f"cand-{digest[:12]}", "filename": name, "sha256": digest,
-            "status": "needs_review", "records": _json_content(raw).get("records", []),
-            "evidence": [_evidence("m0", name, "原始文件哈希")],
-        })
-    batch_id = f"batch-{ctx['task_id'][-12:]}"
+    from .file_sniff import sniff_documents
+
+    files = payload.get("files") or []
+    items = [item for item in files if isinstance(item, dict)]
+    sniffed = sniff_documents(items)
+    accepted = [item for item in sniffed if item.get("status") == "accepted"]
+    skipped = [item for item in sniffed if item.get("status") != "accepted"]
+    encoded_by_name = {str(item.get("filename")): item for item in items}
+    store = _m0_store(ctx)
+    registered = store.register_batch(
+        task_id=str(ctx.get("task_id") or "local"),
+        tenant_id=str(ctx.get("tenant_id") or "default"),
+        files=[{**encoded_by_name.get(item.get("filename"), {}), "filename": item.get("filename")} for item in accepted],
+        batch_id=payload.get("batch_id"),
+    )
+    batch_id = registered["batch_id"]
+    quarantined = [{"filename": item.get("filename"), "reason": item.get("reason") or "unsupported_or_invalid"} for item in skipped]
+    preview_documents = store.preview(batch_id).get("documents", [])
+    if not preview_documents and not quarantined:
+        return {"id": batch_id, "batch_id": batch_id, "status": "failed", "candidates": [], "quarantined": [], "environment": "sandbox", "canonical": False, "readback": {"available": False, "detail": "没有可登记文件"}, "evidence": []}
     return {
         "id": batch_id, "batch_id": batch_id,
-        "status": "awaiting_review" if candidates or quarantined else "failed",
-        "candidates": candidates, "quarantined": quarantined,
-        "evidence": [_evidence("m0", "import", f"{len(candidates)} candidates")],
+        "status": "awaiting_review",
+        "candidates": [
+            {
+                "candidate_id": doc["candidate_id"], "filename": doc["filename"], "sha256": doc["sha256"],
+                "status": doc["review_status"], "document_kind": doc["document_kind"],
+                "records": doc.get("payload_json") if isinstance(doc.get("payload_json"), list) else [],
+                "evidence": [_evidence("m0", doc["filename"], "sandbox 候选登记哈希")],
+            }
+            for doc in preview_documents
+        ],
+        "quarantined": quarantined,
+        # 本地 sandbox 语义：候选不是 M0 canonical；生产发布需 HTTP transport + 真实 M0 回读。
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "environment": "sandbox",
+        "readback": {"available": False, "detail": "本地 sandbox 只登记候选，未发布 canonical；需要 YUNPAI_TOOL_TRANSPORT=http 与真实 M0 base URL/审核授权"},
+        "evidence": [_evidence("m0", "import", f"{len(preview_documents)} candidates registered in sandbox (non-canonical)")],
     }
 
 
+async def m0_status(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    result = _m0_store(ctx).status(str(payload.get("batch_id") or ""))
+    if result is None:
+        raise ValueError(f"batch not found: {payload.get('batch_id')}")
+    return result
+
+
+async def m0_preview(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    return _m0_store(ctx).preview(str(payload.get("batch_id") or ""))
+
+
+async def m0_resolve(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    batch_id = str(payload.get("batch_id") or "")
+    kind = str(payload.get("kind") or "")
+    action = str(payload.get("action") or "")
+    raw_id = payload.get("id")
+    candidate_id = str(payload.get("candidate_id") or "")
+    if kind not in {"entity", "mapping", "candidate"}:
+        raise ValueError("resolve kind 必须为 entity|mapping|candidate")
+    if action not in {"approve", "reject"}:
+        raise ValueError("resolve action 必须为 approve|reject")
+    store = _m0_store(ctx)
+    try:
+        if candidate_id:
+            return store.resolve(batch_id=batch_id, candidate_id=candidate_id, action=action, actor=str(ctx.get("actor") or "operator"))
+        resolve_id = int(raw_id) if str(raw_id).strip().isdigit() else None
+        if resolve_id is None:
+            raise ValueError("resolve 需要显式 id(候选序号) 或 candidate_id")
+        return store.resolve(batch_id=batch_id, resolve_id=resolve_id, action=action, actor=str(ctx.get("actor") or "operator"))
+    except ValueError as exc:
+        if "already decided" in str(exc):
+            raise
+        raise ValueError(str(exc)) from exc
+
+
 async def m0_commit(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    batch_id = str(payload.get("batch_id") or "")
+    store = _m0_store(ctx)
+    status_result = store.status(batch_id)
+    if status_result is None:
+        raise ValueError(f"batch not found: {batch_id}")
+    require_resolved = str(payload.get("require_resolved") or "").lower() in {"true", "1", "yes"}
+    pending = store.pending_count(batch_id)
+    if require_resolved and pending > 0:
+        return {
+            "status": "blocked", "code": "BLOCKED_INPUT",
+            "errors": [{"code": "PENDING_REVIEW", "message": f"batch {batch_id} 仍有 {pending} 个候选未裁决，禁止 commit", "details": []}],
+            "batch_id": batch_id,
+            # 本地 sandbox 语义：绝不表述为已发布 canonical。
+            "provider": "local_fixture", "canonical": False, "transport": "local", "environment": "sandbox",
+            "readback": {"available": False, "detail": "未完成人工裁决，未发布 canonical"},
+            "evidence": [_evidence("m0", batch_id, "commit 被拒：存在未裁决候选")],
+        }
     return {
-        "status": "committed", "batch_id": payload["batch_id"],
-        "master_counts": {"published_batches": 1},
-        "revision": "m0-v1", "ledger_id": f"ledger-{ctx['task_id'][-10:]}",
-        "evidence": [_evidence("m0", payload["batch_id"], "人工批准后的 canonical 发布")],
+        # 任务书 §1.4：data_import_commit=committed 只有在 canonical entity/version、
+        # ledger、outbox 可回读时才成立。本地 sandbox 无真实 M0 表，故只记录意图，
+        # 状态显式标记 fixture_recorded，不得表述为已发布 canonical。
+        "status": "fixture_recorded",
+        "batch_id": batch_id,
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "environment": "sandbox",
+        "revision": "",
+        "ledger_id": "",
+        "master_counts": {},
+        "pending_review_before_commit": pending if require_resolved else 0,
+        "readback": {
+            "available": False,
+            "detail": "local transport 无 M0 canonical 表与回读接口；真实发布需部署方提供 M0 URL、PostgreSQL schema/权限、审核授权和写入回读接口",
+        },
+        "evidence": [_evidence("m0", batch_id or "fixture", "本地 sandbox 记录发布意图；未发布 canonical、无 ledger/outbox 回读，需人工 Gate 后才可对接真实 M0")],
     }
 
 
@@ -260,11 +358,27 @@ async def m4_purchase(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
 
 async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     # Explicit WIP/v2 facts are handled by the frozen constrained scheduler.
-    # The legacy branch remains available for older lightweight fixtures.
-    if payload.get("pmc_v2") or payload.get("pmc_v2_bundle") or payload.get("calendar_windows") or any(
-        isinstance(step, dict) and (step.get("standard_minutes") is not None or step.get("std_minutes") is not None)
-        for step in payload.get("routing_steps", [])
-    ):
+    # The legacy branch remains available only for explicitly preview/sandbox
+    # marked requests; production requests without v2 facts fail closed.
+    purpose = str(payload.get("scenario_purpose") or "production")
+    v2_marked = bool(
+        payload.get("pmc_v2") or payload.get("pmc_v2_bundle") or payload.get("calendar_windows")
+        or any(isinstance(step, dict) and (step.get("standard_minutes") is not None or step.get("std_minutes") is not None)
+               for step in payload.get("routing_steps", []))
+    )
+    legacy_preview = bool(payload.get("legacy_preview")) or str(purpose).lower() in {"preview", "sandbox"}
+    if payload.get("orders") and not payload.get("routing_steps"):
+        return {
+            "success": False, "code": "BLOCKED_INPUT", "errors": [{"code": "MISSING_SOP", "message": "缺少可执行的 SOP/工艺路线", "details": []}],
+            "data": {
+                "idempotency_key": str(payload.get("idempotency_key") or ""),
+                "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"makespan_minutes": 0, "operation_count": 0}},
+                "scenario_purpose": purpose, "lifecycle_status": "draft", "input_hash": "",
+                "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id"),
+            },
+            "evidence": [_evidence("m5", "routing_steps", "未提供 SOP/工艺路线，停止排程")], "trace_id": _trace(ctx, "m5"),
+        }
+    if v2_marked:
         from .pmc_v2_adapter import PmcError, run_pmc_v2
         try:
             result = run_pmc_v2(payload)
@@ -275,21 +389,27 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
             data.setdefault("parent_plan_version", payload.get("expected_head_plan_version"))
             data.setdefault("tracking_task_id", ctx.get("task_id"))
             result["trace_id"] = result.get("trace_id") or _trace(ctx, "m5-pmc-v2")
+            persisted = _persist_v2_draft(result, payload, ctx)
+            if persisted is not None:
+                return persisted
             return result
         except PmcError as exc:
-            return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": payload.get("scenario_purpose", "production"), "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902"}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
-    resources = {str(item["resource_id"]): item for item in payload["resources"]}
-    if payload.get("orders") and not payload.get("routing_steps"):
+            return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": purpose, "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902", "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id")}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
+    if not legacy_preview:
+        # Production requests must go through PMC v2.  Without an explicit
+        # preview/sandbox marker the legacy branch must not run.
         return {
-            "success": False, "code": "BLOCKED_INPUT", "errors": [{"code": "MISSING_SOP", "message": "缺少可执行的 SOP/工艺路线", "details": []}],
+            "success": False, "code": "BLOCKED_INPUT",
+            "errors": [{"code": "LEGACY_PRODUCTION_BLOCKED", "message": "production 请求必须携带 v2 事实并进入 PMC v2；legacy 分支只能显式标记为 preview/sandbox", "details": []}],
             "data": {
                 "idempotency_key": str(payload.get("idempotency_key") or ""),
-                "schedule": {"scenario_purpose": payload.get("scenario_purpose", "production"), "operations": [], "metrics": {"makespan_minutes": 0, "operation_count": 0}},
-                "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": "",
+                "schedule": {"scenario_purpose": "production", "operations": [], "metrics": {"makespan_minutes": 0, "operation_count": 0}},
+                "scenario_purpose": "production", "lifecycle_status": "draft", "input_hash": "",
                 "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id"),
             },
-            "evidence": [_evidence("m5", "routing_steps", "未提供 SOP/工艺路线，停止排程")], "trace_id": _trace(ctx, "m5"),
+            "evidence": [_evidence("m5", "legacy", "production 请求不得进入 legacy 分支")], "trace_id": _trace(ctx, "m5"),
         }
+    resources = {str(item["resource_id"]): item for item in payload["resources"]}
     operations, cursor = [], 0
     for order in payload["orders"]:
         product_id = str(order["product_id"])
@@ -310,12 +430,132 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
     return {"success": True, "data": data, "errors": [], "trace_id": _trace(ctx, "m5"), "evidence": [_evidence("m5", "planning_snapshot", "订单/路线/资源快照")]}
 
 
+def _persist_v2_draft(result: dict[str, Any], payload: dict[str, Any],
+                      ctx: dict[str, Any]) -> dict[str, Any] | None:
+    """Task 2: when an M5 repository is configured, persist the six snapshot
+    kinds and a draft plan with idempotent replay / same-key conflict rules.
+
+    Enabled only when ``ctx["m5_db_path"]`` or the ``YUNPAI_M5_DB`` env var is
+    set, so the default stateless registry path is unchanged.  Returns the
+    final handler response when the repository path is enabled (including a
+    replayed or conflicted response), otherwise ``None``.
+    """
+    db_path = (ctx or {}).get("m5_db_path") or os.getenv("YUNPAI_M5_DB")
+    if not db_path:
+        return None
+    from .m5_repository import M5Repository, M5RepositoryError
+    scenario_id = str(payload.get("scenario_id") or "")
+    idem = str(payload.get("idempotency_key") or "")
+    data = result.get("data") or {}
+    digest = str(data.get("input_hash") or "")
+    bundle = data.get("input_package")
+    if not scenario_id or not bundle or not digest:
+        return None
+    repo = M5Repository(db_path)
+    purpose = str(data.get("scenario_purpose") or "production")
+    version = f"plan-{scenario_id}-{digest[:10]}"
+    try:
+        existing = repo.find_by_idempotency(scenario_id, idem) if idem else None
+        if existing is not None:
+            stored = repo.get_plan(existing["plan_version"])
+            if stored is not None and existing["input_hash"] == digest:
+                schedule = stored.get("schedule") or {}
+                replayed_data = {
+                    "idempotency_key": idem,
+                    "schedule": schedule,
+                    "scenario_purpose": stored.get("scenario_purpose", purpose),
+                    "lifecycle_status": stored.get("lifecycle_status", "draft"),
+                    "input_hash": stored.get("input_hash", digest),
+                    "plan_version": stored["plan_version"],
+                    "parent_plan_version": stored.get("parent_plan_version"),
+                    "tracking_task_id": ctx.get("task_id"),
+                    "replayed": True,
+                }
+                return {"success": True, "data": replayed_data, "errors": [],
+                        "trace_id": _trace(ctx, "m5-pmc-v2-replay"),
+                        "evidence": [_evidence("m5", "pmc_v2", "idempotent replay of stored draft")]}
+            # same idempotency key, different input -> conflict (Task 2)
+            return {
+                "success": False, "code": "BLOCKED_INPUT",
+                "errors": [{"code": "IDEMPOTENCY_CONFLICT",
+                            "message": f"同幂等键 {idem} 已用于不同输入（scenario {scenario_id}）",
+                            "details": [{"stored_hash": existing["input_hash"], "new_hash": digest}]}],
+                "data": {
+                    "idempotency_key": idem,
+                    "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}},
+                    "scenario_purpose": purpose, "lifecycle_status": "draft",
+                    "input_hash": digest, "parent_plan_version": payload.get("expected_head_plan_version"),
+                    "tracking_task_id": ctx.get("task_id"), "replayed": False,
+                },
+                "trace_id": _trace(ctx, "m5-pmc-v2-conflict"),
+                "evidence": [_evidence("m5", "pmc_v2", "idempotency conflict")],
+            }
+        repo.store_snapshots(scenario_id, bundle, tenant_id=str(ctx.get("tenant_id") or "default"),
+                             task_id=str(ctx.get("task_id") or ""))
+        repo.save_plan(
+            plan_version=version, scenario_id=scenario_id,
+            tenant_id=str(ctx.get("tenant_id") or "default"), task_id=str(ctx.get("task_id") or ""),
+            lifecycle_status="draft", parent_plan_version=payload.get("expected_head_plan_version"),
+            input_hash=digest, solver_hash=f"solver-{data.get('algorithm_version', 'pmc-v2')}",
+            algorithm_version=data.get("algorithm_version", "pmc-v2-frozen-20260902"),
+            scenario_purpose=purpose, validation_report=data.get("validator") or {},
+            bundle=bundle, schedule=data.get("schedule") or {},
+            idempotency_key=idem or None,
+        )
+        data["plan_version"] = version
+        schedule = data.setdefault("schedule", {})
+        schedule["plan_version"] = version
+        return None
+    except M5RepositoryError as exc:
+        return {
+            "success": False, "code": "BLOCKED_INPUT",
+            "errors": [{"code": exc.code, "message": exc.message, "details": []}],
+            "data": {
+                "idempotency_key": idem,
+                "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}},
+                "scenario_purpose": purpose, "lifecycle_status": "draft",
+                "input_hash": digest, "parent_plan_version": payload.get("expected_head_plan_version"),
+                "tracking_task_id": ctx.get("task_id"), "replayed": False,
+            },
+            "trace_id": _trace(ctx, "m5-pmc-v2-persist-blocked"),
+            "evidence": [_evidence("m5", "pmc_v2", exc.message)],
+        }
+
+
+def _m5(name: str):
+    """Lazily import the local M5 PMC handler for a manifest tool name."""
+    from .m5_tools import M5_HANDLERS
+    return M5_HANDLERS[name]
+
+
 HANDLERS = {
     "data_import_run": m0_import,
+    "data_import_status": m0_status,
+    "data_import_preview": m0_preview,
+    "data_import_resolve": m0_resolve,
     "data_import_commit": m0_commit,
     "ingest_document": m1_parse,
     "run_bom_sop_workflow": m2_bom,
     "run_m3_procurement_requirements": m3_mrp,
     "import_m4_purchase_suggestions_json": m4_purchase,
     "solve_scheduling": m5_schedule,
+    # M5 PMC v2 tool handlers (Taskbook Tasks 3-5); the two excluded tools
+    # (report_workload, bind_worker_to_order) intentionally stay unbound.
+    "get_m5_schedule": _m5("get_m5_schedule"),
+    "list_m5_schedules": _m5("list_m5_schedules"),
+    "get_m5_pmc_progress": _m5("get_m5_pmc_progress"),
+    "get_m5_material_readiness": _m5("get_m5_material_readiness"),
+    "get_m5_integration_contracts": _m5("get_m5_integration_contracts"),
+    "ingest_m5_planning_snapshot": _m5("ingest_m5_planning_snapshot"),
+    "replan_m5_schedule": _m5("replan_m5_schedule"),
+    "dispatch_m5_schedule": _m5("dispatch_m5_schedule"),
+    "get_m5_execution_summary": _m5("get_m5_execution_summary"),
+    "search_m5_knowledge": _m5("search_m5_knowledge"),
+    "record_m5_knowledge": _m5("record_m5_knowledge"),
+    "prepare_m5_department_message": _m5("prepare_m5_department_message"),
+    "get_m5_department_message": _m5("get_m5_department_message"),
+    "get_m5_department_message_delivery": _m5("get_m5_department_message_delivery"),
+    "advise_m5_schedule": _m5("advise_m5_schedule"),
+    "run_m5_intelligent_schedule": _m5("run_m5_intelligent_schedule"),
+    "generate_m5_material_procurement_plan": _m5("generate_m5_material_procurement_plan"),
 }
