@@ -199,3 +199,25 @@ def test_candidate_review_rejects_unknown_and_bad_decision(tmp_path):
     document_id = list_candidates(db)[0]["document_id"]
     with pytest.raises(ValueError):
         transition_candidate_review(db, document_id, decision="nonsense")
+
+
+def test_large_xlsx_is_marked_deferred_not_completed(tmp_path):
+    """大表延迟深解析：状态必须显式 deferred_to_m1，不能声称已识别完成。"""
+    import sqlite3
+
+    root = tmp_path / "大表"
+    root.mkdir()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["物料编码", "材料名称", "用量"])
+    for index in range(5):
+        sheet.append([f"M-{index}", "材料", index + 1])
+    workbook.save(root / "big-bom.xlsx")
+    db = tmp_path / "deferred.sqlite"
+    # parse_xlsx=False 且超过 deep 阈值走轻量登记 -> deferred。
+    result = ingest_tree(root, db, parse_xlsx=False, deep_limit_bytes=1)
+    with sqlite3.connect(db) as connection:
+        row = connection.execute("SELECT status FROM source_files").fetchone()
+        doc = connection.execute("SELECT review_status FROM document_candidates").fetchone()
+    assert row[0] == "deferred_to_m1"
+    assert doc[0] == "deferred_to_m1"

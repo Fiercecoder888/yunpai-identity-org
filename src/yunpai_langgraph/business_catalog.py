@@ -571,6 +571,10 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
         ]
     if required and missing_fields and document_payload.get("review_status") in (None, "unclassified", "candidate"):
         document_payload["review_status"] = "needs_review"
+    # 延迟深解析状态贯通（任务书 §5.5）：大表不冒充“已识别完成”。
+    if isinstance(extraction, dict) and extraction.get("extraction_skipped") == "xlsx_deferred_to_m1_parser":
+        document_payload["review_status"] = "deferred_to_m1"
+        document_payload["deferred_to_m1"] = True
     document_payload["missing_fields"] = missing_fields
     document_payload["classification_rules"] = content_class.get("rules", [])
     return {
@@ -729,14 +733,15 @@ def ingest_tree(root: str | Path, db_path: str | Path, *, batch_id: str | None =
                 document_id = f"doc-{source_key[:24]}"
                 kind = extracted["file_kind"]
                 counts[kind] = counts.get(kind, 0) + 1
+                document = extracted["document"]
+                source_status = "deferred_to_m1" if document.get("review_status") == "deferred_to_m1" else "identified"
                 db.execute(
                     """INSERT INTO source_files(file_id,batch_id,absolute_path,relative_path,filename,extension,mime_type,size_bytes,modified_at,sha256,file_kind,document_subtype,classification_confidence,status,metadata_json)
                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                        ON CONFLICT(absolute_path,sha256) DO UPDATE SET batch_id=excluded.batch_id, metadata_json=excluded.metadata_json, status=excluded.status""",
-                    (file_id, batch_id, str(path), extracted["relative_path"], path.name, path.suffix.lower(), mimetypes.guess_type(path.name)[0], stat.st_size, datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(), sha256, kind, extracted["document_subtype"], extracted["classification_confidence"], "identified", json_text({"schema_version": SCHEMA_VERSION, "extraction": extracted["extraction"]})),
+                    (file_id, batch_id, str(path), extracted["relative_path"], path.name, path.suffix.lower(), mimetypes.guess_type(path.name)[0], stat.st_size, datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(), sha256, kind, extracted["document_subtype"], extracted["classification_confidence"], source_status, json_text({"schema_version": SCHEMA_VERSION, "extraction": extracted["extraction"]})),
                 )
                 db.execute("DELETE FROM field_observations WHERE document_id=?", (document_id,))
-                document = extracted["document"]
                 sensitivity = sensitivity_of(extracted, kind)
                 issues = list(document.get("validation_issues") or [])
                 missing = list(document.get("missing_fields") or [])
