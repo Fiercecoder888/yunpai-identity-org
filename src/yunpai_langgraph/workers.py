@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from io import BytesIO
 from hashlib import sha256
 from math import ceil
@@ -291,6 +292,9 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
             data.setdefault("parent_plan_version", payload.get("expected_head_plan_version"))
             data.setdefault("tracking_task_id", ctx.get("task_id"))
             result["trace_id"] = result.get("trace_id") or _trace(ctx, "m5-pmc-v2")
+            persisted = _persist_v2_draft(result, payload, ctx)
+            if persisted is not None:
+                return persisted
             return result
         except PmcError as exc:
             return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": purpose, "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902", "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id")}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
@@ -327,6 +331,98 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
     schedule = {"scenario_purpose": purpose, "plan_version": f"draft-{digest[:10]}", "operations": operations, "metrics": {"operation_count": len(operations), "makespan_minutes": cursor}, "validation_report": {"status": "pass", "errors": []}}
     data = {"idempotency_key": payload["idempotency_key"], "schedule": schedule, "scenario_purpose": purpose, "lifecycle_status": "draft", "input_hash": digest, "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id"), "replayed": False}
     return {"success": True, "data": data, "errors": [], "trace_id": _trace(ctx, "m5"), "evidence": [_evidence("m5", "planning_snapshot", "订单/路线/资源快照")]}
+
+
+def _persist_v2_draft(result: dict[str, Any], payload: dict[str, Any],
+                      ctx: dict[str, Any]) -> dict[str, Any] | None:
+    """Task 2: when an M5 repository is configured, persist the six snapshot
+    kinds and a draft plan with idempotent replay / same-key conflict rules.
+
+    Enabled only when ``ctx["m5_db_path"]`` or the ``YUNPAI_M5_DB`` env var is
+    set, so the default stateless registry path is unchanged.  Returns the
+    final handler response when the repository path is enabled (including a
+    replayed or conflicted response), otherwise ``None``.
+    """
+    db_path = (ctx or {}).get("m5_db_path") or os.getenv("YUNPAI_M5_DB")
+    if not db_path:
+        return None
+    from .m5_repository import M5Repository, M5RepositoryError
+    scenario_id = str(payload.get("scenario_id") or "")
+    idem = str(payload.get("idempotency_key") or "")
+    data = result.get("data") or {}
+    digest = str(data.get("input_hash") or "")
+    bundle = data.get("input_package")
+    if not scenario_id or not bundle or not digest:
+        return None
+    repo = M5Repository(db_path)
+    purpose = str(data.get("scenario_purpose") or "production")
+    version = f"plan-{scenario_id}-{digest[:10]}"
+    try:
+        existing = repo.find_by_idempotency(scenario_id, idem) if idem else None
+        if existing is not None:
+            stored = repo.get_plan(existing["plan_version"])
+            if stored is not None and existing["input_hash"] == digest:
+                schedule = stored.get("schedule") or {}
+                replayed_data = {
+                    "idempotency_key": idem,
+                    "schedule": schedule,
+                    "scenario_purpose": stored.get("scenario_purpose", purpose),
+                    "lifecycle_status": stored.get("lifecycle_status", "draft"),
+                    "input_hash": stored.get("input_hash", digest),
+                    "plan_version": stored["plan_version"],
+                    "parent_plan_version": stored.get("parent_plan_version"),
+                    "tracking_task_id": ctx.get("task_id"),
+                    "replayed": True,
+                }
+                return {"success": True, "data": replayed_data, "errors": [],
+                        "trace_id": _trace(ctx, "m5-pmc-v2-replay"),
+                        "evidence": [_evidence("m5", "pmc_v2", "idempotent replay of stored draft")]}
+            # same idempotency key, different input -> conflict (Task 2)
+            return {
+                "success": False, "code": "BLOCKED_INPUT",
+                "errors": [{"code": "IDEMPOTENCY_CONFLICT",
+                            "message": f"同幂等键 {idem} 已用于不同输入（scenario {scenario_id}）",
+                            "details": [{"stored_hash": existing["input_hash"], "new_hash": digest}]}],
+                "data": {
+                    "idempotency_key": idem,
+                    "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}},
+                    "scenario_purpose": purpose, "lifecycle_status": "draft",
+                    "input_hash": digest, "parent_plan_version": payload.get("expected_head_plan_version"),
+                    "tracking_task_id": ctx.get("task_id"), "replayed": False,
+                },
+                "trace_id": _trace(ctx, "m5-pmc-v2-conflict"),
+                "evidence": [_evidence("m5", "pmc_v2", "idempotency conflict")],
+            }
+        repo.store_snapshots(scenario_id, bundle, tenant_id=str(ctx.get("tenant_id") or "default"),
+                             task_id=str(ctx.get("task_id") or ""))
+        repo.save_plan(
+            plan_version=version, scenario_id=scenario_id,
+            tenant_id=str(ctx.get("tenant_id") or "default"), task_id=str(ctx.get("task_id") or ""),
+            lifecycle_status="draft", parent_plan_version=payload.get("expected_head_plan_version"),
+            input_hash=digest, solver_hash=f"solver-{data.get('algorithm_version', 'pmc-v2')}",
+            algorithm_version=data.get("algorithm_version", "pmc-v2-frozen-20260902"),
+            scenario_purpose=purpose, validation_report=data.get("validator") or {},
+            bundle=bundle, schedule=data.get("schedule") or {},
+            idempotency_key=idem or None,
+        )
+        data["plan_version"] = version
+        schedule = data.setdefault("schedule", {})
+        schedule["plan_version"] = version
+        return None
+    except M5RepositoryError as exc:
+        return {
+            "success": False, "code": "BLOCKED_INPUT",
+            "errors": [{"code": exc.code, "message": exc.message, "details": []}],
+            "data": {
+                "idempotency_key": idem,
+                "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}},
+                "scenario_purpose": purpose, "lifecycle_status": "draft",
+                "input_hash": digest, "parent_plan_version": payload.get("expected_head_plan_version"),
+                "tracking_task_id": ctx.get("task_id"), "replayed": False,
+            },
+            "trace_id": _trace(ctx, "m5-pmc-v2-persist-blocked"),
+            "evidence": [_evidence("m5", "pmc_v2", exc.message)],
+        }
 
 
 def _m5(name: str):
