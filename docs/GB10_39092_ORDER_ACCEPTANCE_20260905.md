@@ -6,7 +6,7 @@
 
 ## 版本与部署
 
-- Git：`origin/main` = `origin/dev` = `a9a85ebfd56f3f6fd94eec7e2700e32e6236c801`。
+- Git：`origin/main` = `origin/dev` = `c732871a3285b9dc929c59e18a555c8e1fa0e1d1`；GB10 运行代码为其前一功能提交 `a9a85ebfd56f3f6fd94eec7e2700e32e6236c801`（本次最后提交仅更新报告）。
 - 集成提交：`30a8df6`（M0 HTTP batch envelope 解包）、`5139527`（从 M1 输出补全 M2 的产品名和订单号）、`15d0442`（M5 apply Gate 持久化 release/head，并增加回归测试）。
 - `2b07276`（订单附件默认走 `m1_m5_document_to_plan`）、`a9a85eb`（递归脱敏公开状态中的文件正文，避免历史列表膨胀）。
 - GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905071500`。
