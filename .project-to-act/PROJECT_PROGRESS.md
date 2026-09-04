@@ -11,6 +11,7 @@
 | P-003 | 已完成 | zhb / 集成负责人 | 微信及企业微信下载目录、`~/Downloads`、导出目录和业务压缩包完成只读全量核验，结果写入审计文档和 0903 数据需求修订 | E-0904-WECHAT-AUDIT-001 | 2026-09-04 |
 | P-004 | 已阻塞 | zhb / 集成负责人 | 逐类核对 M0 -> GB10 39092 的来源 SHA、候选审核、canonical 表和写入回读；具备 M0 受控写入条件后补传并逐笔复核 | E-0904-M0-GB10-RECON-001 | 2026-09-04 |
 | P-005 | 已规划 | zhb / DeepSeek Harness | 按任务书完成上传识别、M0 canonical、下游 M1-M5/PMC 实施；从最新 main 同步 dev，在 GB10 测试，通过后推送并发起合并 | E-PLAN-DEEPSEEK-HARNESS-001 | 2026-09-04 |
+| P-007 | 已完成（代码验收） | DeepSeek Harness / s-m1-tools-20260904 | M1 17 个 Tool 全部绑定（专用 HTTP Adapter）与 Skill 全操作映射落地，117 项测试通过 | E-M1-TOOLS-001 | 2026-09-04 |
 | P-006 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过 | E-M3M4-TOOLS-001 | 2026-09-04 |
 
 ## 阻塞项
@@ -40,3 +41,5 @@
 - 2026-09-04：完成微信/企业微信、`~/Downloads`、导出目录及业务压缩包全量只读复核；证据 `E-0904-WECHAT-AUDIT-001`；修正“数据不存在”的宽泛判断，确认真实制造原始资料存在但生产 snapshot 仍不完整；下一步补齐人员/技能/绑定、生产日历、当前 WIP、能力和执行事件；确认来源：本次只读审计。
 - 2026-09-04：完成 M0 -> GB10 39092 逐类只读对账；证据 `E-0904-M0-GB10-RECON-001`；确认设备/库存来源已进候选目录但未批准，供应商/成本财务/人员主数据没有对应来源 SHA，39092 local transport 无可达 M0 canonical API；下一步等待受控 M0 写入条件后按顺序补传；确认来源：本次运行态核验。
 - 2026-09-04：生成 DeepSeek Harness 实施任务书，证据 `E-PLAN-DEEPSEEK-HARNESS-001`；范围覆盖 main/dev 基线同步、上传识别、M0 canonical、M1-M5/PMC、GB10 新 release、测试、推送和 MR 合并；当前仅完成规划，未执行代码、数据或线上变更；确认来源：用户请求。
+
+- 2026-09-04：完成 P-007 代码实现与本地验收；M1 17 个 Tool 全部绑定（default 61 bound，HTTP runtime 112 bound），专用 M1 HTTP Adapter（租户双头/角色/202 轮询/错误映射/属性过滤前向兼容），Skill 扩展到 17 Tool 与 19 ops；完整 pytest 117 passed、2 skipped（真实服务 opt-in）；真实 M1 独立服务联调待外部条件；证据 E-M1-TOOLS-001；确认来源：本次实施与验证。

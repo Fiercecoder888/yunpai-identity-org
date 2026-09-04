@@ -23,12 +23,14 @@
 | A-007 | 微信下载目录全量复核结论可追溯，且不把原始资料误报为不存在 | 通过 | 只读扫描个人/企业微信目录、`~/Downloads` 和导出目录；归档清单、表头核验；账本校验；后端/前端回归与构建 | E-0904-WECHAT-AUDIT-001 |
 | A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 未通过（外部阻塞） | 39092 health/openapi、GB10 SQLite 完整性与 schema、source SHA/候选审核状态、运行状态批次交叉核对 | E-0904-M0-GB10-RECON-001 |
 | A-009 | M3/M4 Tool 与 Skill 完整绑定并保持副作用 Gate | 通过（代码与本地运行态） | 完整 pytest、compileall、diff check、账本校验、9001 health/tools、HTTP mock 集成 | E-M3M4-TOOLS-001 |
+| A-010 | M1 Tool 与 Skill 完整绑定：17 个 M1 Tool 经专用 HTTP Adapter 可执行（租户头/202 轮询/权限/错误映射），Skill 声明 17 Tool 且查询 op 不打开写入 Gate，本地 fixture 不冒充完整 M1 解析 | 通过（代码与本地运行态） | 完整 pytest、M1 定向测试、compileall、git diff --check、Registry 绑定统计、HTTP mock 集成 | E-M1-TOOLS-001 |
 
 ## 证据索引
 
 | 证据 ID | 时间 | 方法或命令 | 退出状态 | 版本或文件哈希 | 结果摘要 | 证据位置 | 有效期 |
 |---|---|---|---|---|---|---|---|
 | E-M3M4-TOOLS-001 | 2026-09-04 19:23 | Windows venv 完整 pytest；compileall；git diff --check；项目账本 --validate；临时 9001 /health 与 /tools；显式 Yunpai SSH key 执行 fetch/push | 全部代码/本地验证退出 0；69 passed, 1 warning；远端 main 未前移；实现提交已推送 | 实现 commit f7fedaf；分支 codex/m3-m4-tool-skill-completion-20260904；基线 1829888a | 114 个 Tool、45 个 bound；M3 16/17、M4 24/26；两个 receiver 未绑定；M3→M4 mock HTTP、审批、revision/checksum、发送和供应事实确认通过；真实服务未联调 | reports/sessions/s-m3-m4-tools-20260904.md、tests/test_m3_m4_tool_integration.py | 2026-09-11 |
+| E-M1-TOOLS-001 | 2026-09-04 22:10 | 完整 pytest；compileall；git diff --check；M1 定向测试；Registry 绑定统计；本地 API/HTTP mock 集成 | 全部退出 0；117 passed, 2 skipped（真实服务 opt-in） | 实现 commit 8a9794d5e7f2e92acbb122692cc66262af59ddd3；分支 dsh/m1-tool-skill-completion-20260904；基线 79973082535f459f7c0be03096c654d233fe99ab | 114 Tool：default 61 bound（M1 17/17：ingest_document 本地 fixture + 16 专用 Adapter），HTTP runtime 112 bound（M1 17/17 专用 Adapter）；Skill yunpai-m1-document-parser 17 Tool / 19 ops；13 个查询 op 免授权 Gate；真实 M1 服务（MinerU/Instructor/PostgreSQL/Neo4j）未联调，生产未验收 | reports/sessions/s-m1-tools-20260904.md、tests/test_m1_*.py、ops/m1/README.md | 2026-09-11 |
 | E-SESSION-001 | 2026-09-03 | 初始化脚本 `--validate`；人工审阅规则文件 | 0 | `dev` / `4b9c1aa1` | 治理账本有效，规则与 claim 模板已落盘 | `.project-to-act/`、`docs/SESSION_COLLABORATION_RULES.md`、`.coordination/claims/README.md` | 2026-12-31 |
 | E-REGRESSION-002 | 2026-09-03 18:09 | `npm run typecheck`; `npm run build`; `npm test -- --run --maxWorkers=1 --no-file-parallelism`; root `pytest -q` | 前三项 0；root pytest 1（47 passed, 1 EOL hash mismatch） | `dev` / `24da1d70`；Git blob manifest hash 与 provenance 一致 | 前端回归通过；根测试唯一失败为 Windows `core.autocrlf` 工作树换行误报，非代码/运行时错误 | `reports/sessions/s-integration-final-20260903.md`、`reports/s-progress-restore-20260903/REPORT.md` | 2026-12-31 |
 | E-INTEGRATION-002 | 2026-09-03 18:10 | Git merge/cherry-pick；线上浏览器控制 API 点击、布局、独立滚动；`/api/health`；静态资源请求 | Git/浏览器/HTTP 均成功；控制台 error/warning 0 | `dev` / `24da1d70`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；release `20260903173855` | 后端与右栏提交完整集成；上传菜单、右栏满高/滚动、移动抽屉和问答关键路径符合预期 | `reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张截图、线上 URL | 2026-12-31 |
@@ -58,3 +60,5 @@
 - 2026-09-03：复核 PMC v2 流式 WIP 与 GB10 39092 运行结果；证据 `E-PMCV2-STREAM-001`；结论：十五道工序和批次级 WIP 已生成，保留人工发布 Gate。
 - 2026-09-04：完成微信/企业微信及本机下载目录全量只读复核；证据 `E-0904-WECHAT-AUDIT-001`；结论：真实订单、BOM、库存、采购入库、供应商、设备/模具、SOP/IE 时间和历史排产存在，但不能替代生产人员、技能绑定、日历、当前 WIP 与执行回传；真实 PMC 继续保持生产阻断。
 - 2026-09-04：逐类核对 GB10 39092 候选目录、来源 SHA、候选审核状态、运行批次与 M0 接入面；证据 `E-0904-M0-GB10-RECON-001`；结论：设备和库存仅进入候选源库，代表性供应商明细/成本财务/人员主数据未进入（采购类候选仍存在）；39092 使用 local transport 且 M0 HTTP 路径不可达，未执行绕过 M0 的补传，canonical 落库和完整 PMC 仍阻塞。
+
+- 2026-09-04：检查 M1 Registry/Skill/专用 HTTP Adapter、租户与角色头、202 轮询、错误映射、本地 fixture 边界和 M1 定向测试；证据 E-M1-TOOLS-001；结论：代码与本地运行态通过（117 passed, 2 skipped），真实 M1 独立服务与数据库回读因外部条件缺失未验收。
