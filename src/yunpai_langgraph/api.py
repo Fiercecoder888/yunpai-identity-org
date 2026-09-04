@@ -14,7 +14,7 @@ from .repository import RunRepository, SQLiteRunRepository
 
 def create_app(*, repository: RunRepository | None = None, registry: ToolRegistry | None = None):
     try:
-        from fastapi import FastAPI, File, Form, HTTPException
+        from fastapi import FastAPI, File, Form, Header, HTTPException
         from fastapi.responses import StreamingResponse
     except ImportError as exc: raise RuntimeError("安装 fastapi 后才能启动 HTTP API") from exc
     if repository is None:
@@ -24,9 +24,66 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
     graph = YunpaiGraph(registry or build_runtime_registry(), repository)
     app = FastAPI(title="Yunpai LangGraph", version="0.2.0")
 
+    def _principal_from_headers(headers: dict[str, str]) -> tuple[dict[str, Any], bool]:
+        """从受信反向代理/认证中间件读取审批 principal（T5.2）。
+
+        优先 ``X-Yunpai-Principal``（JSON：actor/roles/tenant_id），其次拆分头
+        ``X-Actor-User`` + ``X-Actor-Roles`` + ``X-Tenant-Id``。
+        返回 (principal, trusted)；无受信头且未强制受信时 actor 交由调用方
+        从 body 取（dev/preview 降级），审计标记 principal_source=untrusted_body。
+        """
+        header = headers.get("x-yunpai-principal")
+        if header:
+            try:
+                value = json.loads(header)
+                actor = str(value.get("actor") or "")
+                roles = value.get("roles") if isinstance(value.get("roles"), list) else [str(value.get("role") or "")]
+                tenant = str(value.get("tenant_id") or value.get("tenant") or "")
+                if actor:
+                    return {"actor": actor, "roles": [str(r) for r in roles], "tenant_id": tenant}, True
+            except (ValueError, TypeError):
+                raise HTTPException(400, {"code": "INVALID_PRINCIPAL", "message": "X-Yunpai-Principal 不是合法 JSON"})
+        user = headers.get("x-actor-user") or headers.get("x-yunpai-actor-user")
+        if user:
+            roles = [item.strip() for item in (headers.get("x-actor-roles") or "").split(",") if item.strip()]
+            tenant = headers.get("x-tenant-id") or headers.get("x-yunpai-tenant-id") or ""
+            return {"actor": str(user), "roles": roles, "tenant_id": str(tenant)}, True
+        require_trusted = os.getenv("YUNPAI_REQUIRE_TRUSTED_PRINCIPAL", "0").lower() in {"1", "true", "yes"}
+        if require_trusted:
+            raise HTTPException(403, {"code": "TRUSTED_PRINCIPAL_REQUIRED",
+                                      "message": "必须从受信认证中间件/反向代理提供 X-Yunpai-Principal 或 X-Actor-User 头"})
+        return {}, False
+
+    def _principal_actor(principal: dict[str, Any], trusted: bool, body: dict[str, Any]) -> tuple[str, list[str]]:
+        body_actor = str(body.get("actor") or "")
+        if trusted:
+            actor = str(principal.get("actor") or "")
+            if body_actor and body_actor != actor:
+                # T5.4：body 冒充受信 principal 必须拒绝并记录审计。
+                raise HTTPException(403, {"code": "ACTOR_IMPERSONATION",
+                                          "message": f"请求体 actor={body_actor} 与受信 principal={actor} 不一致，拒绝冒充审批"})
+            return actor, list(principal.get("roles") or [])
+        # dev/preview 降级：无受信头时 body actor 不构成受信身份；若部署方
+        # 要求受信（YUNPAI_REQUIRE_TRUSTED_PRINCIPAL=1）已在解析处拒绝。
+        return body_actor or "operator", []
+
     @app.get("/health")
     async def health():
-        payload = {"status": "ok", "module": "yunpai-langgraph", "tools": len(graph.registry.specs), "bound_tools": len(graph.registry.handlers), "skills": len(graph.skills.specs), "planner_model": graph.planner.router.config.public()}
+        from collections import Counter
+
+        specs = graph.registry.specs
+        bound = graph.registry.handlers
+        spec_by_module = Counter(spec.module for spec in specs.values())
+        bound_by_module = Counter()
+        for name in bound:
+            spec = specs.get(name)
+            if spec is not None:
+                bound_by_module[spec.module] += 1
+        modules = {
+            module: {"spec": int(spec_by_module.get(module, 0)), "bound": int(bound_by_module.get(module, 0))}
+            for module in sorted(set(spec_by_module) | set(bound_by_module))
+        }
+        payload = {"status": "ok", "module": "yunpai-langgraph", "tools": len(specs), "bound_tools": len(bound), "skills": len(graph.skills.specs), "planner_model": graph.planner.router.config.public(), "modules": modules}
         environment = getattr(graph.registry, "environment", None)
         if environment:
             payload["environment"] = environment
@@ -74,26 +131,46 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
 
     @app.post("/runs/upload")
     async def upload_run(file: Any = File(...), message: str = "请解析并验证这份订单", tenant_id: str = "default", workflow: str | None = None):
-        from .order_workbook import parse_order_workbook
+        """单文件上传入口：保存原字节/哈希/类型/相对路径为 attachment reference，
+        再交给 Planner 选择 workflow。API 层不做固定 XLSX 解析；支持的实际类型
+        以 M1 工具合同为准（PDF/图片/XLS*/CSV/DOCX/DXF-DWG/ZIP-TAR-RAR-7Z 等）。
+        """
+        from .file_sniff import sniff_format
+        from .uploads import MAX_FILE_BYTES, sha256_of
 
         raw = await file.read()
         if not raw:
             raise HTTPException(400, "uploaded file is empty")
-        filename = str(file.filename or "order.xlsx")
-        if Path(filename).suffix.lower() != ".xlsx":
-            raise HTTPException(415, {"code": "UNSUPPORTED_FILE_TYPE", "message": "订单上传当前仅支持 XLSX"})
+        if len(raw) > MAX_FILE_BYTES:
+            raise HTTPException(413, {"code": "FILE_TOO_LARGE", "message": f"单文件超过 {MAX_FILE_BYTES // (1024 * 1024)} MiB 上限"})
+        filename = str(file.filename or "upload.bin")
+        verdict = sniff_format(raw, filename)
+        if verdict.detected_format == "unknown" or not verdict.match:
+            raise HTTPException(415, {
+                "code": "UNSUPPORTED_FILE_TYPE",
+                "message": f"无法识别的文件类型（声明 .{verdict.declared_suffix.strip('.')}，嗅探 {verdict.detected_format}）；请上传 M1 支持的订单/业务资料格式",
+            })
+        attachment = {
+            "id": "upload-1",
+            "kind": "order",
+            "filename": filename,
+            "relative_path": filename,
+            "content_type": verdict.mime_type,
+            "content_b64": base64.b64encode(raw).decode("ascii"),
+            "size": len(raw),
+            "sha256": sha256_of(raw),
+            "detected_format": verdict.detected_format,
+        }
+        request: dict[str, Any] = {
+            "message": message,
+            "attachments": [attachment],
+        }
+        if workflow:
+            request["workflow"] = workflow
         try:
-            document = parse_order_workbook(filename, raw)
-            request: dict[str, Any] = {
-                "message": message,
-                "documents": [{"filename": filename, "content_type": file.content_type or "application/octet-stream", "content_b64": base64.b64encode(raw).decode("ascii")}],
-                "document": document,
-            }
-            if workflow:
-                request["workflow"] = workflow
             state = await graph.run(new_state(request, tenant_id=tenant_id))
             return graph._public_state(state)
-        except (KeyError, ValueError, RuntimeError) as exc:
+        except (KeyError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @app.post("/runs/upload/batch")
@@ -177,20 +254,60 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         return graph._public_state(state)
 
     @app.post("/runs/{run_id}/resume")
-    async def resume_run(run_id: str, body: dict[str, Any]):
+    async def resume_run(run_id: str, body: dict[str, Any],
+                         x_yunpai_principal: str | None = Header(None),
+                         x_actor_user: str | None = Header(None),
+                         x_actor_roles: str | None = Header(None),
+                         x_tenant_id: str | None = Header(None)):
         state = graph.repository.get(run_id)
         if state is None: raise HTTPException(404, "run not found")
+        principal, trusted = _principal_from_headers({
+            "x-yunpai-principal": x_yunpai_principal or "",
+            "x-actor-user": x_actor_user or "",
+            "x-actor-roles": x_actor_roles or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
+        actor, roles = _principal_actor(principal, trusted, body)
+        decision = str(body.get("decision", "allow"))
         try:
-            resumed = await graph.resume(state, str(body.get("decision", "allow")), body.get("supplement"), actor=str(body.get("actor", "operator")))
+            graph.validate_resume_decision(state, decision, body.get("supplement"))
+            if trusted:
+                # 只有受信 principal 才做角色/租户 Gate；本地无认证降级路径
+                # 保留操作能力但审计标记 untrusted_body（生产强制受信）。
+                graph.authorize_gate(state, actor=actor, roles=roles,
+                                     tenant_id=principal.get("tenant_id") or None)
+        except ValueError as exc:
+            status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
+            raise HTTPException(status, str(exc)) from exc
+        try:
+            resumed = await graph.resume(state, decision, body.get("supplement"), actor=actor)
+            if resumed.get("approvals"):
+                resumed["approvals"][-1].setdefault("principal", {
+                    "trusted": trusted, "actor": actor, "roles": roles,
+                    "tenant_id": principal.get("tenant_id") or "",
+                })
+                if not trusted:
+                    resumed["approvals"][-1]["principal"]["source"] = "untrusted_body"
             return graph._public_state(resumed)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
     @app.post("/runs/{run_id}/resume/stream")
-    async def resume_stream(run_id: str, body: dict[str, Any]):
+    async def resume_stream(run_id: str, body: dict[str, Any],
+                            x_yunpai_principal: str | None = Header(None),
+                            x_actor_user: str | None = Header(None),
+                            x_actor_roles: str | None = Header(None),
+                            x_tenant_id: str | None = Header(None)):
         state = graph.repository.get(run_id)
         if state is None:
             raise HTTPException(404, "run not found")
+        principal, trusted = _principal_from_headers({
+            "x-yunpai-principal": x_yunpai_principal or "",
+            "x-actor-user": x_actor_user or "",
+            "x-actor-roles": x_actor_roles or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
+        actor, roles = _principal_actor(principal, trusted, body)
         decision = str(body.get("decision", "allow"))
         if state.get("status") != "waiting_human" or not state.get("pending_gate"):
             raise HTTPException(409, "run is not waiting_human")
@@ -198,15 +315,14 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(409, "unsupported gate decision")
         try:
             graph.validate_resume_decision(state, decision, body.get("supplement"))
+            if trusted:
+                graph.authorize_gate(state, actor=actor, roles=roles,
+                                     tenant_id=principal.get("tenant_id") or None)
         except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
+            raise HTTPException(status, str(exc)) from exc
         return ndjson_response(
-            graph.stream_resume(
-                state,
-                decision,
-                body.get("supplement"),
-                actor=str(body.get("actor", "operator")),
-            )
+            graph.stream_resume(state, decision, body.get("supplement"), actor=actor)
         )
 
     @app.get("/m0/readback/{batch_id}")

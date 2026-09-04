@@ -159,6 +159,24 @@ async def test_business_data_skill_runs_after_planner_and_opens_review_gate(tmp_
 
 
 @pytest.mark.asyncio
+async def test_worker_data_opens_sensitive_data_gate(tmp_path):
+    from openpyxl import Workbook
+
+    root = tmp_path / "hr"
+    root.mkdir()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["工号", "姓名", "技能", "班次"])
+    sheet.append(["E-01", "张三", "焊接", "白班"])
+    workbook.save(root / "员工技能表.xlsx")
+    graph = YunpaiGraph()
+    graph.planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), graph.skills)
+    state = await graph.run(new_state({"message": "识别并落库业务资料", "business_data_root": str(root), "business_catalog_db": str(tmp_path / "catalog.sqlite")}))
+    assert state["status"] == "waiting_human"
+    assert state["pending_gate"]["type"] == "sensitive_data"
+    assert "敏感" in state["pending_gate"]["message"]
+
+
 async def test_m4_read_skill_operation_runs_without_authorization_gate():
     graph = YunpaiGraph()
 
@@ -192,22 +210,3 @@ async def test_m4_write_skill_operation_requires_authorization_before_http():
     assert state["status"] == "waiting_human"
     assert state["pending_gate"]["type"] == "authorization"
     assert state["outputs"] == {}
-
-
-@pytest.mark.asyncio
-async def test_worker_data_opens_sensitive_data_gate(tmp_path):
-    from openpyxl import Workbook
-
-    root = tmp_path / "hr"
-    root.mkdir()
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.append(["工号", "姓名", "技能", "班次"])
-    sheet.append(["E-01", "张三", "焊接", "白班"])
-    workbook.save(root / "员工技能表.xlsx")
-    graph = YunpaiGraph()
-    graph.planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), graph.skills)
-    state = await graph.run(new_state({"message": "识别并落库业务资料", "business_data_root": str(root), "business_catalog_db": str(tmp_path / "catalog.sqlite")}))
-    assert state["status"] == "waiting_human"
-    assert state["pending_gate"]["type"] == "sensitive_data"
-    assert "敏感" in state["pending_gate"]["message"]

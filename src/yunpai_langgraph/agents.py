@@ -5,10 +5,11 @@ from typing import Any
 
 from .models import RunState, summarize
 from .registry import ToolRegistry
-from .workflow_registry import load_workflow
+from .workflow_registry import KNOWN_WORKFLOWS, load_workflow
 from .llm import QwenRouter
 from .skills import SkillRegistry, build_default_skill_registry
 from .m3_m4_tooling import M3_READ_ONLY_SKILL_OPERATIONS, M4_READ_ONLY_SKILL_OPERATIONS
+from .m1_tooling import M1_READ_ONLY_SKILL_OPERATIONS
 
 
 INTENT_TO_TOOL = (
@@ -112,8 +113,11 @@ class PlannerAgent:
         if route == "chat":
             return {"route": "chat", "steps": [], "reason": decision.get("reason") or "Qwen 判定为解释性对话", "response": decision.get("answer") or ""}
         if route == "workflow":
-            workflow = load_workflow("m0_m5")
-            return {"route": "workflow", "steps": [{**step, "mode": "workflow"} for step in workflow["steps"]], "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": decision.get("reason") or "Qwen 判定为 M0→M5 受控业务目标"}
+            workflow_id = str(decision.get("workflow") or decision.get("workflow_id") or "m0_m5")
+            if workflow_id not in KNOWN_WORKFLOWS:
+                return {"_invalid_reason": f"模型提案含未知 workflow: {workflow_id}"}
+            workflow = load_workflow(workflow_id)
+            return {"route": "workflow", "steps": [{**step, "mode": "workflow"} for step in workflow["steps"]], "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": decision.get("reason") or f"Qwen 判定为受控业务目标 ({workflow_id})"}
         if route == "free":
             requested_tools = [str(name) for name in decision.get("tools", [])]
             requested_skills = [str(name) for name in decision.get("skills", [])] if skills else []
@@ -151,6 +155,14 @@ class PlannerAgent:
             if not skills or requested_skill not in skills.specs:
                 raise ValueError(f"未注册 Skill: {requested_skill}")
             return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": str(requested_skill), "kind": "skill", "mode": "free"}], "reason": f"显式选择已注册 Skill: {requested_skill}"}
+        # 显式受控 workflow 优先于文本语义猜测（例如 "canonical" 文本
+        # 不应被误路由到 m0 Skill），保证 m1_m5_document_to_plan /
+        # canonical_to_m5 能被可靠选择。
+        explicit_workflow = str(request.get("workflow") or "").strip()
+        if explicit_workflow in KNOWN_WORKFLOWS:
+            workflow = load_workflow(explicit_workflow)
+            steps = [{**step, "mode": "workflow"} for step in workflow["steps"]]
+            return {"route": "workflow", "steps": steps, "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": f"显式选择受控 workflow: {explicit_workflow}"}
         if skills:
             upload_mode = str(request.get("upload_mode") or request.get("business_data_mode") or "")
             if upload_mode in {"master_data", "directory"} and BUSINESS_DATA_SKILL in skills.specs:
@@ -264,13 +276,12 @@ class ReviewerAgent:
     }
     _READ_ONLY_SKILL_OPERATIONS = {
         "yunpai-m0-data-foundation": {"preview"},
-        "yunpai-m1-document-parser": {"report"},
+        "yunpai-m1-document-parser": M1_READ_ONLY_SKILL_OPERATIONS,
         "yunpai-m3-material-planning": M3_READ_ONLY_SKILL_OPERATIONS,
         "yunpai-m4-procurement": M4_READ_ONLY_SKILL_OPERATIONS,
         # M5 PMC read-only queries (never mutate plan/snapshot state)
-        "yunpai-m5-pmc": {"schedule", "progress", "contracts", "readiness",
-                          "knowledge_search", "message_get", "message_delivery",
-                          "advise", "intelligent"},
+        "yunpai-m5-pmc": {"schedule", "progress", "versions", "readiness", "advise", "intelligent",
+                          "execution", "contracts", "knowledge_search", "message_get", "message_delivery"},
         "yunpai-m5-pmc-lifecycle": {"default", "schedule", "versions", "progress", "execution"},
     }
 

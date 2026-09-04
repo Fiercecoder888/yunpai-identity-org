@@ -13,7 +13,9 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     assert health["status"] == "ok"
     assert health["module"] == "yunpai-langgraph"
     assert health["tools"] == 114
-    assert health["bound_tools"] == 65
+    # 合并 main(M3/M4 adapter) + pmctooldev(M5 PMC v2) + M1 专用 adapter 后真实绑定：
+    # m0 5 + m1 17 + m2 1 + m3 16 + m4 24 + m5 18 = 81；m3/m4 两个 receive_* 排除。
+    assert health["bound_tools"] == 81
     assert health["skills"] == 8
     assert health["planner_model"]["provider"] == "qwen"
     created = client.post("/runs", json=workflow_request()).json()
@@ -21,8 +23,15 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     run_id = created["run_id"]
     assert client.get(f"/runs/{run_id}").json()["task_id"] == created["task_id"]
     assert len(client.get("/runs", params={"tenant_id": "default"}).json()["runs"]) == 1
-    resumed = client.post(f"/runs/{run_id}/resume", json={"decision": "approve", "actor": "steward"}).json()
+    # T5：resume 使用受信 principal 头（X-Actor-User/Roles），body actor 不再被信任。
+    resumed = client.post(
+        f"/runs/{run_id}/resume",
+        json={"decision": "approve", "actor": "steward"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
+    ).json()
     assert resumed["pending_gate"]["type"] == "engineering"
+    # 审计记录 principal 且 body 冒充（actor=steward 之外的伪造）被忽略。
+    assert resumed["approvals"][-1]["principal"]["actor"] == "steward"
     assert len(client.get("/tools", params={"module": "m5"}).json()["tools"]) == 20
 
 
@@ -41,10 +50,24 @@ def test_api_accepts_request_envelope_and_rejects_invalid_resume(tmp_path):
     rejected = client.post(
         f"/runs/{created['run_id']}/resume",
         json={"decision": "reject", "actor": "operator-1"},
+        headers={"X-Actor-User": "operator-1", "X-Actor-Roles": "operator"},
     )
     assert rejected.status_code == 200
     assert rejected.json()["outputs"] == {}
-    conflict = client.post(f"/runs/{created['run_id']}/resume", json={"decision": "approve"})
+    # body actor 冒充受信身份 -> 403（T5.4 impersonation）。
+    impersonated = client.post(
+        f"/runs/{created['run_id']}/resume",
+        json={"decision": "approve", "actor": "not-steward"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
+    )
+    assert impersonated.status_code == 403
+    assert impersonated.json()["detail"]["code"] == "ACTOR_IMPERSONATION"
+    # run 已 failed（reject 终止），一致 principal 重复 resume 报 409 run is not waiting_human
+    conflict = client.post(
+        f"/runs/{created['run_id']}/resume",
+        json={"decision": "approve", "actor": "steward"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
+    )
     assert conflict.status_code == 409
     skills = {item["name"]: item for item in client.get("/skills").json()["skills"]}
     assert "business-data-identification" in skills
@@ -84,14 +107,28 @@ def test_api_uploads_xlsx_and_records_intent_route(tmp_path):
     assert state["plan"][0]["tool"] == "ingest_document"
 
 
-def test_api_rejects_non_xlsx_upload_with_controlled_status(tmp_path):
+def test_api_accepts_m1_supported_non_xlsx_and_rejects_unknown_type(tmp_path):
+    """断点 1 修复：上传层不再只收 XLSX/API 层提前失败；M1 合同支持的
+    CSV/PDF/图片等进入 M1 流程，只有无法识别的类型才 415。"""
     client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "csv.sqlite")))
+    # M1 合同支持 CSV：不再 415，进入 ingest_document（本地 fixture 对 CSV
+    # 会失败关闭为 LOCAL_FIXTURE_UNSUPPORTED_FORMAT，而不是 API 层提前拒绝）。
     response = client.post(
         "/runs/upload",
+        params={"message": "请解析并验证这份订单"},
         files={"file": ("order.csv", b"order_id,quantity\nSO-1,1\n", "text/csv")},
     )
-    assert response.status_code == 415
-    assert response.json()["detail"]["code"] == "UNSUPPORTED_FILE_TYPE"
+    assert response.status_code == 200
+    state = response.json()
+    assert state["plan"][0]["tool"] == "ingest_document"
+    assert state["route"] in {"free", "workflow"}
+    # 无法识别的二进制类型仍然受控拒绝。
+    unknown = client.post(
+        "/runs/upload",
+        files={"file": ("order.exe", b"\x7fELFgarbage", "application/octet-stream")},
+    )
+    assert unknown.status_code == 415
+    assert unknown.json()["detail"]["code"] == "UNSUPPORTED_FILE_TYPE"
 
 
 def test_api_batch_upload_requires_explicit_mode(tmp_path):

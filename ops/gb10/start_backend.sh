@@ -5,8 +5,10 @@ cd "$ROOT"
 mkdir -p runtime logs
 export PYTHONPATH="$ROOT/src"
 export YUNPAI_RUN_DB="${YUNPAI_RUN_DB:-$ROOT/runtime/yunpai-runs.sqlite}"
+export YUNPAI_M5_DB="${YUNPAI_M5_DB:-$ROOT/runtime/yunpai-m5.sqlite}"
 export YUNPAI_TOOL_TRANSPORT="${YUNPAI_TOOL_TRANSPORT:-http}"
-export YUNPAI_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m2}"
+export YUNPAI_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m1,m2}"
+export M1_URL="${M1_URL:-http://127.0.0.1:8080}"
 export M2_URL="${M2_URL:-http://127.0.0.1:8765}"
 export QWEN_ROUTER_ENABLED="${QWEN_ROUTER_ENABLED:-true}"
 if [[ -z "${QWEN_API_KEY:-}" && -r /home/soft/yunpai/dev-39085/config/deploy.env ]]; then

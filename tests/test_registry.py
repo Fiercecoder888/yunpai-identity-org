@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from yunpai_langgraph.contracts import ToolSpec
+from yunpai_langgraph.m1_tooling import M1_ADAPTER_TOOL_NAMES, M1_HTTP_ADAPTER_TOOL_NAMES, M1_TOOL_NAMES
 from yunpai_langgraph.m3_m4_tooling import M3_ADAPTER_TOOL_NAMES, M4_ADAPTER_TOOL_NAMES
 from yunpai_langgraph.registry import ToolRegistry, build_default_registry, build_runtime_registry
 
@@ -16,9 +17,16 @@ def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
     assert len(registry.specs) == 114
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
-    assert len(registry.handlers) == 65
+    # 合并 main(M3/M4 adapter) + pmctooldev(M5 PMC v2) + M1 专用 adapter 后真实绑定：
+    # m0 5 + m1 17 + m2 1 + m3 16 + m4 24 + m5 18 = 81；m3/m4 两个 receive_* 排除。
+    assert len(registry.handlers) == 81
+    assert {"data_import_run", "data_import_status", "data_import_preview", "data_import_resolve", "data_import_commit"} <= set(registry.handlers)
     assert all(name in registry.handlers for name in M3_ADAPTER_TOOL_NAMES)
     assert all(name in registry.handlers for name in M4_ADAPTER_TOOL_NAMES)
+    # All 17 M1 tools are bound in the default registry: ingest_document stays
+    # on the local fixture handler, the remaining 16 use the M1 HTTP adapter.
+    assert all(name in registry.handlers for name in M1_TOOL_NAMES)
+    assert all(name in registry.handlers for name in M1_ADAPTER_TOOL_NAMES)
     assert "receive_m3_material_demand" not in registry.handlers
     assert "receive_m4_schedule_impact_proposal" not in registry.handlers
     assert "import_m4_purchase_suggestions" not in registry.handlers

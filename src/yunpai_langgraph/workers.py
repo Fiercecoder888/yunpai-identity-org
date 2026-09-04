@@ -232,14 +232,40 @@ async def m0_commit(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, A
 
 
 async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """Local-compat M1 handler (fixture/preview only, never production).
+
+    This handler intentionally does NOT implement the full multi-format M1
+    parsing the manifest describes (PDF/image/DOCX/CAD/archive + MinerU/
+    Instructor extraction, TaskStore, review queue, knowledge projections).
+    It only understands JSON or a pre-parsed ``_fixture_document`` structure
+    for demo/local flows.  Any other content fails closed with an explicit
+    code so a fixture success is never mistaken for a complete M1 parse; in
+    production transport (``YUNPAI_TOOL_TRANSPORT=http``) this handler is
+    replaced by the dedicated M1 HTTP adapter pointing at the real service.
+    """
     filename, raw = _decode_file(payload["file"])
-    fixture = payload.get("_fixture_document") or _json_content(raw)
-    lines = fixture.get("lines") or fixture.get("records") or []
-    confidence = float(fixture.get("confidence", 1.0 if lines else 0.0))
-    source_issues = fixture.get("validation_issues") if isinstance(fixture.get("validation_issues"), list) else []
+    fixture = payload.get("_fixture_document")
+    parsed_source = fixture if isinstance(fixture, dict) and fixture else _json_content(raw)
+    if not parsed_source:
+        return {
+            "task_id": f"m1-{ctx['task_id'][-10:]}",
+            "status": "failed",
+            "code": "LOCAL_FIXTURE_UNSUPPORTED_FORMAT",
+            "message": "本地 fixture handler 无法解析该文件（仅支持 JSON 或预解析结构，不冒充完整 M1 多格式解析）。生产解析请通过 M1_URL 调用真实 M1 服务。",
+            "provider": "local_fixture",
+            "fixture": True,
+            "document": None,
+            "document_schema_version": None,
+            "schema_version": None,
+            "needs_review": False,
+            "overall_confidence": 0.0,
+        }
+    lines = parsed_source.get("lines") or parsed_source.get("records") or []
+    confidence = float(parsed_source.get("confidence", 1.0 if lines else 0.0))
+    source_issues = parsed_source.get("validation_issues") if isinstance(parsed_source.get("validation_issues"), list) else []
     header = {
-        "order_id": fixture.get("order_id"), "product_code": fixture.get("product_code"),
-        "quantity": fixture.get("quantity"), "due_date": fixture.get("due_date"),
+        "order_id": parsed_source.get("order_id"), "product_code": parsed_source.get("product_code"),
+        "quantity": parsed_source.get("quantity"), "due_date": parsed_source.get("due_date"),
     }
     missing = [key for key, value in header.items() if value in (None, "")]
     document = {
@@ -259,7 +285,9 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
         "overall_confidence": confidence, "document": document,
         "extraction": {"order": header, "lines": lines},
         "order": header, "lines": lines, "missing": missing,
-        "evidence": [_evidence("m1", filename, "m1.document.v2 字段证据")],
+        "provider": "local_fixture",
+        "fixture": True,
+        "evidence": [_evidence("m1", filename, "m1.document.v2 字段证据（本地 fixture，非生产解析）")],
     }
 
 
