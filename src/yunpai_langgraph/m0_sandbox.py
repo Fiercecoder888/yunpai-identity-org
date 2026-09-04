@@ -179,6 +179,31 @@ class M0SandboxStore:
             row = db.execute("SELECT count(*) AS c FROM m0_candidates WHERE batch_id=? AND review_status NOT IN ('approved','rejected')", (batch_id,)).fetchone()
         return int(row["c"]) if row else 0
 
+    def readback_report(self, batch_id: str, *, real_m0_available: bool = False) -> dict[str, Any]:
+        """M0 canonical 回读报告（dry-run 语义）。
+
+        本地 sandbox 无真实 M0 canonical 表/ledger/outbox；只有当部署方提供
+        M0 URL/PostgreSQL/审核授权且本函数收到 real_m0_available=true 时才报告
+        可回读。没有回读证据时绝不写“生产完成”。
+        """
+        with self._connect() as db:
+            approved = db.execute("SELECT count(*) AS c FROM m0_candidates WHERE batch_id=? AND review_status='approved'", (batch_id,)).fetchone()["c"]
+            pending = self.pending_count(batch_id)
+        if real_m0_available:
+            return {
+                "batch_id": batch_id, "transport": "http", "environment": "production",
+                "canonical_readback_available": True, "approved_candidates": int(approved),
+                "ledger": {"available": True}, "outbox": {"available": True}, "rollback": {"available": True},
+                "detail": "真实 M0 联调回读（需部署方确认 URL/schema/授权）",
+            }
+        return {
+            "batch_id": batch_id, "transport": "local", "environment": "sandbox",
+            "canonical_readback_available": False, "approved_candidates": int(approved), "pending_candidates": int(pending),
+            "ledger": {"available": False}, "outbox": {"available": False}, "rollback": {"available": False},
+            "detail": "local transport 无 M0 canonical 表与回读接口；未写生产完成。真实发布需部署方提供 M0 URL、PostgreSQL schema/权限、审核授权和写入回读接口",
+            "dry_run": True,
+        }
+
 
 def _decode_upload(item: Any) -> tuple[str, bytes | None]:
     if not isinstance(item, dict):

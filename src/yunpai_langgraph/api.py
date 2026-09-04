@@ -252,6 +252,21 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         db_path = Path(os.getenv("YUNPAI_EXEC_DB", "runtime/yunpai-execution.sqlite"))
         db_path.parent.mkdir(parents=True, exist_ok=True)
         return PmcExecutionStore(db_path).execution_summary(plan_version)
+
+    @app.get("/m0/readback/{batch_id}")
+    async def m0_readback(batch_id: str):
+        """M0 canonical 回读报告（dry-run 语义）。
+
+        返回当前 transport 是否具备真实 M0 canonical/ledger/outbox 回读；
+        没有回读证据时绝不写“生产完成”。
+        """
+        from .m0_sandbox import M0SandboxStore
+
+        db_path = Path(os.getenv("YUNPAI_M0_SANDBOX_DB", "runtime/yunpai-m0-sandbox.sqlite"))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        transport = os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower()
+        real_available = transport == "http" and bool(os.getenv("M0_URL"))
+        return M0SandboxStore(db_path).readback_report(batch_id, real_m0_available=real_available)
     return app
 
 

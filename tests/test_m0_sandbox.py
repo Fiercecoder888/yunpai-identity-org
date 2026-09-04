@@ -123,3 +123,18 @@ async def test_m0_chain_resolve_all_then_commit_tracks_batch_and_evidence(sandbo
     assert committed["environment"] == "sandbox"
     assert committed["readback"]["available"] is False
     assert any(item.get("module") == "m0" for item in committed.get("evidence", []))
+
+
+@pytest.mark.asyncio
+async def test_m0_readback_report_dry_run_and_production(sandbox_env):
+    ctx = {"task_id": "TASK-M0-RB", "tenant_id": "default"}
+    imported = await m0_import({"files": _files({"records": [{"kind": "order"}]})}, ctx)
+    batch_id = imported["batch_id"]
+    store = __import__("yunpai_langgraph.m0_sandbox", fromlist=["M0SandboxStore"]).M0SandboxStore(os.environ["YUNPAI_M0_SANDBOX_DB"])
+    dry = store.readback_report(batch_id, real_m0_available=False)
+    assert dry["canonical_readback_available"] is False
+    assert dry["dry_run"] is True
+    assert dry["ledger"]["available"] is False
+    production = store.readback_report(batch_id, real_m0_available=True)
+    assert production["canonical_readback_available"] is True
+    assert production["environment"] == "production"
