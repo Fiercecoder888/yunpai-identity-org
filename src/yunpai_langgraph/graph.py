@@ -12,6 +12,7 @@ from .models import RunState, new_state, summarize
 from .registry import ToolRegistry, build_default_registry
 from .repository import InMemoryRunRepository, RunRepository
 from .skills import SkillRegistry, build_default_skill_registry
+from .orchestration_bridge import BRIDGED_WORKFLOWS
 
 
 def _now() -> str:
@@ -163,6 +164,26 @@ class YunpaiGraph:
             state["trace"].append({"event": "gate.opened", "tool": step["tool"], "step_index": index, "phase": "pre_execution", "at": _now()})
             return self._save(state)
         payload = self._payload_for(state, step["tool"])
+        if state.get("route") == "workflow" and state.get("workflow_id") in BRIDGED_WORKFLOWS:
+            from .orchestration_bridge import bridge_payload
+            bridged = bridge_payload(state, step["tool"])
+            if bridged.get("success") is False and bridged.get("code") == "BLOCKED_INPUT":
+                # 桥接发现缺少权威输入：作为可恢复的业务 Gate（数据 Gate）交给
+                # Reviewer，不调用 tool，也不把 fixture/request 默认冒充事实。
+                record = {
+                    "id": step["id"], "module": step["module"], "tool": step["tool"],
+                    "status": "blocked", "input_summary": summarize(payload),
+                    "started_at": _now(), "finished_at": _now(),
+                }
+                state["steps"].append(record)
+                state["current_result"] = bridged
+                state["outputs"][step["tool"]] = bridged
+                state["outputs"][step["module"]] = bridged
+                state["evidence"].extend(bridged.get("evidence", []))
+                record.update(output_summary=summarize(bridged), evidence=bridged.get("evidence", []))
+                state["trace"].append({"event": "bridge.blocked_input", "tool": step["tool"], "step_index": index, "missing_fields": bridged.get("data", {}).get("missing_fields", []), "at": _now()})
+                return self._save(state)
+            payload = bridged
         record = {
             "id": step["id"], "module": step["module"], "tool": step["tool"],
             "status": "running", "input_summary": summarize(payload), "started_at": _now(),
