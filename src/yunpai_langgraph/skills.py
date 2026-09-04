@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .business_catalog import ingest_tree
+from .m3_m4_tooling import (
+    M3_SKILL_OPERATION_MAP,
+    M4_SKILL_OPERATION_MAP,
+    unique_tools,
+)
 
 
 SkillHandler = Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -160,14 +165,14 @@ async def m2_engineering_control(payload: dict[str, Any], context: dict[str, Any
 async def m3_material_planning(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     return await _dispatch_registered_tool(
         "yunpai-m3-material-planning", payload, context,
-        {"default": "run_m3_procurement_requirements", "mrp": "run_m3_procurement_requirements", "readiness": "get_material_readiness_snapshot", "readiness_summary": "get_material_readiness", "plan": "get_m3_procurement_plan", "handoff": "export_m3_procurement_suggestions"},
+        M3_SKILL_OPERATION_MAP,
     )
 
 
 async def m4_procurement_control(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     return await _dispatch_registered_tool(
         "yunpai-m4-procurement", payload, context,
-        {"default": "import_m4_purchase_suggestions_json", "import": "import_m4_purchase_suggestions_json", "orders": "list_m4_purchase_orders", "tracking": "list_m4_tracking", "alerts": "list_m4_purchase_alerts", "supply": "query_m4_material_supply_snapshot", "supplier_reply": "parse_m4_supplier_reply"},
+        M4_SKILL_OPERATION_MAP,
     )
 
 
@@ -219,14 +224,14 @@ def build_default_skill_registry() -> SkillRegistry:
         description="计算 MRP、物料缺口和齐套快照，输出可审计的 M3→M4 采购需求，不预占库存。",
         handler=m3_material_planning,
         tags=("m3", "mrp", "material", "readiness"),
-        tools=("run_m3_procurement_requirements", "get_material_readiness_snapshot", "get_material_readiness", "get_m3_procurement_plan", "export_m3_procurement_suggestions"),
+        tools=unique_tools(M3_SKILL_OPERATION_MAP),
     ))
     registry.register(SkillSpec(
         name="yunpai-m4-procurement",
         description="管理采购建议、采购单审核、供应商回复、供应快照、ETA 跟踪和预警；副作用仍需人工授权。",
         handler=m4_procurement_control,
         tags=("m4", "procurement", "supplier", "tracking"),
-        tools=("import_m4_purchase_suggestions_json", "list_m4_purchase_orders", "list_m4_tracking", "list_m4_purchase_alerts", "query_m4_material_supply_snapshot", "parse_m4_supplier_reply"),
+        tools=unique_tools(M4_SKILL_OPERATION_MAP),
     ))
     registry.register(SkillSpec(
         name="yunpai-m5-pmc",

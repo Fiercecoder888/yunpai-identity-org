@@ -11,6 +11,7 @@
 | P-003 | 已完成 | zhb / 集成负责人 | 微信及企业微信下载目录、`~/Downloads`、导出目录和业务压缩包完成只读全量核验，结果写入审计文档和 0903 数据需求修订 | E-0904-WECHAT-AUDIT-001 | 2026-09-04 |
 | P-004 | 已阻塞 | zhb / 集成负责人 | 逐类核对 M0 -> GB10 39092 的来源 SHA、候选审核、canonical 表和写入回读；具备 M0 受控写入条件后补传并逐笔复核 | E-0904-M0-GB10-RECON-001 | 2026-09-04 |
 | P-005 | 已规划 | zhb / DeepSeek Harness | 按任务书完成上传识别、M0 canonical、下游 M1-M5/PMC 实施；从最新 main 同步 dev，在 GB10 测试，通过后推送并发起合并 | E-PLAN-DEEPSEEK-HARNESS-001 | 2026-09-04 |
+| P-006 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过 | E-M3M4-TOOLS-001 | 2026-09-04 |
 
 ## 阻塞项
 
@@ -18,10 +19,11 @@
 |---|---|---|---|
 | Windows 工作树 JSON 换行导致 provenance 字节哈希测试误报 | 完整 pytest 在该环境多 1 个失败；运行代码与 Git blob 内容未受影响 | 统一仓库 EOL 或在 Linux/CI 复核 | 已记录 |
 | 39092 未暴露 M0 canonical 写入链路 | 只能核对 orchestrator 候选 SQLite，不能证明产品/物料/设备/人员/财务等 canonical 落库；直接补写会绕过审核和 Outbox | 部署方提供可访问的 M0 base URL、PostgreSQL schema/权限、审核授权和写入回读接口 | 新增，未解除 |
+| 本机无可达 M3/M4 独立服务 | 已完成 Adapter、合同、Gate 和 mock HTTP 全链路验证，但无法声明真实服务或数据库验收 | 提供可访问的 M3_URL、M4_URL、认证信息及受控数据库回读条件 | 外部联调待办 |
 
 ## 下一步
 
-1. 后续 session 继续创建独立 worktree、分支、claim 文件和实时报告。
+1. 具备 M3/M4 独立服务条件后，执行真实 HTTP 与数据库回读验收。
 2. 新需求按提交逐个集成，并运行受影响范围的回归集。
 3. 需要发布时登记唯一 `DEPLOY_LOCK`，发布后记录 release 与回滚点。
 
@@ -29,6 +31,9 @@
 
 按时间倒序追加：日期、完成事项、证据 ID、遗留问题、下一步和确认来源。不要覆盖旧记录。
 
+- 2026-09-04：完成 P-006 代码实现和本地验收；补齐 M3/M4 HTTP Adapter、39 个目标工具映射、Skill operation、授权 Gate、错误映射和 M3→M4 集成测试；完整 pytest 69 项通过，本地 FastAPI 运行态为 114/45 bound；遗留为真实 M3/M4 服务不可达；证据 E-M3M4-TOOLS-001；确认来源：本次实施与验证。
+
+- 2026-09-04：启动 M3/M4 Tool 与 Skill 补全，基线为远端最新 `main` 提交 `1829888a58855b0fd6064fa5b8ee4a858823c191`，个人分支 `codex/m3-m4-tool-skill-completion-20260904` 已推送；证据 `E-M3M4-TOOLS-001`；下一步实现公共适配层和领域 provider；确认来源：用户请求。
 - 2026-09-03：初始化项目治理账本，新增多 session 协作规则和实时报告模板；证据 `E-SESSION-001`；下一步按规则登记首个并行任务；确认来源：用户请求。
 - 2026-09-03：完成后端修复与前端右栏 session 集成，线上 `39092` 新 release 通过关键点击/滚动验收；证据 `E-INTEGRATION-002`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。
 - 2026-09-03：`dev` 推送至 `neworigin/dev`（最终交接提交 `ee8541cc`，交付基线 `d48ce911`），完成集成 session 交接和 claim 释放；证据 `E-INTEGRATION-003`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。

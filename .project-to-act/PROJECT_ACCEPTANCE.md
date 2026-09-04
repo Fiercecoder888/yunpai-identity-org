@@ -5,10 +5,10 @@
 
 ## 当前验收结论
 
-- 结论：关键业务路径、右栏响应式布局和线上发布验收通过；Windows provenance 字节哈希测试仍需在统一 EOL/CI 环境复核
-- 验收范围：前后端集成提交、右栏视觉/高度/滚动、关键页面点击、health 和前端回归
-- 最后检查：2026-09-03 18:20 +08:00
-- 遗留问题：本机 CLI Playwright 缺 Chromium；中文 OCR 引擎未安装；两项均已用真实浏览器控制 API、截图和同 DOM 可读文本证据替代并如实记录
+- 结论：既有关键业务路径和线上发布验收保持通过；M3/M4 Tool 与 Skill 补全已通过代码、本地运行态和 mock HTTP 集成验收，真实独立服务/数据库联调尚未执行
+- 验收范围：既有前后端集成与线上证据；本次 M3/M4 Tool registry、HTTP Adapter、Skill operation、授权 Gate、错误语义和 M3→M4 流程
+- 最后检查：2026-09-04 19:14 +08:00
+- 遗留问题：本机未监听 8000、8010、8080、8765、39092，未取得真实 M3/M4 服务 URL、认证和数据库回读条件；不得将 mock HTTP 证据描述为生产验收
 
 ## 验收标准
 
@@ -22,11 +22,13 @@
 | A-006 | 每个 session 持续维护独立实时修改报告 | 通过 | 检查实时报告规则和 `reports/sessions/README.md` 模板 | E-SESSION-001 |
 | A-007 | 微信下载目录全量复核结论可追溯，且不把原始资料误报为不存在 | 通过 | 只读扫描个人/企业微信目录、`~/Downloads` 和导出目录；归档清单、表头核验；账本校验；后端/前端回归与构建 | E-0904-WECHAT-AUDIT-001 |
 | A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 未通过（外部阻塞） | 39092 health/openapi、GB10 SQLite 完整性与 schema、source SHA/候选审核状态、运行状态批次交叉核对 | E-0904-M0-GB10-RECON-001 |
+| A-009 | M3/M4 Tool 与 Skill 完整绑定并保持副作用 Gate | 通过（代码与本地运行态） | 完整 pytest、compileall、diff check、账本校验、9001 health/tools、HTTP mock 集成 | E-M3M4-TOOLS-001 |
 
 ## 证据索引
 
 | 证据 ID | 时间 | 方法或命令 | 退出状态 | 版本或文件哈希 | 结果摘要 | 证据位置 | 有效期 |
 |---|---|---|---|---|---|---|---|
+| E-M3M4-TOOLS-001 | 2026-09-04 19:14 | Windows venv 完整 pytest；compileall；git diff --check；项目账本 --validate；临时 9001 /health 与 /tools；显式 Yunpai SSH key 执行 git fetch origin main | 全部代码/本地验证退出 0；69 passed, 1 warning；远端 main 未前移 | codex/m3-m4-tool-skill-completion-20260904，基线 1829888a | 114 个 Tool、45 个 bound；M3 16/17、M4 24/26；两个 receiver 未绑定；M3→M4 mock HTTP、审批、revision/checksum、发送和供应事实确认通过；真实服务未联调 | reports/sessions/s-m3-m4-tools-20260904.md、tests/test_m3_m4_tool_integration.py | 2026-09-11 |
 | E-SESSION-001 | 2026-09-03 | 初始化脚本 `--validate`；人工审阅规则文件 | 0 | `dev` / `4b9c1aa1` | 治理账本有效，规则与 claim 模板已落盘 | `.project-to-act/`、`docs/SESSION_COLLABORATION_RULES.md`、`.coordination/claims/README.md` | 2026-12-31 |
 | E-REGRESSION-002 | 2026-09-03 18:09 | `npm run typecheck`; `npm run build`; `npm test -- --run --maxWorkers=1 --no-file-parallelism`; root `pytest -q` | 前三项 0；root pytest 1（47 passed, 1 EOL hash mismatch） | `dev` / `24da1d70`；Git blob manifest hash 与 provenance 一致 | 前端回归通过；根测试唯一失败为 Windows `core.autocrlf` 工作树换行误报，非代码/运行时错误 | `reports/sessions/s-integration-final-20260903.md`、`reports/s-progress-restore-20260903/REPORT.md` | 2026-12-31 |
 | E-INTEGRATION-002 | 2026-09-03 18:10 | Git merge/cherry-pick；线上浏览器控制 API 点击、布局、独立滚动；`/api/health`；静态资源请求 | Git/浏览器/HTTP 均成功；控制台 error/warning 0 | `dev` / `24da1d70`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；release `20260903173855` | 后端与右栏提交完整集成；上传菜单、右栏满高/滚动、移动抽屉和问答关键路径符合预期 | `reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张截图、线上 URL | 2026-12-31 |
@@ -40,12 +42,15 @@
 
 | Gate ID | 日期 | Gate | 对象 | 结果 | 证据 ID | 豁免与确认人 |
 |---|---|---|---|---|---|---|
+| G-003 | 2026-09-04 | M3/M4 Tool 与 Skill 代码验收 Gate | codex/m3-m4-tool-skill-completion-20260904 | 通过（不含真实外部服务） | E-M3M4-TOOLS-001 | Codex |
 | G-001 | 2026-09-03 | 协作治理 Gate | 多 session 规则 | 通过 | E-SESSION-001 | zhb |
 | G-002 | 2026-09-03 | 前后端集成与线上关键路径 Gate | `dev` / GB10 39092 | 通过（关键路径；完整 pytest 环境性缺口已记录） | E-INTEGRATION-003 | zhb |
 
 ## 验收记录
 
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
+
+- 2026-09-04：检查 M3/M4 registry、Skill、授权 Gate、HTTP Adapter、完整后端回归和本地 FastAPI 运行态；证据 E-M3M4-TOOLS-001；结论：代码与本地运行态通过，真实 M3/M4 服务和数据库回读因外部条件缺失未验收。
 
 - 2026-09-03：检查治理文件、分支策略、claim 模板和配置校验；证据 `E-SESSION-001`；结论：可开始并行 session，业务验收仍按各任务单独记录。
 - 2026-09-03：检查集成提交、前端顺序回归、线上 `39092` 多视口点击/滚动、静态资源和 `/api/health`；证据 `E-INTEGRATION-002`、`E-REGRESSION-002`；结论：关键路径通过；CLI Playwright/OCR 与 Windows provenance 换行测试缺口已如实保留。

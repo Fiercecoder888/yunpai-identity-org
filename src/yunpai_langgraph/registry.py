@@ -38,6 +38,16 @@ except ImportError:  # pragma: no cover - only used in dependency-free smoke env
 from .contracts import ToolHandler, ToolSpec
 
 
+class ToolHTTPError(RuntimeError):
+    """Stable HTTP adapter error surfaced through ToolRegistry and MCP."""
+
+    def __init__(self, tool: str, code: str, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(f"{tool}: {code}: {message}")
+        self.tool = tool
+        self.code = code
+        self.status_code = status_code
+
+
 class ToolRegistry:
     """全局唯一工具注册表；可加载 JSON manifest 并绑定本地/HTTP handler。"""
 
@@ -68,6 +78,7 @@ class ToolRegistry:
                     execution=item.get("execution", "sync"), base_url=data.get("base_url", ""),
                     method=http.get("method", "POST"), path=http.get("path", ""),
                     timeout_s=float(http.get("timeout_s", 60)), tool_type=item.get("type", "tool"),
+                    required_headers=tuple(http.get("required_headers", [])),
                     agent_endpoints=item.get("agent_endpoints", {}), tags=tuple(item.get("tags", [])),
                 ))
 
@@ -88,9 +99,21 @@ class ToolRegistry:
         Draft202012Validator(spec.output_schema).validate(result)
         return result
 
-    def bind_http(self, base_urls: dict[str, str], *, timeout_s: float = 60.0, headers_by_module: dict[str, dict[str, str]] | None = None) -> None:
+    def bind_http(
+        self,
+        base_urls: dict[str, str],
+        *,
+        timeout_s: float = 60.0,
+        headers_by_module: dict[str, dict[str, str]] | None = None,
+        tool_names: set[str] | frozenset[str] | None = None,
+        overwrite: bool = True,
+    ) -> None:
         """按模块 base URL 将工具绑定为 HTTP handler，并保留合同校验。"""
         for name, spec in self.specs.items():
+            if tool_names is not None and name not in tool_names:
+                continue
+            if not overwrite and name in self.handlers:
+                continue
             base_url = base_urls.get(spec.module)
             if not base_url:
                 continue
@@ -105,37 +128,66 @@ class ToolRegistry:
                     marker = "{" + key + "}"
                     if marker in path:
                         path = path.replace(marker, quote(str(body.pop(key)), safe=""))
-                headers = {"X-Yunpai-Task-ID": str(context.get("task_id", ""))}
-                headers.update((headers_by_module or {}).get(_spec.module, {}))
-                if context.get("tenant_id"):
-                    headers["X-Yunpai-Tenant-ID"] = str(context["tenant_id"])
-                if context.get("idempotency_key"):
-                    headers["Idempotency-Key"] = str(context["idempotency_key"])
+                configured_headers = (headers_by_module or {}).get(_spec.module, {})
+                headers = _http_headers(_spec, body, context, configured_headers)
+                missing_headers = [key for key in _spec.required_headers if not headers.get(key)]
+                if missing_headers:
+                    raise ToolHTTPError(
+                        _spec.name,
+                        "MISSING_REQUIRED_HEADER",
+                        f"missing required HTTP headers: {', '.join(missing_headers)}",
+                    )
                 # The standalone M2 API consumes uploaded source files as
                 # base64 JSON and stages them itself; other modules use the
                 # generic multipart adapter.
                 files = [] if _spec.module == "m2" else _extract_uploads(body)
                 request_kwargs: dict[str, Any] = {"headers": headers}
+                query_fields = _http_query_fields(_spec.name)
+                query = {
+                    key: body.pop(key)
+                    for key in query_fields
+                    if key in body and body[key] is not None
+                }
+                if "tenant_id" in query_fields and context.get("tenant_id"):
+                    query.setdefault("tenant_id", context["tenant_id"])
                 if files:
+                    if query:
+                        request_kwargs["params"] = query
                     request_kwargs["files"] = files
                     request_kwargs["data"] = {
                         key: value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
                         for key, value in body.items()
                     }
                 elif _spec.method.upper() in {"GET", "DELETE"}:
-                    request_kwargs["params"] = body
+                    request_kwargs["params"] = {**query, **body}
                 else:
+                    if query:
+                        request_kwargs["params"] = query
                     request_kwargs["json"] = body
-                async with httpx.AsyncClient(timeout=_spec.timeout_s or timeout_s) as client:
-                    response = await client.request(_spec.method, _base.rstrip("/") + path, **request_kwargs)
-                    response.raise_for_status()
-                    value = response.json()
-                    # The standalone M2 web adapter wraps its workflow result
-                    # in {"result": ...}; normalize that transport envelope
-                    # so ReviewerAgent sees the declared tool output directly.
-                    if isinstance(value, dict) and set(value) == {"result"}:
-                        return value["result"]
-                    return value
+                try:
+                    async with httpx.AsyncClient(timeout=_spec.timeout_s or timeout_s) as client:
+                        response = await client.request(_spec.method, _base.rstrip("/") + path, **request_kwargs)
+                        response.raise_for_status()
+                        value = response.json()
+                except httpx.TimeoutException as exc:
+                    raise ToolHTTPError(_spec.name, "HTTP_TIMEOUT", str(exc)) from exc
+                except httpx.HTTPStatusError as exc:
+                    detail = _http_error_detail(exc.response)
+                    raise ToolHTTPError(
+                        _spec.name,
+                        "HTTP_STATUS_ERROR",
+                        detail,
+                        status_code=exc.response.status_code,
+                    ) from exc
+                except httpx.RequestError as exc:
+                    raise ToolHTTPError(_spec.name, "HTTP_UNAVAILABLE", str(exc)) from exc
+                except ValueError as exc:
+                    raise ToolHTTPError(_spec.name, "INVALID_JSON_RESPONSE", str(exc)) from exc
+                # The standalone M2 web adapter wraps its workflow result in
+                # {"result": ...}; expose the declared tool output directly.
+                if isinstance(value, dict) and set(value) == {"result"}:
+                    return value["result"]
+                return value
 
             self.handlers[name] = http_handler
 
@@ -147,7 +199,12 @@ class ToolRegistry:
             {
                 "name": spec.name, "module": spec.module, "description": spec.description,
                 "execution": spec.execution, "type": spec.tool_type,
-                "http": {"method": spec.method, "path": spec.path, "timeout_s": spec.timeout_s},
+                "http": {
+                    "method": spec.method,
+                    "path": spec.path,
+                    "timeout_s": spec.timeout_s,
+                    "required_headers": list(spec.required_headers),
+                },
                 "bound": name in self.handlers,
             }
             for name, spec in self.specs.items()
@@ -155,6 +212,7 @@ class ToolRegistry:
 
 
 def build_default_registry() -> ToolRegistry:
+    from .m3_m4_tooling import M3_M4_ADAPTER_TOOL_NAMES
     from .workers import HANDLERS
     registry = ToolRegistry()
     manifest_root = Path(os.getenv("YUNPAI_MANIFEST_DIR", Path(__file__).with_name("manifests")))
@@ -162,7 +220,110 @@ def build_default_registry() -> ToolRegistry:
     for name, handler in HANDLERS.items():
         if name in registry.specs:
             registry.handlers[name] = handler
+    registry.bind_http(
+        _module_urls(registry, {"m3", "m4"}),
+        headers_by_module=_module_auth_headers({"m3", "m4"}),
+        tool_names=M3_M4_ADAPTER_TOOL_NAMES,
+        overwrite=False,
+    )
     return registry
+
+
+def _http_headers(
+    spec: ToolSpec,
+    payload: dict[str, Any],
+    context: dict[str, Any],
+    configured: dict[str, str],
+) -> dict[str, str]:
+    headers = {key: str(value) for key, value in configured.items() if value is not None and str(value)}
+    task_id = context.get("task_id")
+    if task_id:
+        headers["X-Yunpai-Task-ID"] = str(task_id)
+    tenant_id = context.get("tenant_id") or payload.get("tenant_id")
+    if tenant_id:
+        headers["X-Yunpai-Tenant-ID"] = str(tenant_id)
+    idempotency_key = context.get("idempotency_key") or payload.get("idempotency_key")
+    if idempotency_key:
+        headers["Idempotency-Key"] = str(idempotency_key)
+    authorization = context.get("authorization") or context.get("Authorization")
+    if authorization:
+        headers["Authorization"] = str(authorization)
+    elif context.get("auth_token"):
+        headers["Authorization"] = f"Bearer {context['auth_token']}"
+    trace_id = context.get("trace_id") or context.get("run_id")
+    if trace_id:
+        headers["X-Yunpai-Trace-ID"] = str(trace_id)
+    revision = (
+        context.get("revision")
+        or payload.get("revision")
+        or payload.get("expected_revision")
+        or payload.get("expected_po_revision")
+    )
+    if revision is not None:
+        headers["X-Yunpai-Revision"] = str(revision)
+    checksum = (
+        context.get("checksum")
+        or payload.get("checksum")
+        or payload.get("expected_checksum")
+        or payload.get("expected_po_checksum")
+        or payload.get("source_plan_checksum")
+    )
+    if checksum:
+        headers["X-Yunpai-Checksum"] = str(checksum)
+    if payload.get("source_module"):
+        headers["X-Yunpai-Source"] = str(payload["source_module"])
+    actor_user = context.get("actor_user") or payload.get("actor_user")
+    actor_role = context.get("actor_role") or payload.get("actor_role")
+    if actor_user:
+        headers["X-Actor-User"] = str(actor_user)
+    if actor_role:
+        headers["X-Actor-Role"] = str(actor_role)
+    return headers
+
+
+def _http_query_fields(tool_name: str) -> frozenset[str]:
+    if tool_name in {
+        "get_persisted_m3_plan",
+        "get_pr_po_drafts",
+        "approve_m3_task",
+        "reject_m3_task",
+        "request_change_m3_task",
+        "approve_to_send_m3_task",
+    }:
+        return frozenset({"tenant_id"})
+    return frozenset()
+
+
+def _http_error_detail(response: Any) -> str:
+    try:
+        value = response.json()
+    except Exception:
+        value = getattr(response, "text", "")
+    text = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
+    return text[:2000] or f"HTTP {getattr(response, 'status_code', 'error')}"
+
+
+def _module_urls(registry: ToolRegistry, modules: set[str]) -> dict[str, str]:
+    urls: dict[str, str] = {}
+    for module in modules:
+        tools = registry.tools_for(module)
+        default = tools[0].base_url if tools else ""
+        value = os.getenv(f"{module.upper()}_URL", default)
+        if value:
+            urls[module] = value
+    return urls
+
+
+def _module_auth_headers(modules: set[str]) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for module in modules:
+        authorization = os.getenv(f"{module.upper()}_AUTHORIZATION", "").strip()
+        api_key = os.getenv(f"{module.upper()}_API_KEY", "").strip()
+        if not authorization and api_key:
+            authorization = f"Bearer {api_key}"
+        if authorization:
+            result[module] = {"Authorization": authorization}
+    return result
 
 
 def _extract_uploads(body: dict[str, Any]) -> list[tuple[str, tuple[str, bytes, str]]]:
@@ -185,14 +346,16 @@ def _extract_uploads(body: dict[str, Any]) -> list[tuple[str, tuple[str, bytes, 
 def build_runtime_registry() -> ToolRegistry:
     registry = build_default_registry()
     if os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower() == "http":
+        from .m3_m4_tooling import EXCLUDED_M3_M4_TOOL_NAMES
+
         selected = {
             item.strip().lower()
             for item in os.getenv("YUNPAI_HTTP_MODULES", "m0,m1,m2,m3,m4,m5").split(",")
             if item.strip()
         }
-        urls = {
-            module: os.getenv(f"{module.upper()}_URL", registry.tools_for(module)[0].base_url if registry.tools_for(module) else "")
-            for module in selected
-        }
-        registry.bind_http({module: url for module, url in urls.items() if url})
+        registry.bind_http(
+            _module_urls(registry, selected),
+            headers_by_module=_module_auth_headers(selected),
+            tool_names=set(registry.specs) - set(EXCLUDED_M3_M4_TOOL_NAMES),
+        )
     return registry

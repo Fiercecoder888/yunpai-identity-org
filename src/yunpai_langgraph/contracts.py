@@ -18,6 +18,7 @@ class ToolSpec:
     method: str = "POST"
     path: str = ""
     timeout_s: float = 60.0
+    required_headers: tuple[str, ...] = field(default_factory=tuple)
     tool_type: str = "tool"
     agent_endpoints: dict[str, Any] = field(default_factory=dict)
     tags: tuple[str, ...] = field(default_factory=tuple)

@@ -7,7 +7,7 @@
 ## 已实现
 
 - 原源码 M0-M5 的 114 个 Tool 合同全部注册到总 Agent，并通过 MCP 暴露。
-- 七个主链工具提供本地确定性实现；其余工具在 HTTP 模式绑定原模块服务。
+- 七个主链工具提供本地确定性实现；M3 的 15 个、M4 的 24 个目标 Tool 默认具备 manifest HTTP Adapter，其中已有主链 handler 不被覆盖。
 - LangGraph 拓扑：`planner -> worker -> reviewer -> worker|END`。
 - M0 candidate、M1 低置信、M2 工程批准、M4 供应商缺口、M5 发布 Gate。
 - `run_id`/根 `task_id`、步骤、证据、审批和 ReAct trace。
@@ -53,7 +53,9 @@ LangGraph Studio/CLI 使用根目录 [langgraph.json](/Users/murkydoubloon45/Des
 
 ## 运行模式
 
-`YUNPAI_TOOL_TRANSPORT=local` 只绑定七个主链本地 handler，其他工具未绑定时失败关闭。生产连接设置 `YUNPAI_TOOL_TRANSPORT=http` 和 `M0_URL` 至 `M5_URL`；HTTP adapter 会按原 manifest 发送 query、JSON 或 multipart，并传播 TaskID 和租户。
+`YUNPAI_TOOL_TRANSPORT=local` 保留七个主链本地 handler，同时为 M3/M4 专用工具安装指向 `M3_URL`、`M4_URL` 的 HTTP Adapter；默认共 45 个 bound Tool。设置 `YUNPAI_TOOL_TRANSPORT=http` 后，M0-M5 其余已实现 Tool 也按 manifest 绑定外部服务。两个没有历史实现的 receiver Tool 始终保持未绑定。HTTP Adapter 按 manifest 发送 query、JSON 或 multipart，传播 TaskID、租户、幂等键、revision/checksum、trace 和操作者信息，并在发送前检查必需认证头。
+
+需要 Bearer 认证的 M3/M4 环境可设置 `M3_API_KEY`、`M4_API_KEY`，或通过 `M3_AUTHORIZATION`、`M4_AUTHORIZATION` 提供完整 Authorization 值。凭据只放运行环境，不写入 manifest 或仓库。
 
 规划模型配置见 [Qwen 意图与路由](/Users/murkydoubloon45/Desktop/yunpaigragh/docs/LLM_ROUTING.md)，设置 `QWEN_API_KEY` 后 Planner 会调用 GB10；未配置时自动使用确定性路由并明确记录 `not_configured`。
 

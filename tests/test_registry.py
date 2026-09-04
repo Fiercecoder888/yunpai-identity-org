@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from yunpai_langgraph.contracts import ToolSpec
-from yunpai_langgraph.registry import ToolRegistry, build_default_registry
+from yunpai_langgraph.m3_m4_tooling import M3_ADAPTER_TOOL_NAMES, M4_ADAPTER_TOOL_NAMES
+from yunpai_langgraph.registry import ToolRegistry, build_default_registry, build_runtime_registry
 
 
 EXPECTED = {"m0": 27, "m1": 17, "m2": 7, "m3": 17, "m4": 26, "m5": 20}
@@ -15,7 +16,12 @@ def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
     assert len(registry.specs) == 114
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
-    assert len(registry.handlers) == 7
+    assert len(registry.handlers) == 45
+    assert all(name in registry.handlers for name in M3_ADAPTER_TOOL_NAMES)
+    assert all(name in registry.handlers for name in M4_ADAPTER_TOOL_NAMES)
+    assert "receive_m3_material_demand" not in registry.handlers
+    assert "receive_m4_schedule_impact_proposal" not in registry.handlers
+    assert "import_m4_purchase_suggestions" not in registry.handlers
 
 
 def test_packaged_and_documented_manifests_are_identical():
@@ -28,7 +34,7 @@ def test_packaged_and_documented_manifests_are_identical():
 def test_extracted_manifests_match_recorded_source_hashes():
     provenance = json.loads(Path("registry/SOURCE_PROVENANCE.json").read_text())
     for module, expected in provenance["manifests"].items():
-        content = Path(f"registry/tool-manifests/{module}.json").read_bytes()
+        content = Path(f"registry/tool-manifests/{module}.json").read_bytes().replace(b"\r\n", b"\n")
         assert sha256(content).hexdigest() == expected
 
 
@@ -54,4 +60,18 @@ def test_catalog_reports_bound_state():
     registry = build_default_registry()
     catalog = {item["name"]: item for item in registry.catalog()}
     assert catalog["solve_scheduling"]["bound"] is True
-    assert catalog["list_m4_tracking"]["bound"] is False
+    assert catalog["list_m4_tracking"]["bound"] is True
+    assert catalog["receive_m4_schedule_impact_proposal"]["bound"] is False
+    assert catalog["query_m4_material_supply_snapshot"]["http"]["required_headers"] == [
+        "Authorization",
+        "X-Yunpai-Task-ID",
+        "Idempotency-Key",
+    ]
+
+
+def test_full_http_runtime_keeps_missing_receivers_unbound(monkeypatch):
+    monkeypatch.setenv("YUNPAI_TOOL_TRANSPORT", "http")
+    registry = build_runtime_registry()
+    assert len(registry.handlers) == 112
+    assert "receive_m3_material_demand" not in registry.handlers
+    assert "receive_m4_schedule_impact_proposal" not in registry.handlers

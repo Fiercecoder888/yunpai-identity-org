@@ -24,6 +24,8 @@ M1_URL=http://m1:8080
 M2_URL=http://m2:8765
 M3_URL=http://m3:8000
 M4_URL=http://m4:8000
+M3_API_KEY=
+M4_API_KEY=
 M5_URL=http://m5-api:8000
 ```
 
@@ -33,10 +35,12 @@ M5_URL=http://m5-api:8000
 2. 替换并 URL 编码 `{path_parameter}`。
 3. GET/DELETE 使用 query；普通写请求使用 JSON。
 4. `content_b64` 文件对象转换为 multipart。
-5. 传播 `X-Yunpai-Task-ID`、`X-Yunpai-Tenant-ID` 和 `Idempotency-Key`。
-6. 使用工具自有 timeout，校验响应 JSON Schema。
+5. 传播 `X-Yunpai-Task-ID`、`X-Yunpai-Tenant-ID`、`Idempotency-Key`、trace、revision/checksum、来源和操作者信息。
+6. 按 manifest 检查 `Authorization` 等必需请求头，缺失时在发出 HTTP 请求前失败关闭。
+7. 将超时、连接失败、HTTP 4xx/5xx 和非 JSON 响应映射为稳定的 Tool HTTP 错误。
+8. 使用工具自有 timeout，并对响应再次执行输出 JSON Schema 校验。
 
-认证头通过 `headers_by_module` 注入；密钥不写入 manifest。
+认证头可通过 `headers_by_module`、调用 context 或模块环境变量注入；密钥不写入 manifest。默认 registry 保留七个本地主链 handler，并补齐 M3 15 个、M4 24 个目标工具的 Adapter，总计 45 个 bound Tool；`receive_m3_material_demand` 和 `receive_m4_schedule_impact_proposal` 因没有可迁移实现而保持未绑定。
 
 ## MCP
 
