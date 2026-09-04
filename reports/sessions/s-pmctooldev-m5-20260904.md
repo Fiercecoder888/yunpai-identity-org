@@ -83,3 +83,9 @@
   - sqlite 回读：六类 snapshot、plan status/lifecycle audit、dispatch(pending)、execution events
 - 阻塞/说明：无新阻塞。39093 仅转发 /api/*（/tools 404 属代理范围预期，M5 绑定经 9001 /tools?module=m5 验证）。dev/main 未推送（等待集成负责人）。
 - 证据：远端 origin/pmctooldev（61382f2）、GB10 release 目录与 sqlite、本报告、IMPLEMENTATION_NOTES。
+
+### 2026-09-04（Round 4 收尾确认）
+
+- 实际修改：无代码变更；仅最终一致性核验。
+- 验证：worktree(pmctooldev-merge) 全量 pytest **201 passed / exit 0**；registry 114 / m5 20 / m5 bound 18 / 排除 2 未绑定 / skills 8 / pmc 13 / lifecycle 7；origin/dev 最新 a3384379 已被 HEAD 包含。
+- 状态：本分支交付完毕，等待集成负责人合入 dev。
