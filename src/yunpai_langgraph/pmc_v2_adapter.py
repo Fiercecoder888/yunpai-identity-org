@@ -213,6 +213,21 @@ def run_pmc_v2(payload: dict[str, Any]) -> dict[str, Any]:
         "summary_metrics": wip["summary_metrics"],
         "wip_source_ref": wip["source_ref"],
     })
+    # PMC P1：目标驱动指标（on_time/tardiness/资源负载），纯计算、不影响求解结果。
+    try:
+        from .pmc_metrics import compute_order_metrics, compute_resource_load
+
+        order_metrics = compute_order_metrics(enriched, bundle["order_snapshots"])
+        load_metrics = compute_resource_load(intervals, makespan_minutes=makespan if makespan is not None else 0)
+        schedule["metrics"].update({
+            "on_time_rate": order_metrics["on_time_rate"],
+            "total_tardiness_minutes": order_metrics["total_tardiness_minutes"],
+            "tardiness_orders": order_metrics["tardiness_orders"],
+            "resource_load_minutes": load_metrics["total_busy_minutes"],
+            "resource_load_by_resource": load_metrics["load_by_resource"],
+        })
+    except Exception:  # 指标计算失败不吞求解结果（metrics 缺失时前端显示 -）
+        pass
     result = {"success": not blocks, "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": schedule, "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": digest, "algorithm_version": "pmc-v2-frozen-20260902", "input_package": {"order_snapshots": bundle["order_snapshots"], "routes": bundle["routes"], "resource_snapshot": bundle["resource_snapshot"], "calendar_snapshot": bundle["calendar_snapshot"], "supply_snapshot": bundle["supply_snapshot"], "constraint_snapshot": bundle["constraint_snapshot"]}, "validator": schedule["validation_report"], "blocks": blocks, "wip": bundle["supply_snapshot"].get("entries", []), "wip_pmc": wip}, "errors": [{"code": "BLOCKED_INPUT", "message": b.get("reason", "") , "details": [b]} for b in blocks], "trace_id": f"m5:pmc-v2:{digest[:12]}", "evidence": [{"module": "m5", "source_ref": "pmc_v2_frozen", "evidence_ref": "pmc-v2-frozen-20260902", "detail": "WIP/工时/产能/换型/日历约束求解"}, {"module": "m5", "source_ref": "wip-pmc-reuse-20260901", "evidence_ref": "wip-pmc-reuse-20260901", "detail": "工位状态段、工位间 WIP、人工利用率投影"}]}
     # PMC P0 计划持久化（可选）：提供 plan_store_db 时把本次求解写为 draft，
     # 回填持久 plan_version 与 solver_hash；不改变默认 local 求解行为。
