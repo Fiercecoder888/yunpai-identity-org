@@ -15,8 +15,9 @@
 | 测试矩阵（strict/tool binding/skill ops/http+metrics/lifecycle tools） | 完成 | `b437c32` |
 | solve 落库幂等（registry 真实入口 replay/conflict） | 完成 | `a7a89b6` |
 | session 报告 | 完成 | `27fac5f` |
+| 服务端生命周期守卫（pressure_only/validation-failed 不可 release）＋ ingest 只建快照不求解 | 完成 | 待提交 |
 
-本地回归：**103 passed**（原 60 passed 基线全部保留并按新合同等价升级；新增 43 项 M5 测试；最近一轮又补 solve 落库幂等 4 项）。
+本地回归：**105 passed**（原 60 passed 基线全部保留并按新合同等价升级；新增 45 项 M5 测试，含 pressure_only/validation-failed 不可 release 负向、solve 落库幂等等）。
 
 Registry 数量实测：工具总数 **114**、M5 manifest **20**、Skill **8**；M5 已绑定 **18**（17 新增 + solve_scheduling），排除工具 `report_workload`/`bind_worker_to_order` 保持未绑定且不在任何 Skill。
 
@@ -34,7 +35,7 @@ Registry 数量实测：工具总数 **114**、M5 manifest **20**、Skill **8**�
 - plan 表：plan_version/lifecycle_status/parent/input_hash/solver_hash/algorithm_version/validation/bundle/schedule/released_at。
 - idempotency：同键同输入重放；save 已 released 计划 → `PLAN_PROTECTED`。
 - scenario head CAS：`set_head(expected_revision=...)`，冲突 `HEAD_CONFLICT`。
-- lifecycle：`draft→approved→released→dispatched→execution` 相邻迁移 + `m5_lifecycle` 审计日志。
+- lifecycle：`draft→approved→released→dispatched→execution` 相邻迁移 + `m5_lifecycle` 审计日志；仅 production 且 validation report pass 可 release/dispatch/execution，pressure_only/preview → `PURPOSE_NOT_RELEASABLE`。
 - 追加：dispatch（pending durable）、execution events（幂等）、department messages（pending_approval→approved→outbox）、knowledge、procurement proposals。
 
 ## 4. 17 个本地 handler（m5_tools.py，registry 绑定已验证）

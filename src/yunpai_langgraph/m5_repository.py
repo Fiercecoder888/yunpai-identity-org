@@ -481,7 +481,14 @@ class M5Repository:
     def transition(self, plan_version: str, to_status: str, *, gate: str,
                    actor: str = "", task_id: str = "", trace_id: str = "",
                    revision: str = "", expected_from: str | None = None) -> dict[str, Any]:
-        """Apply one lifecycle transition with legality + revision checks."""
+        """Apply one lifecycle transition with legality + revision checks.
+
+        Taskbook Task 3 guards:
+        - pressure_only/preview plans can never be released or dispatched
+          (they are diagnostic-only identities).
+        - a validation-failed draft can be approved (gate review), but cannot
+          be released until the validation report passes.
+        """
         if to_status not in LIFECYCLE_ORDER:
             raise M5RepositoryError("INVALID_STATUS", f"未知生命周期状态 {to_status}")
         plan = self.get_plan(plan_version)
@@ -496,6 +503,14 @@ class M5Repository:
         if expected_from is not None and from_status != expected_from:
             raise M5RepositoryError("STALE_REVISION",
                                     f"计划 {plan_version} 当前状态为 {from_status}，期望 {expected_from}")
+        if plan.get("scenario_purpose") != "production" and to_status in {"released", "dispatched", "execution"}:
+            raise M5RepositoryError("PURPOSE_NOT_RELEASABLE",
+                                    f"pressure_only/preview 计划 {plan_version} 不能 {to_status}")
+        if to_status == "released":
+            report = plan.get("validation_report") or {}
+            if report.get("status") != "pass":
+                raise M5RepositoryError("VALIDATION_FAILED",
+                                        f"计划 {plan_version} validation 未通过，不能 release")
         with self._lock, self._connect() as db:
             if to_status == "released":
                 db.execute("UPDATE m5_plans SET lifecycle_status=?, released_at=?, updated_at=? WHERE plan_version=?",

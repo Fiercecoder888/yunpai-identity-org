@@ -75,17 +75,20 @@ async def m5_ingest_snapshot(payload: dict[str, Any], ctx: dict[str, Any]) -> di
         return _blocked_result("缺少 scenario_id", _trace(ctx, "m5-ingest"),
                                code="MISSING_SCENARIO")
     repo = _repo(ctx)
-    # production/pressure_only ingestion: build and validate the six-kind bundle
-    # strictly, then persist (replace_existing honored by the repository).
+    # production/pressure_only ingestion: build and validate the six-kind
+    # bundle (facts only), then persist.  Full solving is NOT run here: a
+    # feasible window is a solve-time concern, while snapshot fact integrity
+    # is the ingest-time gate.
+    from .pmc_v2_adapter import build_bundle
+    from .pmc_v2_snapshots import validate_bundle
     try:
         request = dict(payload)
         request["scenario_purpose"] = _purpose_of(payload)
-        # guard against missing production facts before touching the store
-        result = run_pmc_v2(request)
+        bundle = build_bundle(request)
+        validate_bundle(bundle)
     except (PmcError, M5RepositoryError) as exc:
         return _blocked_result(str(getattr(exc, "message", exc)), _trace(ctx, "m5-ingest"),
                                details=[{"snapshot_kind": "six-class-bundle"}])
-    bundle = result["data"]["input_package"]
     records = repo.store_snapshots(
         scenario_id, bundle,
         tenant_id=_tenant(ctx), task_id=_task(ctx),
@@ -101,7 +104,9 @@ async def m5_ingest_snapshot(payload: dict[str, Any], ctx: dict[str, Any]) -> di
         "source_observed_at": payload.get("source_observed_at") or {},
         "replace_existing": bool(payload.get("replace_existing", True)),
         "counts": counts,
-        "readiness": result["data"]["validator"],
+        "readiness": {"status": "snapshots_stored",
+                      "snapshot_kinds": sorted(counts),
+                      "checksummed": True},
     }
     return {"success": True, "data": data, "errors": [],
             "trace_id": _trace(ctx, "m5-ingest"),

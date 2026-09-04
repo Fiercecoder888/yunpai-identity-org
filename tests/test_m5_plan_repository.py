@@ -96,7 +96,7 @@ def test_same_idempotency_same_input_replays_same_plan(repo):
                    task_id="k", lifecycle_status="draft", parent_plan_version=None,
                    input_hash=result["data"]["input_hash"], solver_hash="s1",
                    algorithm_version="a", scenario_purpose="production",
-                   validation_report={}, bundle=bundle, schedule={},
+                   validation_report={"status":"pass","errors":[]}, bundle=bundle, schedule={},
                    idempotency_key="KEY-REPLAY")
     result2 = run_pmc_v2(payload)  # identical canonical input
     v2 = f"plan-{payload['scenario_id']}-{result2['data']['input_hash'][:10]}"
@@ -105,7 +105,7 @@ def test_same_idempotency_same_input_replays_same_plan(repo):
                    task_id="k", lifecycle_status="draft", parent_plan_version=None,
                    input_hash=result2["data"]["input_hash"], solver_hash="s1",
                    algorithm_version="a", scenario_purpose="production",
-                   validation_report={}, bundle=bundle, schedule={},
+                   validation_report={"status":"pass","errors":[]}, bundle=bundle, schedule={},
                    idempotency_key="KEY-REPLAY")
     hit = repo.find_by_idempotency("SC-REPO", "KEY-REPLAY")
     assert hit["plan_version"] == v1
@@ -119,7 +119,7 @@ def test_same_idempotency_different_input_conflicts(repo):
                    lifecycle_status="draft", parent_plan_version=None,
                    input_hash=result["data"]["input_hash"], solver_hash="s1",
                    algorithm_version="a", scenario_purpose="production",
-                   validation_report={}, bundle=bundle, schedule={},
+                   validation_report={"status":"pass","errors":[]}, bundle=bundle, schedule={},
                    idempotency_key="KEY-CONFLICT")
     changed = _strict_payload()
     changed["orders"][0]["quantity"] = 5
@@ -146,14 +146,14 @@ def test_released_plan_cannot_be_overwritten(repo):
                    task_id="k", lifecycle_status="draft", parent_plan_version=None,
                    input_hash=result["data"]["input_hash"], solver_hash="s1",
                    algorithm_version="a", scenario_purpose="production",
-                   validation_report={}, bundle=bundle, schedule={})
+                   validation_report={"status":"pass","errors":[]}, bundle=bundle, schedule={})
     repo.transition(version, "approved", gate="review", actor="zhb")
     repo.transition(version, "released", gate="release", actor="zhb")
     with pytest.raises(M5RepositoryError) as exc:
         repo.save_plan(plan_version=version, scenario_id="SC-REPO", tenant_id="t",
                        task_id="k", lifecycle_status="draft", parent_plan_version=None,
                        input_hash="different", solver_hash="s2", algorithm_version="a",
-                       scenario_purpose="production", validation_report={},
+                       scenario_purpose="production", validation_report={"status":"pass","errors":[]},
                        bundle=bundle, schedule={})
     assert exc.value.code == "PLAN_PROTECTED"
 
@@ -166,7 +166,7 @@ def test_lifecycle_requires_adjacent_transition(repo):
                    task_id="k", lifecycle_status="draft", parent_plan_version=None,
                    input_hash=result["data"]["input_hash"], solver_hash="s1",
                    algorithm_version="a", scenario_purpose="production",
-                   validation_report={}, bundle=bundle, schedule={})
+                   validation_report={"status":"pass","errors":[]}, bundle=bundle, schedule={})
     repo.transition(version, "approved", gate="review", actor="zhb")
     with pytest.raises(M5RepositoryError) as exc:
         repo.transition(version, "execution", gate="mes", actor="zhb")
@@ -178,3 +178,35 @@ def test_lifecycle_requires_adjacent_transition(repo):
     events = repo.lifecycle_events(version)
     assert [e["to_status"] for e in events] == ["approved", "released", "dispatched", "execution"]
     assert all(e["actor"] == "zhb" for e in events)
+
+
+def test_pressure_only_plan_cannot_release_or_dispatch(repo):
+    payload = _strict_payload()
+    result, bundle, _ = _solved(repo, payload)
+    version = f"plan-pressure-{result['data']['input_hash'][:10]}"
+    repo.save_plan(plan_version=version, scenario_id="SC-REPO", tenant_id="t",
+                   task_id="k", lifecycle_status="draft", parent_plan_version=None,
+                   input_hash=result["data"]["input_hash"], solver_hash="s1",
+                   algorithm_version="a", scenario_purpose="pressure_only",
+                   validation_report={"status": "pass", "errors": []},
+                   bundle=bundle, schedule={})
+    repo.transition(version, "approved", gate="review", actor="zhb")
+    with pytest.raises(M5RepositoryError) as exc:
+        repo.transition(version, "released", gate="release", actor="zhb")
+    assert exc.value.code == "PURPOSE_NOT_RELEASABLE"
+
+
+def test_validation_failed_plan_cannot_release(repo):
+    payload = _strict_payload()
+    result, bundle, _ = _solved(repo, payload)
+    version = f"plan-fail-{result['data']['input_hash'][:10]}"
+    repo.save_plan(plan_version=version, scenario_id="SC-REPO", tenant_id="t",
+                   task_id="k", lifecycle_status="draft", parent_plan_version=None,
+                   input_hash=result["data"]["input_hash"], solver_hash="s1",
+                   algorithm_version="a", scenario_purpose="production",
+                   validation_report={"status": "fail", "errors": [{"reason_code": "SUPPLY_NOT_READY"}]},
+                   bundle=bundle, schedule={})
+    repo.transition(version, "approved", gate="review", actor="zhb")
+    with pytest.raises(M5RepositoryError) as exc:
+        repo.transition(version, "released", gate="release", actor="zhb")
+    assert exc.value.code == "VALIDATION_FAILED"
