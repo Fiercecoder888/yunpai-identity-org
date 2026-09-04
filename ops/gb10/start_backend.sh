@@ -5,6 +5,7 @@ cd "$ROOT"
 mkdir -p runtime logs
 export PYTHONPATH="$ROOT/src"
 export YUNPAI_RUN_DB="${YUNPAI_RUN_DB:-$ROOT/runtime/yunpai-runs.sqlite}"
+export YUNPAI_M5_DB="${YUNPAI_M5_DB:-$ROOT/runtime/yunpai-m5.sqlite}"
 export YUNPAI_TOOL_TRANSPORT="${YUNPAI_TOOL_TRANSPORT:-http}"
 export YUNPAI_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m1,m2}"
 export M1_URL="${M1_URL:-http://127.0.0.1:8080}"
