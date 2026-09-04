@@ -27,6 +27,7 @@
 
 | 证据 ID | 时间 | 方法或命令 | 退出状态 | 版本或文件哈希 | 结果摘要 | 证据位置 | 有效期 |
 |---|---|---|---|---|---|---|---|
+| E-GB10-QWEN-001 | 2026-09-04 22:31 +08:00 | 通过 GB10 SSH 使用服务器托管凭据调用三种 `GET /v1/models`；调用 `POST /v1/chat/completions`；只读核对 vLLM 进程参数 | SSH、HTTP 和 JSON 校验全部退出 0 | `dev` / `974eca0`；模型 `qwen3.6-35b-a3b-fp8-gpu0-200k` | `127.0.0.1:18085`、`192.168.110.19:18085` 和 `gb10:18085` 均鉴权成功；chat 返回 `GB10-QWEN-OK`；实际上下文 65536；未记录 API Key | `工作记忆.md`、GB10 当前 vLLM 运行态 | 2026-09-11 |
 | E-SESSION-001 | 2026-09-03 | 初始化脚本 `--validate`；人工审阅规则文件 | 0 | `dev` / `4b9c1aa1` | 治理账本有效，规则与 claim 模板已落盘 | `.project-to-act/`、`docs/SESSION_COLLABORATION_RULES.md`、`.coordination/claims/README.md` | 2026-12-31 |
 | E-REGRESSION-002 | 2026-09-03 18:09 | `npm run typecheck`; `npm run build`; `npm test -- --run --maxWorkers=1 --no-file-parallelism`; root `pytest -q` | 前三项 0；root pytest 1（47 passed, 1 EOL hash mismatch） | `dev` / `24da1d70`；Git blob manifest hash 与 provenance 一致 | 前端回归通过；根测试唯一失败为 Windows `core.autocrlf` 工作树换行误报，非代码/运行时错误 | `reports/sessions/s-integration-final-20260903.md`、`reports/s-progress-restore-20260903/REPORT.md` | 2026-12-31 |
 | E-INTEGRATION-002 | 2026-09-03 18:10 | Git merge/cherry-pick；线上浏览器控制 API 点击、布局、独立滚动；`/api/health`；静态资源请求 | Git/浏览器/HTTP 均成功；控制台 error/warning 0 | `dev` / `24da1d70`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；release `20260903173855` | 后端与右栏提交完整集成；上传菜单、右栏满高/滚动、移动抽屉和问答关键路径符合预期 | `reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张截图、线上 URL | 2026-12-31 |
@@ -48,6 +49,7 @@
 
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
 
+- 2026-09-04 22:31 +08:00：实测 GB10 Qwen 35B 的 OpenAI-compatible models/chat 调用，并核对 18085 鉴权入口、18095 vLLM 后端、模型名和 65536 上下文；证据 `E-GB10-QWEN-001`；结论：三种地址均可用，chat 返回预期正文，调用方法已脱敏写入 `工作记忆.md`。
 - 2026-09-03：检查治理文件、分支策略、claim 模板和配置校验；证据 `E-SESSION-001`；结论：可开始并行 session，业务验收仍按各任务单独记录。
 - 2026-09-03：检查集成提交、前端顺序回归、线上 `39092` 多视口点击/滚动、静态资源和 `/api/health`；证据 `E-INTEGRATION-002`、`E-REGRESSION-002`；结论：关键路径通过；CLI Playwright/OCR 与 Windows provenance 换行测试缺口已如实保留。
 - 2026-09-03：确认 `dev` 已推送到 `neworigin/dev`，账本校验通过，旧 session claim/发布锁已释放；证据 `E-INTEGRATION-003`；结论：本次集成交付完成，后续只需按独立任务处理环境性 EOL/工具缺口。
