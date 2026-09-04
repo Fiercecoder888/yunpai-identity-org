@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from openpyxl import Workbook
 
-from yunpai_langgraph.business_catalog import catalog_summary, ingest_tree
+from yunpai_langgraph.business_catalog import (
+    catalog_summary,
+    ingest_tree,
+    list_candidates,
+    transition_candidate_review,
+)
 
 
 def _order_book(path) -> None:
@@ -148,3 +154,48 @@ def _bom_with_only_name() -> bytes:
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def test_candidate_review_state_machine_records_actor(tmp_path):
+    root = tmp_path / "BOM审批"
+    root.mkdir()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["物料编码", "材料名称", "用量"])
+    sheet.append(["YA.A.01.001", "插头料", 2])
+    workbook.save(root / "bom.xlsx")
+    db = tmp_path / "catalog.sqlite"
+    ingest_tree(root, db, parse_xlsx=True)
+    candidates = list_candidates(db)
+    assert len(candidates) == 1
+    document_id = candidates[0]["document_id"]
+    assert candidates[0]["review_status"] == "candidate"
+
+    approved = transition_candidate_review(db, document_id, decision="approve", actor="zhb", entity_key="product:YA.A.01.001", entity_version="v1")
+    assert approved["from_status"] == "candidate"
+    assert approved["to_status"] == "approved"
+    assert approved["reviewer"] == "zhb"
+    listed = list_candidates(db, review_status="approved")[0]
+    assert listed["entity_version"] == "v1"
+    assert listed["reviewer"] == "zhb"
+    assert listed["reviewed_at"]
+
+    with pytest.raises(ValueError):
+        transition_candidate_review(db, document_id, decision="approve", actor="zhb")
+
+
+def test_candidate_review_rejects_unknown_and_bad_decision(tmp_path):
+    db = tmp_path / "catalog.sqlite"
+    with pytest.raises(ValueError):
+        transition_candidate_review(db, "doc-nope", decision="approve", actor="zhb")
+    root = tmp_path / "bad"
+    root.mkdir()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["物料编码", "材料名称", "用量"])
+    sheet.append(["YA.A.01.001", "插头料", 2])
+    workbook.save(root / "bom.xlsx")
+    ingest_tree(root, db, parse_xlsx=True)
+    document_id = list_candidates(db)[0]["document_id"]
+    with pytest.raises(ValueError):
+        transition_candidate_review(db, document_id, decision="nonsense")

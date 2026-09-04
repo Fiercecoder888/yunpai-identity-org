@@ -56,16 +56,34 @@ async def m0_import(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, A
         "id": batch_id, "batch_id": batch_id,
         "status": "awaiting_review" if candidates or quarantined else "failed",
         "candidates": candidates, "quarantined": quarantined,
-        "evidence": [_evidence("m0", "import", f"{len(candidates)} candidates")],
+        # 本地 fixture 语义：候选不是 M0 canonical；生产发布需 HTTP transport + 真实 M0 回读。
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "readback": {"available": False, "detail": "本地 fixture 只登记候选，未发布 canonical；需要 YUNPAI_TOOL_TRANSPORT=http 与真实 M0 base URL/审核授权"},
+        "evidence": [_evidence("m0", "import", f"{len(candidates)} candidates (local fixture, non-canonical)")],
     }
 
 
 async def m0_commit(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    batch_id = str(payload.get("batch_id") or "")
     return {
-        "status": "committed", "batch_id": payload["batch_id"],
-        "master_counts": {"published_batches": 1},
-        "revision": "m0-v1", "ledger_id": f"ledger-{ctx['task_id'][-10:]}",
-        "evidence": [_evidence("m0", payload["batch_id"], "人工批准后的 canonical 发布")],
+        # 任务书 §1.4：data_import_commit=committed 只有在 canonical entity/version、
+        # ledger、outbox 可回读时才成立。本地 fixture 无真实 M0 表，故只记录意图，
+        # 状态显式标记 fixture_recorded，不得表述为已发布 canonical。
+        "status": "fixture_recorded",
+        "batch_id": batch_id,
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "revision": "",
+        "ledger_id": "",
+        "master_counts": {},
+        "readback": {
+            "available": False,
+            "detail": "local transport 无 M0 canonical 表与回读接口；真实发布需部署方提供 M0 URL、PostgreSQL schema/权限、审核授权和写入回读接口",
+        },
+        "evidence": [_evidence("m0", batch_id or "fixture", "本地 fixture 记录发布意图；未发布 canonical、无 ledger/outbox 回读，需人工 Gate 后才可对接真实 M0")],
     }
 
 

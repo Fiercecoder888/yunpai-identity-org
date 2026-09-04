@@ -767,3 +767,71 @@ def catalog_summary(db_path: str | Path) -> dict[str, Any]:
             "by_kind": db.execute("SELECT file_kind, count(*) FROM source_files GROUP BY file_kind ORDER BY file_kind").fetchall(),
             "by_review_status": db.execute("SELECT review_status, count(*) FROM document_candidates GROUP BY review_status ORDER BY review_status").fetchall(),
         }
+
+
+# 候选审核状态机（任务书 §3.4：identified -> candidate -> needs_review -> approved/rejected）。
+REVIEW_STATE_MACHINE = {
+    "identified": {"candidate", "needs_review", "rejected"},
+    "candidate": {"needs_review", "approved", "rejected"},
+    "needs_review": {"approved", "rejected", "candidate"},
+    "approved": {"rejected"},
+    "rejected": {"candidate"},
+}
+
+
+def transition_candidate_review(db_path: str | Path, document_id: str, *, decision: str, actor: str = "operator", entity_key: str = "", entity_version: str = "") -> dict[str, Any]:
+    """迁移单个候选的审核状态并记录审核人/时间/entity 标识。
+
+    decision: approve | reject | back_to_candidate | mark_needs_review
+    返回 {document_id, from_status, to_status, reviewer, reviewed_at}；
+    非法迁移或未知候选抛 ValueError。
+    """
+    transition_map = {
+        "approve": "approved",
+        "reject": "rejected",
+        "back_to_candidate": "candidate",
+        "mark_needs_review": "needs_review",
+    }
+    target = transition_map.get(decision)
+    if target is None:
+        raise ValueError(f"不支持的审核决策: {decision}")
+    init_catalog(db_path)
+    with sqlite3.connect(db_path) as db:
+        row = db.execute("SELECT review_status FROM document_candidates WHERE document_id=?", (document_id,)).fetchone()
+        if row is None:
+            raise ValueError(f"候选不存在: {document_id}")
+        current = row[0]
+        allowed = REVIEW_STATE_MACHINE.get(current, set())
+        if target not in allowed:
+            raise ValueError(f"非法候选状态迁移: {current} -> {target}")
+        reviewed_at = utc_now()
+        db.execute(
+            "UPDATE document_candidates SET review_status=?, reviewer=?, reviewed_at=?, entity_key=COALESCE(?, entity_key), entity_version=COALESCE(?, entity_version) WHERE document_id=?",
+            (target, actor, reviewed_at, entity_key or None, entity_version or None, document_id),
+        )
+        return {
+            "document_id": document_id,
+            "from_status": current,
+            "to_status": target,
+            "decision": decision,
+            "reviewer": actor,
+            "reviewed_at": reviewed_at,
+        }
+
+
+def list_candidates(db_path: str | Path, *, review_status: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    """列出候选（供审核队列回读），绝不下钻 canonical 语义。"""
+    with sqlite3.connect(db_path) as db:
+        db.row_factory = sqlite3.Row
+        sql = """SELECT document_id, file_id, document_type, document_subtype, confidence, review_status,
+                        parser_version, classification_confidence, sensitivity_classification,
+                        reviewer, reviewed_at, entity_key, entity_version, missing_fields_json
+                 FROM document_candidates"""
+        params: list[Any] = []
+        if review_status:
+            sql += " WHERE review_status=?"
+            params.append(review_status)
+        sql += " ORDER BY document_id LIMIT ?"
+        params.append(max(1, min(limit, 1000)))
+        rows = db.execute(sql, params).fetchall()
+    return [dict(row) for row in rows]
