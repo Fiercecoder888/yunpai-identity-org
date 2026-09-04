@@ -68,3 +68,25 @@ def test_streaming_adapter_satisfies_registered_m5_output_contract():
     assert result["data"]["tracking_task_id"] == "TASK-PMCV2-REGISTRY"
     assert result["data"]["schedule"]["execution_model"] == "STREAMING_FLOW"
     assert result["data"]["schedule"]["production_blocked"] is True
+
+
+def test_production_request_without_v2_facts_is_blocked_not_legacy():
+    from yunpai_langgraph.workers import m5_schedule
+
+    payload = {
+        "scenario_purpose": "production",
+        "production_use_allowed": True,
+        "orders": [{"order_id": "PO-1", "product_id": "P-1", "quantity": 5}],
+        "routing_steps": [{"product_id": "P-1", "operation_id": "OP-1", "sequence": 1, "processing_minutes": 1, "eligible_resources": [{"resource_id": "R-1", "processing_minutes": 1}]}],
+        "resources": [{"resource_id": "R-1", "status": "available"}],
+        "idempotency_key": "ik-prod-block",
+    }
+    result = __import__("asyncio").run(m5_schedule(payload, {"task_id": "TASK-PROD-V2"}))
+    assert result["success"] is False
+    assert result["errors"][0]["code"] == "LEGACY_PREVIEW_ONLY"
+    assert result["data"]["production_blocked"] is True
+    # 同请求显式 preview 标记 -> 允许走 legacy 验证路径。
+    payload["legacy_preview"] = True
+    result = __import__("asyncio").run(m5_schedule(payload, {"task_id": "TASK-PREVIEW"}))
+    assert result["success"] is True
+    assert result["data"]["lifecycle_status"] == "draft"
