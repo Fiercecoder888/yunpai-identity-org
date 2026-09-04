@@ -1,10 +1,9 @@
 """order_semantics 语义补充层 + 真实订单结构同构复现测试。
 
-真实 GB10 样本（日本光纤订单2024-12-20.xlsx，SHA-256
-9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341）含客户
-数据，不能进入仓库；本文件用**同构合成工作簿**（相同的单 Sheet / 块事实 /
-表头行 / 明细行 / 合计行 / 合并备注区布局，数值与名称全部替换为虚构值）来
-固化解析语义。真实文件的本地重放证据单独记录在 run 目录（仓库外）。
+真实 GB10 样本含客户数据，不能进入仓库（原始文件与重放证据保存在仓库外的
+run 目录）；本文件用**同构合成工作簿**（相同的单 Sheet / 块事实 / 表头行 /
+明细行 / 合计行 / 合并备注区布局，数值与名称全部替换为虚构值）来固化解析
+语义。真实文件的本地重放证据单独记录在 run 目录（仓库外）。
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ XLSX_SUFFIX = ".xlsx"
 
 
 def real_order_twin_bytes() -> bytes:
-    """复刻 日本光纤订单 布局：表头行 7、块事实 1-6、明细 8-9、合计 10、
+    """复刻真实订单同构布局：表头行 7、块事实 1-6、明细 8-9、合计 10、
     合并备注区 13（“付款流水…”文本行绝不能成为订单行）。
 
     列：产品图片|系统型号|名称/材质要求|规格|采购数量|销售价|装箱数量|件数|金额|
@@ -92,7 +91,7 @@ def inventory_like_bytes() -> bytes:
 
 def test_parser_produces_valid_header_lines_and_review_issues_for_real_layout():
     raw = real_order_twin_bytes()
-    document = parse_order_sheets("日本光纤订单-测试同构.xlsx", raw)
+    document = parse_order_sheets("订单-同构-回放.xlsx", raw)
     assert document["order_id"] == "WX20260905001"
     assert document["order_date"] == "2026-09-01"
     assert document["customer_name"] == "测试客户A"

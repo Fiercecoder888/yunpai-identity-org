@@ -237,21 +237,57 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
     This handler intentionally does NOT implement the full multi-format M1
     parsing the manifest describes (PDF/image/DOCX/CAD/archive + MinerU/
     Instructor extraction, TaskStore, review queue, knowledge projections).
-    It only understands JSON or a pre-parsed ``_fixture_document`` structure
-    for demo/local flows.  Any other content fails closed with an explicit
-    code so a fixture success is never mistaken for a complete M1 parse; in
-    production transport (``YUNPAI_TOOL_TRANSPORT=http``) this handler is
-    replaced by the dedicated M1 HTTP adapter pointing at the real service.
+    It understands JSON, a pre-parsed ``_fixture_document`` structure, and —
+    for XLSX/XLSM order spreadsheets — the deterministic order parser shared
+    with ``business_catalog``/M1 HTTP supplement (``order_semantics``).  All
+    other content fails closed with an explicit code so a fixture success is
+    never mistaken for a complete M1 parse; in production transport
+    (``YUNPAI_TOOL_TRANSPORT=http``) this handler is replaced by the dedicated
+    M1 HTTP adapter pointing at the real service.
     """
+    from .order_semantics import sniff_xlsx_bytes, workbook_parse_candidate
+
     filename, raw = _decode_file(payload["file"])
     fixture = payload.get("_fixture_document")
-    parsed_source = fixture if isinstance(fixture, dict) and fixture else _json_content(raw)
+    parsed_source: dict[str, Any] = {}
+    parser_meta: dict[str, Any] = {}
+    # 只按字节结构 + 表头/价格证据决定是否本地确定性解析 XLSX/XLSM，不依赖
+    # 文件名/路径/租户；解析器给出的证据（parser 版本、sheet/行/列坐标、
+    # 原值/归一化值、缺失字段）原样带出；非订单表格（库存/设备/无证据）仍失败关闭。
+    candidate = workbook_parse_candidate(filename, raw)
+    if candidate is not None:
+        parsed_source = candidate.get("document") or {}
+        parser_meta = {
+            "name": str(candidate.get("parser_name") or "order.parser.v2"),
+            "version": str(candidate.get("parser_version") or "order.parser.v2"),
+            "revision": str(candidate.get("parser_version") or "order.parser.v2"),
+        }
+    elif sniff_xlsx_bytes(raw):
+        # v2 无订单证据时，老式坐标模板（P6/X7/第 10 行起等固定布局）由坐标解析
+        # 兜底——同样只按内容，不伪造事实；无任何事实则失败关闭。
+        try:
+            from .order_workbook import parse_order_workbook
+
+            legacy = parse_order_workbook(filename, raw)
+            if legacy.get("order_id") or legacy.get("lines"):
+                parsed_source = legacy
+                parser_meta = {
+                    "name": "order.workbook.coordinates.v1",
+                    "version": "order.workbook.coordinates.v1",
+                    "revision": "order.workbook.coordinates.v1",
+                }
+        except Exception:
+            parsed_source = {}
+    if not parsed_source and isinstance(fixture, dict) and fixture:
+        parsed_source = fixture
+    if not parsed_source:
+        parsed_source = _json_content(raw)
     if not parsed_source:
         return {
             "task_id": f"m1-{ctx['task_id'][-10:]}",
             "status": "failed",
             "code": "LOCAL_FIXTURE_UNSUPPORTED_FORMAT",
-            "message": "本地 fixture handler 无法解析该文件（仅支持 JSON 或预解析结构，不冒充完整 M1 多格式解析）。生产解析请通过 M1_URL 调用真实 M1 服务。",
+            "message": "本地 fixture handler 无法解析该文件（仅支持 JSON、预解析结构或含订单结构证据的 XLSX/XLSM；不冒充完整 M1 多格式解析）。生产解析请通过 M1_URL 调用真实 M1 服务。",
             "provider": "local_fixture",
             "fixture": True,
             "document": None,
@@ -294,15 +330,33 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
             normalized["name_raw"] = normalized.get("product_name")
         normalized_lines.append(normalized)
     lines = normalized_lines
+    totals: dict[str, Any] = {}
+    total_quantity = parsed_source.get("total_quantity")
+    if total_quantity is None:
+        total_quantity = parsed_source.get("quantity")
+    if total_quantity is not None:
+        totals["quantity"] = total_quantity
+    if parsed_source.get("total_amount") is not None:
+        totals["amount"] = parsed_source.get("total_amount")
     document = {
         "schema_version": "m1.document.v2",
         "source": {"original_filename": filename, "sha256": sha256(raw).hexdigest()},
         "document_type": "order", "document_subtype": "customer_order",
-        "header": header, "lines": lines, "totals": {}, "field_meta": {},
+        "header": header, "lines": lines, "totals": totals, "field_meta": {},
         "validation_issues": [*source_issues, *({"code": "MISSING_FIELD", "message": f"缺少字段: {key}", "paths": [f"$.header.{key}"]} for key in missing)],
     }
+    field_evidence = parsed_source.get("field_evidence")
+    if isinstance(field_evidence, list) and field_evidence:
+        document["field_evidence"] = field_evidence
+    sheet_docs = parsed_source.get("sheet_docs")
+    if isinstance(sheet_docs, list) and sheet_docs:
+        document["sheet_docs"] = sheet_docs
+    if parser_meta:
+        document["parser_name"] = parser_meta["name"]
+        document["parser_version"] = parser_meta["version"]
     validation_issues = document["validation_issues"]
     needs_review = confidence < 0.8 or bool(validation_issues)
+    parser_detail = "order_semantics/" + parser_meta["version"] if parser_meta else "fixture"
     return {
         "task_id": f"m1-{ctx['task_id'][-10:]}", "status": "needs_review" if needs_review else "done",
         "processing_stage": "review" if needs_review else "complete",
@@ -311,9 +365,10 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
         "overall_confidence": confidence, "document": document,
         "extraction": {"order": header, "lines": lines},
         "order": header, "lines": lines, "missing": missing,
+        "parser": parser_meta or None,
         "provider": "local_fixture",
         "fixture": True,
-        "evidence": [_evidence("m1", filename, "m1.document.v2 字段证据（本地 fixture，非生产解析）")],
+        "evidence": [_evidence("m1", filename, f"m1.document.v2 字段证据（本地 fixture {parser_detail}，非生产解析）")],
     }
 
 

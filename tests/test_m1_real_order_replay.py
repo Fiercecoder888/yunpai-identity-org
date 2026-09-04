@@ -40,7 +40,7 @@ EXTERNAL_ORDER_GAP = {
         "document_type": "order",
         "document_subtype": "customer_purchase_order",
         "document_kind_label": "customer_purchase_order",
-        "source": {"original_filename": "日本光纤订单-测试同构.xlsx", "sha256": "9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341"},
+        "source": {"original_filename": "订单-同构-回放.xlsx", "sha256": "ab" * 32},
         "header": {
             "order_number": None, "order_id": None, "doc_date": None,
             "buyer": None, "seller": None, "title": "业务订单",
@@ -57,7 +57,7 @@ def _xlsx_payload() -> dict:
     raw = real_order_twin_bytes()
     return {
         "file": {
-            "filename": "日本光纤订单-测试同构.xlsx",
+            "filename": "订单-同构-回放.xlsx",
             "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "content_b64": base64.b64encode(raw).decode(),
         },
@@ -106,7 +106,7 @@ async def test_local_graph_replay_produces_order_rows_and_stops_at_review_gate()
         "workflow": "m1_m5_document_to_plan",
         "message": "请解析并校验这份采购备货订单",
         "attachments": [
-            {"kind": "order", "filename": "日本光纤订单-测试同构.xlsx", "content_b64": base64.b64encode(real_order_twin_bytes()).decode()},
+            {"kind": "order", "filename": "订单-同构-回放.xlsx", "content_b64": base64.b64encode(real_order_twin_bytes()).decode()},
         ],
     }
     state = await graph.run(new_state(request, tenant_id="replay-test"))

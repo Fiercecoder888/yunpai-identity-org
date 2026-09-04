@@ -35,15 +35,24 @@ SHA-256：`9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341`
   `order.semantics.2026.09.05`）：同一解析入口服务三处——business_catalog 深解析、
   本地 fixture 重放、M1 HTTP Adapter 对外部订单缺口的补充。
 - `m1_http_adapter.py`：`ingest_document` 收到“声明订单但 0 行/缺订单号”的终端
-  结果时，若上传为 XLSX 则附加 `semantic_supplement`（表头+行+坐标证据+SHA+
-  parser 版本+missing/review/conflicts），**保留外部原始 document**并强制
-  `needs_review=True`；无依据可补充时原样返回，绝不伪造。
+  结果时，按**字节结构**（XLSX magic/OOXML 路径，不依赖文件名）判定可尝试解析
+  则附加 `semantic_supplement`（表头+行+坐标证据+SHA+parser 版本+
+  missing/review/conflicts），**保留外部原始 document**并强制 `needs_review=True`；
+  无依据可补充（含库存表）时原样返回，绝不伪造。
 - `agents.py`：带 supplement 的 M1 review Gate 消息明确提示“外部结果与候选都保留，
   请人工复核”。
-- `orchestration_bridge.py`/`graph.py`：本地 fixture transport 的受控 workflow 用
-  同一 order_semantics 先出候选（原先 bridged 路径根本不会给 fixture 传
-  `_fixture_document`，导致本地重放 0 行）；worker 行输出补稳定 `line_id`
-  （`m1.document.v2` 合同要求）并保留行缺失标记。
+- `order_semantics.py`：`workbook_parse_candidate` 是唯一“订单候选”证据门——字节
+  结构 + 库存专属表头否决 + 表头块事实或价格信号，缺证据的表格（库存/设备/仅有
+  数量+名称）不产生订单候选；HTTP 补充、本地 fixture handler、business_catalog
+  三处共用同一解析入口。
+- `workers.py`：`ingest_document` 本地 handler 直接按字节结构用 `order_semantics`
+  确定性解析 XLSX/XLSM（不再依赖 graph/orchestration_bridge 预解析
+  `_fixture_document`，编排层只传文件）；v2 无证据时坐标模板在 Tool 内部兜底；
+  行输出补稳定 `line_id`，并带出 parser 版本、`field_evidence`、`sheet_docs`
+  与行缺失标记。
+- 输出合同：`ingest_document` manifest 保持开放 schema（含镜像/来源哈希账本），
+  `semantic_supplement` 字段语义由单测在真实调用上验证（保留外部结果、强制
+  review、坐标/SHA/parser 证据），未改动 manifest 来源账本。
 - `business_catalog.py`：order 深解析走共享语义入口；deep 解析时若库存/未分类/
   文档名表格结构实为订单（数量+单价/金额/订单号且无仓库/库位等库存专属表头）则
   改判 `order`——修正订单样本被识别成库存资料的误判（`workbook_looks_like_order`
@@ -93,11 +102,20 @@ SHA-256：`9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341`
 
 ## 3. 自动化证据
 
-- pytest（worktree `.venv`，python3.12）：`307 passed, 2 skipped`（退出 0）。
+- pytest（仓库 `.venv`，退出 0）：首回合 `307 passed, 2 skipped`；通用能力修订后
+  `321 passed, 2 skipped`（新增 `tests/test_m1_generic_parsing.py` 14 项：列顺序/
+  表头别名变体 ×2、多 Sheet、隐藏行列、合并单元格、合计行干扰、缺字段样本、
+  库存/设备反例、跨文件名/跨租户/跨路径一致性——同 Tool 同字节不同名/不同租户
+  输出完全一致）。
+- 修订说明：按“修复必须落在已注册 Tool/Skill/解析器及其输入输出合同”约束，
+  本地 fixture 的 XLSX 确定性解析从 graph/orchestration_bridge 预解析收口到
+  `ingest_document` 本地 handler（`workers.m1_parse`）；路由只用 magic bytes/
+  表头/价格证据，不用文件名/路径/租户；补充与判类共用
+  `order_semantics.workbook_parse_candidate` 同一证据门。
 - 未改动：正式 `39092`/`current`、M5 lifecycle、`m5_repository.py`、
   M3/M4 业务实现、其他 session 文件（主工作区 `.project-to-act/*` 未触碰）。
 - 受限说明：真实 M1/M2 冻结服务联调与 M0 canonical 行为需 GB10 隔离 release
-  重放确认（另见重放申请）；本地证据不代表 GB10 真实链路已验收。
+  重放确认（见 §4）；本地证据不代表 GB10 真实链路已验收。
 
 ## 4. GB10 隔离重放结果（2026-09-05，批准后执行）
 

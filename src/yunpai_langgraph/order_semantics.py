@@ -28,6 +28,81 @@ def _cell_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def sniff_xlsx_bytes(raw: bytes | None) -> bool:
+    """按文件结构（magic bytes + OOXML 内部路径）判断字节是否为 XLSX/XLSM。
+
+    只依据结构证据，不依据文件名/路径/租户：ZIP magic (PK\\x03\\x04) 且前
+    4 KiB 内出现 ``xl/`` 或 OOXML 内容类型声明时视为可尝试解析的表格字节。
+    真正的解析仍由 openpyxl 执行，解析失败（伪装 zip/损坏文件）时调用方保持
+    原结果不变，绝不伪造解析成功。
+    """
+    if not isinstance(raw, bytes) or not raw:
+        return False
+    if raw[:4] != b"PK\x03\x04" and raw[:2] != b"PK":
+        return False
+    head = raw[:4096]
+    return b"xl/" in head or b"[Content_Types].xml" in head or b"xl/workbook" in head
+
+
+def parsed_has_order_shape(document: dict[str, Any]) -> bool:
+    """判断确定性解析结果是否具备“订单表格”结构证据。
+
+    有订单行、或块事实/表头事实（订单号/日期/客户/供应商/编码）、或至少一个
+    Sheet 找到订单表头行即视为订单形状；否则（纯库存/设备/无表头表格）不算，
+    避免把任意表格冒充成订单文档。
+    """
+    if not isinstance(document, dict):
+        return False
+    lines = document.get("lines")
+    if isinstance(lines, list) and lines:
+        return True
+    for key in ("order_id", "order_date", "due_date", "customer_name", "supplier_name", "product_code"):
+        if _cell_text(document.get(key)):
+            return True
+    sheet_docs = document.get("sheet_docs")
+    if isinstance(sheet_docs, list) and any(
+        isinstance(item, dict) and item.get("status") == "header_found" for item in sheet_docs
+    ):
+        return True
+    return False
+
+
+def workbook_parse_candidate(filename: str, raw: bytes) -> dict[str, Any] | None:
+    """只在结构证据支持“订单”时返回确定性解析结果，否则返回 None。
+
+    证据（全部只读自文件本身，不依赖文件名/路径/租户）：
+    - 字节结构是 XLSX/XLSM（magic + OOXML 路径）；
+    - 前几行无仓库/库位/现存数量/盘点等库存专属表头（库存表否决）；
+    - 表头块事实（订单号/客户/日期/交期/供应商）**或**明细行含单价/金额
+      （价格信号）——二者至少其一，数量+名称/纯编码表（料号清单、设备台账
+      等）不会被当作订单候选。
+
+    None 表示无法确认是订单：调用方必须保持原分类/失败关闭，绝不空成功。
+    """
+    if not sniff_xlsx_bytes(raw) or _workbook_has_inventory_headers(raw):
+        return None
+    try:
+        parsed = parse_order_document(filename, raw)
+    except Exception:
+        return None
+    document = parsed.get("document") or {}
+    if not parsed_has_order_shape(document):
+        return None
+    block_facts = any(
+        _cell_text(document.get(key))
+        for key in ("order_id", "order_date", "due_date", "customer_name", "supplier_name")
+    )
+    if block_facts:
+        return parsed
+    lines = [line for line in (document.get("lines") or []) if isinstance(line, dict)]
+    price_signal = any(
+        line.get("unit_price") is not None or line.get("amount") is not None for line in lines
+    )
+    if price_signal:
+        return parsed
+    return None
+
+
 def _looks_order_marker(value: Any) -> bool:
     text = _cell_text(value).lower().replace("_", "").replace("-", "").replace(" ", "")
     return any(marker.replace("_", "").replace("-", "") in text for marker in _ORDER_MARKERS)
@@ -134,10 +209,13 @@ def parse_order_document(filename: str, raw: bytes) -> dict[str, Any]:
 def build_semantic_supplement(filename: str, raw: bytes, *, external: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """为“外部 M1 声明订单但缺事实”的结果构建本地确定性候选补充。
 
-    返回 ``None`` 表示无法给出有依据的订单候选（非 XLSX、无可解析表头等），
-    此时调用方不得伪造补充。
+    只有字节结构 + 表头/价格证据确认是订单工作簿才可能给出补充
+    （``workbook_parse_candidate``）；库存/设备等表格返回 ``None``，调用方
+    不得伪造补充。
     """
-    parsed = parse_order_document(filename, raw)
+    parsed = workbook_parse_candidate(filename, raw)
+    if parsed is None:
+        return None
     document = parsed.get("document") or {}
     lines = document.get("lines") if isinstance(document.get("lines"), list) else []
     order_id = _cell_text(document.get("order_id"))
@@ -148,9 +226,6 @@ def build_semantic_supplement(filename: str, raw: bytes, *, external: dict[str, 
         "customer_name": _cell_text(document.get("customer_name")),
         "supplier_name": _cell_text(document.get("supplier_name")),
     }
-    has_any_fact = bool(lines) or bool(order_id) or bool(header_block["customer_name"] or header_block["order_date"])
-    if not has_any_fact:
-        return None
     missing: list[dict[str, Any]] = []
     if not order_id:
         missing.append({"field": "order_number", "level": "header", "reason": "missing_required_field"})
@@ -240,28 +315,8 @@ def _workbook_has_inventory_headers(raw: bytes) -> bool:
 def workbook_looks_like_order(raw: bytes, filename: str = "workbook.xlsx") -> bool:
     """业务资料目录里用同一解析器判断表格是否更像订单（修正订单/库存误判）。
 
-    只有 v2 表头驱动找到多列订单语义（数量+价格/金额/客户/订单号等）才返回 True；
-    库存/设备等表单（仓库/库位/现存数量表头）不会命中订单别名，保持原分类。
+    委托给 ``workbook_parse_candidate``：只有字节结构 + 表头块事实或价格信号
+    的订单证据才返回 True；库存/设备等表单（仓库/库位/现存数量表头或仅有
+    数量+名称/编码）不会命中，保持原分类。
     """
-    if not filename.lower().endswith((".xlsx", ".xlsm")):
-        return False
-    if _workbook_has_inventory_headers(raw):
-        return False
-    try:
-        parsed = parse_order_document(filename, raw)
-    except Exception:
-        return False
-    document = parsed.get("document") or {}
-    lines = document.get("lines") or []
-    if not lines:
-        return False
-    has_price_signal = any(line.get("unit_price") is not None or line.get("amount") is not None for line in lines)
-    header_block = {
-        "order_id": _cell_text(document.get("order_id")),
-        "order_date": _cell_text(document.get("order_date")),
-        "customer_name": _cell_text(document.get("customer_name")),
-        "supplier_name": _cell_text(document.get("supplier_name")),
-    }
-    if header_block["order_id"] or header_block["customer_name"] or header_block["order_date"]:
-        return True
-    return bool(lines and has_price_signal and document.get("sheet_count") and document.get("parser_version", "").startswith("order."))
+    return workbook_parse_candidate(filename, raw) is not None

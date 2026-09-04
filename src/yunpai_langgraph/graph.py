@@ -621,15 +621,11 @@ class YunpaiGraph:
             if order_attachment:
                 # The browser stream path submits the XLSX as an attachment and
                 # does not call /runs/upload, so derive the M1 fixture here.
-                # 语义入口 order_semantics：表头驱动解析优先、老式坐标模板兜底，
-                # 同一解析器服务 M1 fixture / HTTP 补充 / business_catalog，避免
-                # 只按固定坐标把真实订单解析成 0 行。
                 if not document and isinstance(order_attachment.get("content_b64"), str):
                     try:
                         raw = base64.b64decode(order_attachment["content_b64"])
-                        from .order_semantics import parse_order_document
-                        parsed = parse_order_document(str(order_attachment.get("filename") or "order.xlsx"), raw)
-                        document = parsed.get("document") or {}
+                        from .order_workbook import parse_order_workbook
+                        document = parse_order_workbook(str(order_attachment.get("filename") or "order.xlsx"), raw)
                     except (ValueError, RuntimeError):
                         document = {}
                 return {"file": order_attachment, "_fixture_document": document}

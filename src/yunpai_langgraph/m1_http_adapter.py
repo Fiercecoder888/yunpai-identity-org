@@ -192,21 +192,24 @@ def _attach_semantic_supplement(value: dict[str, Any], filename: str | None, raw
     """外部 M1 声明订单但缺订单头/行时，附加本地确定性候选并强制 review。
 
     - 原样保留外部 ``document``/任务结果，仅新增 ``semantic_supplement``；
-    - 只对可解析的 XLSX/XLSM 附加；无法给出有依据候选时保持原结果不动，
-      绝不伪造补充或把 0 行订单当成成功；
+    - 是否尝试本地补充只按字节结构判断（XLSX magic/OOXML 路径），不依赖文件
+      名、路径或租户；无法解析出订单事实时保持原结果不动，绝不伪造补充或把
+      0 行订单当成成功；
     - 只要启用了补充，就强制 ``needs_review=True``（打开 review Gate），由
       人工在“外部结果 vs 本地候选”之间复核后再放行下游。
     """
-    if filename is None or raw is None:
-        return value
-    if not filename.lower().endswith((".xlsx", ".xlsm")):
+    if raw is None:
         return value
     try:
-        from .order_semantics import build_semantic_supplement, result_has_order_gap
+        from .order_semantics import (
+            build_semantic_supplement,
+            result_has_order_gap,
+            sniff_xlsx_bytes,
+        )
 
-        if not result_has_order_gap(value):
+        if not sniff_xlsx_bytes(raw) or not result_has_order_gap(value):
             return value
-        supplement = build_semantic_supplement(filename, raw, external=value)
+        supplement = build_semantic_supplement(str(filename or "workbook.xlsx"), raw, external=value)
     except Exception:
         # 语义补充失败绝不能让一次真实 M1 调用失败：保持外部原结果。
         return value
