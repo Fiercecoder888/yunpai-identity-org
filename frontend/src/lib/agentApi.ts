@@ -66,7 +66,7 @@ export async function* streamResume(runId: string, decision: string, supplement?
 }
 
 export async function getRuns(): Promise<RunState[]> {
-  const response = await fetch(apiUrl('/runs?tenant_id=default&limit=30'));
+  const response = await fetch(apiUrl('/runs?tenant_id=default&limit=100'));
   if (!response.ok) throw new Error(`运行列表加载失败：HTTP ${response.status}`);
   return ((await response.json()) as { runs: RunState[] }).runs;
 }
