@@ -48,6 +48,21 @@ def test_m2_payload_consumes_approved_m1_order():
     assert payload["_source"]["ref"] == "ingest_document"
 
 
+def test_m2_payload_uses_semantic_supplement_for_missing_header_product_code():
+    state = _approved_m2_state()
+    state["outputs"]["ingest_document"] = {
+        "document": {
+            "header": {"order_number": "PO-1", "product_code": None},
+            "lines": [{"model": "W-H909", "product_code": "W-H909", "quantity": 4}],
+        },
+        "semantic_supplement": {
+            "document": {"header": {"product_code": "W-H909", "order_number": "PO-1"}},
+        },
+    }
+    payload = bridge_payload(state, "run_bom_sop_workflow")
+    assert payload["product_profile"]["product_code"] == "W-H909"
+
+
 def test_m3_without_approved_bom_returns_blocked_input():
     state = _approved_m2_state()
     state["outputs"]["run_bom_sop_workflow"]["data"]["bom_generation"]["approval_status"] = "draft"

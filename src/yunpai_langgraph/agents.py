@@ -324,7 +324,12 @@ class ReviewerAgent:
             return self._gate("candidate", effective_module, effective_tool, message, ["批准候选", "补充裁决", "终止"])
         if effective_tool == "ingest_document" and (result.get("needs_review") or float(result.get("overall_confidence") or 0) < 0.8):
             if isinstance(result.get("semantic_supplement"), dict):
-                message = "外部 M1 未形成有效订单行/订单号；已附加本地确定性解析候选，请人工复核后再放行（外部结果与候选都保留）"
+                supplement_header = ((result.get("semantic_supplement") or {}).get("document") or {}).get("header")
+                external_header = ((result.get("document") or {}).get("header") or {})
+                if isinstance(supplement_header, dict) and supplement_header.get("product_code") and not external_header.get("product_code"):
+                    message = "M1 订单行已识别；顶层产品编码由本地确定性候选回填，请人工确认后再放行（外部结果与候选都保留）"
+                else:
+                    message = "外部 M1 未形成有效订单行/订单号；已附加本地确定性解析候选，请人工复核后再放行（外部结果与候选都保留）"
             else:
                 message = "M1 解析置信度不足或存在字段缺口"
             return self._gate("review", effective_module, effective_tool, message, ["修正并重试", "接受结果", "终止"])

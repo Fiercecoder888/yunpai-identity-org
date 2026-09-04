@@ -80,8 +80,22 @@ def read_order(state: RunState) -> dict[str, Any]:
         from_m1.get("order"), from_m1.get("extraction", {}).get("order"),
         from_m1.get("document", {}).get("header"),
     )
+    supplement = from_m1.get("semantic_supplement")
+    supplement_document = supplement.get("document") if isinstance(supplement, dict) else None
+    supplement_header = supplement_document.get("header") if isinstance(supplement_document, dict) else None
     if isinstance(order, dict):
+        if isinstance(supplement_header, dict):
+            # Keep external M1 values and use only non-empty, source-backed
+            # supplement fields for gaps. This makes line model -> header
+            # product_code explicit without overwriting an external fact.
+            merged = dict(order)
+            for key, value in supplement_header.items():
+                if merged.get(key) in (None, "") and value not in (None, ""):
+                    merged[key] = value
+            return merged
         return order
+    if isinstance(supplement_header, dict):
+        return supplement_header
     return {}
 
 
@@ -92,6 +106,10 @@ def read_lines(state: RunState) -> list[dict[str, Any]]:
         from_m1.get("document", {}).get("lines"),
         from_m1.get("extraction", {}).get("lines"),
     )
+    if not isinstance(lines, list) or not lines:
+        supplement = from_m1.get("semantic_supplement")
+        supplement_document = supplement.get("document") if isinstance(supplement, dict) else None
+        lines = supplement_document.get("lines") if isinstance(supplement_document, dict) else None
     return [item for item in lines if isinstance(item, dict)] if isinstance(lines, list) else []
 
 

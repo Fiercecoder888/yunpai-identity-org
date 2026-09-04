@@ -141,10 +141,11 @@ def _order_id_candidates(result: dict[str, Any]) -> list[str]:
 
 
 def result_has_order_gap(result: dict[str, Any]) -> bool:
-    """外部 M1 结果声明了订单，但缺少订单头号或订单行（需要本地补充候选）。
+    """外部 M1 结果声明了订单，但缺少关键订单事实（需要本地补充候选）。
 
     只有当文档确实被归类为订单时才可能触发补充；非订单文档(库存/图纸/资料)
-    保持原样，绝不把非订单文件改写成订单候选。
+    保持原样，绝不把非订单文件改写成订单候选。订单行已经存在但顶层产品编码
+    缺失时也必须补充，否则下游 M2 无法把订单型号提升为权威产品事实。
     """
     if not isinstance(result, dict) or not result_declares_order(result):
         return False
@@ -153,7 +154,24 @@ def result_has_order_gap(result: dict[str, Any]) -> bool:
     line_count = len(lines) if isinstance(lines, list) else 0
     if line_count == 0:
         return True
-    return not _order_id_candidates(result)
+    if not _order_id_candidates(result):
+        return True
+    doc_header = doc.get("header") if isinstance(doc.get("header"), dict) else {}
+    top_product_code = (
+        result.get("product_code")
+        or doc.get("product_code")
+        or doc_header.get("product_code")
+        or doc_header.get("model")
+    )
+    if _cell_text(top_product_code):
+        return False
+    # Only trigger for a useful, deterministic repair: an order line that already
+    # carries a model/product code.  A line without one remains an ordinary
+    # missing-code review case and must not be guessed.
+    return any(
+        isinstance(line, dict) and _cell_text(line.get("product_code") or line.get("model"))
+        for line in lines
+    )
 
 
 def _pick_best_document(filename: str, raw: bytes) -> dict[str, Any]:
@@ -219,18 +237,28 @@ def build_semantic_supplement(filename: str, raw: bytes, *, external: dict[str, 
     document = parsed.get("document") or {}
     lines = document.get("lines") if isinstance(document.get("lines"), list) else []
     order_id = _cell_text(document.get("order_id"))
+    product_code = _cell_text(document.get("product_code"))
+    if not product_code:
+        for line in lines:
+            if isinstance(line, dict):
+                product_code = _cell_text(line.get("product_code") or line.get("model"))
+                if product_code:
+                    break
     header_block = {
         "order_number": order_id,
         "order_date": _cell_text(document.get("order_date")),
         "due_date": _cell_text(document.get("due_date")),
         "customer_name": _cell_text(document.get("customer_name")),
         "supplier_name": _cell_text(document.get("supplier_name")),
+        "product_code": product_code,
     }
     missing: list[dict[str, Any]] = []
     if not order_id:
         missing.append({"field": "order_number", "level": "header", "reason": "missing_required_field"})
     if not header_block["due_date"]:
         missing.append({"field": "due_date", "level": "header", "reason": "missing_required_field"})
+    if not header_block["product_code"]:
+        missing.append({"field": "header.product_code", "level": "header", "reason": "missing_required_field"})
     line_missing_codes = 0
     for line in lines:
         if not _cell_text(line.get("product_code")):

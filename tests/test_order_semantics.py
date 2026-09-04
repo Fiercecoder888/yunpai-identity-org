@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from io import BytesIO
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from yunpai_langgraph.order_parser_v2 import parse_order_sheets
 from yunpai_langgraph.order_semantics import (
@@ -89,6 +89,17 @@ def inventory_like_bytes() -> bytes:
     return output.getvalue()
 
 
+def coded_order_twin_bytes() -> bytes:
+    """同构订单但带有可提升为权威产品编码的系统型号。"""
+    workbook = load_workbook(BytesIO(real_order_twin_bytes()))
+    sheet = workbook.active
+    sheet["B8"] = "W-H909"
+    sheet["B9"] = "W-H911"
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
 def test_parser_produces_valid_header_lines_and_review_issues_for_real_layout():
     raw = real_order_twin_bytes()
     document = parse_order_sheets("订单-同构-回放.xlsx", raw)
@@ -147,6 +158,23 @@ def test_semantic_supplement_for_external_order_gap_keeps_both_results():
     assert any(conflict["field"] == "lines" for conflict in supplement["conflicts"])
     # 外部结果必须原样保留（本测试只验证补充，不覆盖外部）。
     assert external["document"]["lines"] == []
+
+
+def test_semantic_supplement_repairs_missing_header_product_code():
+    raw = coded_order_twin_bytes()
+    external = {
+        "status": "needs_review", "doc_type": "order",
+        "document": {
+            "document_type": "order", "document_subtype": "stocking_order",
+            "header": {"order_number": "PO-1"},
+            "lines": [{"model": "W-H909", "product_code": "W-H909"}],
+        },
+    }
+    assert result_has_order_gap(external) is True
+    supplement = build_semantic_supplement("order.xlsx", raw, external=external)
+    assert supplement is not None
+    assert supplement["document"]["header"]["product_code"] == "W-H909"
+    assert not any(item["field"] == "header.product_code" for item in supplement["missing_fields"])
 
 
 def test_no_supplement_for_non_order_or_complete_external():
