@@ -5,9 +5,9 @@
 
 ## 当前验收结论
 
-- 结论：既有关键业务路径和线上发布验收保持通过；M3/M4 Tool 与 Skill 补全已通过代码、本地运行态和 mock HTTP 集成验收，真实独立服务/数据库联调尚未执行
-- 验收范围：既有前后端集成与线上证据；本次 M3/M4 Tool registry、HTTP Adapter、Skill operation、授权 Gate、错误语义和 M3→M4 流程
-- 最后检查：2026-09-04 19:14 +08:00
+- 结论：M0-M5 Tool/Skill 集成、后端回归和前端构建已通过；真实独立服务/数据库联调仍未执行
+- 验收范围：既有前后端集成与线上证据；M3/M4 Tool registry、HTTP Adapter、Skill operation、授权 Gate、错误语义和 M3→M4 流程；M5 PMC v2 repository、lifecycle、replan、WIP/readiness 和 handler
+- 最后检查：2026-09-04 23:28 +08:00
 - 遗留问题：本机未监听 8000、8010、8080、8765、39092，未取得真实 M3/M4 服务 URL、认证和数据库回读条件；不得将 mock HTTP 证据描述为生产验收
 
 ## 验收标准
@@ -29,6 +29,7 @@
 | 证据 ID | 时间 | 方法或命令 | 退出状态 | 版本或文件哈希 | 结果摘要 | 证据位置 | 有效期 |
 |---|---|---|---|---|---|---|---|
 | E-M3M4-TOOLS-001 | 2026-09-04 19:23 | Windows venv 完整 pytest；compileall；git diff --check；项目账本 --validate；临时 9001 /health 与 /tools；显式 Yunpai SSH key 执行 fetch/push | 全部代码/本地验证退出 0；69 passed, 1 warning；远端 main 未前移；实现提交已推送 | 实现 commit f7fedaf；分支 codex/m3-m4-tool-skill-completion-20260904；基线 1829888a | 114 个 Tool、45 个 bound；M3 16/17、M4 24/26；两个 receiver 未绑定；M3→M4 mock HTTP、审批、revision/checksum、发送和供应事实确认通过；真实服务未联调 | reports/sessions/s-m3-m4-tools-20260904.md、tests/test_m3_m4_tool_integration.py | 2026-09-11 |
+| E-M5-PMC-MAIN-INTEGRATION-001 | 2026-09-04 23:28 +08:00 | `origin/pmctooldev` 合并 `origin/dev` 后运行 `.venv/bin/python -m pytest -q`、`cd frontend && npm test -- --run`、`cd frontend && npm run build`、账本 `--validate`、`git diff --check`；核对 registry | 全部退出 0；后端 210 passed；前端 6 passed；构建成功；账本 valid=true | `origin/main` / `4c6352c5fc6631644cdd6a6d2576fec1158adb11`；`origin/dev` / `3c60d30cca3c2ebf170934e155de76797d997364` | 合并后的 registry 为 114 tools、65 bound、M3 16、M4 24、M5 18；M5 `report_workload`、`bind_worker_to_order` 仍按合同未绑定；真实独立服务/数据库联调仍待部署条件 | `handoff/m5-pmc-v2-completion-20260904/ACCEPTANCE_REPORT_20260904.md`、`reports/sessions/s-pmctooldev-m5-20260904.md` | 2026-09-11 |
 | E-PLAN-M1M5-ORCH-001 | 2026-09-04 | 核对当前 Agent/Graph/API/Registry/Skill/M5 lifecycle 实现、远端 M1/M3/M4/M5 分支、交接包、数据审计、GB10/Qwen 和项目治理；逐项检查 27 个基础资料/代码路径；生成自包含 DSH 任务书；运行完整 pytest、账本 `--validate` 和 `git diff --check` | 路径检查、151 项 pytest、账本和 diff 检查全部退出 0；未执行业务代码、分支集成或生产联调 | `dev` / `85c77a4`；执行时远端 SHA 必须重新 fetch | 将 Tool 合并之外的阻塞定位到文件入口、workflow、跨模块桥接、六类 snapshot、M5 lifecycle/head、审批身份和 MES 边界；全部列明路径存在，任务书与当前回归兼容 | `docs/DEEPSEEK_HARNESS_M1_M5_ORCHESTRATOR_TASK_20260904.md` | 2026-09-30 |
 | E-GB10-QWEN-001 | 2026-09-04 22:31 +08:00 | 通过 GB10 SSH 使用服务器托管凭据调用三种 `GET /v1/models`；调用 `POST /v1/chat/completions`；只读核对 vLLM 进程参数 | SSH、HTTP 和 JSON 校验全部退出 0 | `dev` / `974eca0`；模型 `qwen3.6-35b-a3b-fp8-gpu0-200k` | `127.0.0.1:18085`、`192.168.110.19:18085` 和 `gb10:18085` 均鉴权成功；chat 返回 `GB10-QWEN-OK`；实际上下文 65536；未记录 API Key | `工作记忆.md`、GB10 当前 vLLM 运行态 | 2026-09-11 |
 | E-INFRA-GITLAB-FRP-TS-001 | 2026-09-04 | SSH 只读核对 GitLab22 服务；`frpc verify`、FRP 服务重启；LAN/Tailscale/FRP Web 与 Git SSH 三路径探针；Tailscale ping | 全部退出 0 | GitLab22 `100.127.40.100`；FRP config mode `0600` | `tailscaled.service`/`frpc.service` 均 enabled/active；Web 三路径 HTTP 200；三个 Git SSH 入口 `git ls-remote` 均返回同一 HEAD；token/私钥未进入仓库 | `工作记忆.md`；服务器 `/root/frpc.toml.bak-pre-permissions-20260904-145836` | 2026-09-11 |
@@ -55,6 +56,7 @@
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
 
 - 2026-09-04：检查 M3/M4 registry、Skill、授权 Gate、HTTP Adapter、完整后端回归和本地 FastAPI 运行态；证据 E-M3M4-TOOLS-001；结论：代码与本地运行态通过，真实 M3/M4 服务和数据库回读因外部条件缺失未验收。
+- 2026-09-04 23:28 +08:00：完成 `origin/dev` 到 `origin/main` 的 M5 PMC v2 集成并复跑后端、前端、构建、账本和 diff 校验；证据 `E-M5-PMC-MAIN-INTEGRATION-001`；结论：代码集成门槛通过，真实独立服务/数据库联调仍待部署条件。
 - 2026-09-04：核对 M1-M5 Agent/Worker/Skill/Tool 主链和当前分支成果，生成自包含 DSH Orchestrator 执行任务书；27 个资料/代码位置均存在，完整后端 151 项、账本和 diff 检查通过；证据 `E-PLAN-M1M5-ORCH-001`；结论：任务书完整覆盖基础资料、GB10/Qwen、流程断点、实施和验收，但本记录只证明任务交接完成，不证明代码集成或生产链路完成。
 - 2026-09-04 22:31 +08:00：实测 GB10 Qwen 35B 的 OpenAI-compatible models/chat 调用，并核对 18085 鉴权入口、18095 vLLM 后端、模型名和 65536 上下文；证据 `E-GB10-QWEN-001`；结论：三种地址均可用，chat 返回预期正文，调用方法已脱敏写入 `工作记忆.md`。
 - 2026-09-04：核对并收紧 GitLab22 的 FRP/Tailscale 入口；证据 `E-INFRA-GITLAB-FRP-TS-001`；结论：LAN `:8181/:2222`、Tailscale `100.127.40.100:8181/:2222`、FRP `linkdown.bitnp.asia:6001/:6002` 均可用，FRP token 配置已改为 `0600 root:root` 并保留 root-only 备份；未修改业务代码、GitLab 数据或仓库内容。
