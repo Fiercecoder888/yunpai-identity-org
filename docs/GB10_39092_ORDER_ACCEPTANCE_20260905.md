@@ -6,10 +6,10 @@
 
 ## 版本与部署
 
-- Git：`origin/main` = `origin/dev` = `51395275401dedf5d4a4dd3ccc31ecd58210477c`。
-- 集成提交：`30a8df6`（M0 HTTP batch envelope 解包）、`5139527`（从 M1 输出补全 M2 的产品名和订单号）。
-- GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905045000`。
-- 发布归档 SHA-256：`5758430d84e6292d8acb4026c323839c6cfe4056726fdfcb88b7102e205ab84f`。
+- Git：`origin/main` = `origin/dev` = `15d0442f48d005c366f793dbe3c4d63fdb482673`。
+- 集成提交：`30a8df6`（M0 HTTP batch envelope 解包）、`5139527`（从 M1 输出补全 M2 的产品名和订单号）、`15d0442`（M5 apply Gate 持久化 release/head，并增加回归测试）。
+- GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905063000`。
+- 发布归档 SHA-256：`f723fbfad0c1a3d04b2e1c5ece0e4b35fce7b362e5e9941f5a73ae2e19e9c2bc`。
 - `GET /health`：`status=ok`，`tools=114`，`bound_tools=112`，`skills=8`，`local_fixture=false`，planner 为 Qwen `qwen3.6-35b-a3b-fp8-gpu0-200k`。
 - 模块绑定：M0 `27/27`、M1 `17/17`、M2 `7/7`、M3 `16/17`、M4 `25/26`、M5 `20/20`。M3/M4 各有一个按合同保留未绑定的 receiver 工具。
 
