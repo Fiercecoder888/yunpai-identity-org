@@ -1,5 +1,5 @@
 ---
-name: yunpai-business-data-identification
+name: business-data-identification
 description: Identify Yunpai business files after upload or from an authorized business-data directory, extract order/BOM/engineering metadata, preserve hashes and field evidence, and write reviewable candidates to the catalog database.
 ---
 

@@ -19,6 +19,9 @@ class SkillSpec:
     handler: SkillHandler
     tags: tuple[str, ...] = field(default_factory=tuple)
     tools: tuple[str, ...] = field(default_factory=tuple)
+    version: str = "1.0.0"
+    # 与 registry 工具/上游 Skill 的契约版本，用于回归兼容与证据引用
+    contract_version: str = "yunpai.skill-contract.v1"
 
 
 class SkillRegistry:
@@ -46,12 +49,28 @@ class SkillRegistry:
     async def call(self, name: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if name not in self.specs:
             raise KeyError(f"unknown skill: {name}")
-        return await self.specs[name].handler(payload, context)
+        spec = self.specs[name]
+        result = await spec.handler(payload, context)
+        if isinstance(result, dict):
+            result = {
+                **result,
+                "skill": name,
+                "skill_version": spec.version,
+                "skill_contract": spec.contract_version,
+                "evidence": [
+                    *([item for item in result.get("evidence", [])] if isinstance(result.get("evidence"), list) else []),
+                    {"module": "orchestrator", "source_ref": name, "evidence_ref": f"skill:{name}@{spec.version}", "detail": f"Skill 调用 {name}@{spec.version} 已执行"},
+                ],
+            }
+        return result
 
     def catalog(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": spec.name,
+                "skill_id": f"{spec.name}@{spec.version}",
+                "version": spec.version,
+                "contract_version": spec.contract_version,
                 "description": spec.description,
                 "tags": list(spec.tags),
                 "tools": list(spec.tools),
@@ -233,7 +252,7 @@ def build_default_skill_registry() -> SkillRegistry:
         description="统一 M5 PMC 求解、WIP/资源检查、计划版本、重排、派工、报工和执行摘要；生产发布必须通过 Gate。",
         handler=m5_pmc_control,
         tags=("m5", "pmc", "wip", "schedule", "execution"),
-        tools=("solve_scheduling", "get_m5_schedule", "get_m5_pmc_progress", "replan_m5_schedule", "list_m5_schedules", "dispatch_m5_schedule", "get_m5_execution_summary", "report_workload", "bind_worker_to_order"),
+        tools=("solve_scheduling", "get_m5_schedule", "get_m5_pmc_progress", "list_m5_schedules", "get_m5_material_readiness", "replan_m5_schedule", "advise_m5_schedule", "run_m5_intelligent_schedule", "dispatch_m5_schedule", "get_m5_execution_summary", "ingest_m5_planning_snapshot", "generate_m5_material_procurement_plan", "report_workload", "bind_worker_to_order"),
     ))
     registry.register(SkillSpec(
         name="yunpai-m5-pmc-lifecycle",

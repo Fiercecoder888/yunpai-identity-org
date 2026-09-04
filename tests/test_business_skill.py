@@ -20,7 +20,28 @@ def test_planner_selects_business_data_skill_for_upload_intent():
     assert decision["steps"][0]["kind"] == "skill"
 
 
-def test_high_level_skills_are_registered_with_tool_descriptions():
+def test_master_data_attachment_binds_identification_skill_without_keyword():
+    planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
+    decision = planner.plan({
+        "message": "请导入并审核这些文件",
+        "attachments": [{"kind": "master_data", "filename": "设备台账.xlsx", "content_b64": "AA=="}],
+    }, build_default_registry())
+    assert decision["route"] == "free"
+    assert decision["steps"][0]["tool"] == "business-data-identification"
+
+
+def test_order_attachment_does_not_bind_identification_skill_by_kind():
+    planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
+    decision = planner.plan({
+        "message": "根据订单附件执行订单到排程",
+        "attachments": [{"kind": "order", "filename": "order.xlsx", "content_b64": "AA=="}],
+        "workflow": "m0_m5",
+    }, build_default_registry())
+    assert decision["route"] == "workflow"
+    assert decision["steps"][0]["tool"] == "data_import_run"
+
+
+def test_skill_catalog_exposes_versioned_skill_ids():
     catalog = {item["name"]: item for item in build_default_skill_registry().catalog()}
     expected = {
         "business-data-identification",
@@ -36,6 +57,19 @@ def test_high_level_skills_are_registered_with_tool_descriptions():
     assert "solve_scheduling" in catalog["yunpai-m5-pmc"]["tools"]
     assert "dispatch_m5_schedule" in catalog["yunpai-m5-pmc-lifecycle"]["tools"]
     assert all(item["description"] for item in catalog.values())
+    assert all(item["version"] for item in catalog.values())
+    assert all(item["skill_id"] == f"{item['name']}@{item['version']}" for item in catalog.values())
+
+
+def test_skill_execution_records_versioned_evidence_and_contract():
+    from yunpai_langgraph.contracts import ToolSpec
+    from yunpai_langgraph.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec("get_m5_schedule", "m5", "查询排程", {"type": "object"}, {"type": "object"}), None)
+    result = build_default_skill_registry().specs["yunpai-m5-pmc-lifecycle"]
+    assert result.version >= "1.0.0"
+    assert result.contract_version == "yunpai.skill-contract.v1"
 
 
 def test_planner_routes_explicit_and_semantic_pmc_lifecycle_skill():
