@@ -20,6 +20,7 @@
 | A-004 | 阻塞与重大遗留问题已处理 | 部分通过 | 线上无当前错误；环境性 provenance 测试缺口待统一 EOL/CI 复核 | E-INTEGRATION-002 |
 | A-005 | 多 session 有唯一分支/worktree、路径认领和发布锁规则 | 通过 | 检查 `docs/SESSION_COLLABORATION_RULES.md`、claims 模板并运行 `--validate` | E-SESSION-001 |
 | A-006 | 每个 session 持续维护独立实时修改报告 | 通过 | 检查实时报告规则和 `reports/sessions/README.md` 模板 | E-SESSION-001 |
+| A-007 | 微信下载目录全量复核结论可追溯，且不把原始资料误报为不存在 | 通过 | 只读扫描个人/企业微信目录、`~/Downloads` 和导出目录；归档清单、表头核验；账本校验；后端/前端回归与构建 | E-0904-WECHAT-AUDIT-001 |
 
 ## 证据索引
 
@@ -30,6 +31,7 @@
 | E-INTEGRATION-002 | 2026-09-03 18:10 | Git merge/cherry-pick；线上浏览器控制 API 点击、布局、独立滚动；`/api/health`；静态资源请求 | Git/浏览器/HTTP 均成功；控制台 error/warning 0 | `dev` / `24da1d70`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；release `20260903173855` | 后端与右栏提交完整集成；上传菜单、右栏满高/滚动、移动抽屉和问答关键路径符合预期 | `reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张截图、线上 URL | 2026-12-31 |
 | E-INTEGRATION-003 | 2026-09-03 18:20 | 两次 `git push neworigin dev`；`git ls-remote --heads neworigin dev`；项目管理 `--validate`；最终线上状态复核 | 全部退出 0；远端 `dev=ee8541cc`；账本 `valid=true` | `dev` / `ee8541cc`（交付基线 `d48ce911`）；release `20260903173855`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c` | 集成提交和独立 session 报告已推送；旧 claim/DEPLOY_LOCK 已释放；线上关键路径保持通过 | `reports/sessions/s-integration-final-20260903.md`、`.project-to-act/`、`reports/s-progress-restore-20260903/`、远端分支 | 2026-12-31 |
 | E-PMCV2-STREAM-001 | 2026-09-03 | 本地后端/前端测试、W-H128 SOP 流式候选、GB10 Tailscale release/API/静态资源验证 | 0 | release `20260903201200`；run `run-67f945452c254e37a3a3d991749f1d72` | `STREAMING_FLOW` 15 道工序展开 180 条子批次，生成 WIP 数量段与工序衔接边，validator PASS，停在人工发布 Gate；39092 前端包含批次甘特逻辑 | `docs/pmc-v2-streaming/wh128-15ops-gantt.png`、`docs/pmc-v2-streaming/gb10-wh128-15ops-r3-run.json` | 2026-09-10 |
+| E-0904-WECHAT-AUDIT-001 | 2026-09-04 | `find` 目录/扩展名统计；ZIP/RAR/7z 归档清单；bundled Python/openpyxl 表头读取；`soffice` 临时转换旧 `.xls`；账本 `--validate`；`.venv/bin/python -m pytest -q`；`cd frontend && npm test -- --run`；`cd frontend && npm run build` | 全部退出 0 | `dev` / 本次审计提交 | 覆盖个人微信 `msg/file` 1,078、`msg/attach` 约 30,500、`~/Downloads` 约 43,054 和企业微信邮件缓存；确认真实制造资料存在，生产人员/技能/工位绑定、生产日历、当前 WIP、MES 事件仍未形成可放行实体；后端 58、前端 4 测试通过并成功构建 | `docs/WECHAT_DOWNLOAD_AUDIT_20260904.md`、`docs/DATA_REQUIREMENTS_0903.md` | 2026-09-11 |
 
 ## Gate 记录
 
@@ -46,3 +48,4 @@
 - 2026-09-03：检查集成提交、前端顺序回归、线上 `39092` 多视口点击/滚动、静态资源和 `/api/health`；证据 `E-INTEGRATION-002`、`E-REGRESSION-002`；结论：关键路径通过；CLI Playwright/OCR 与 Windows provenance 换行测试缺口已如实保留。
 - 2026-09-03：确认 `dev` 已推送到 `neworigin/dev`，账本校验通过，旧 session claim/发布锁已释放；证据 `E-INTEGRATION-003`；结论：本次集成交付完成，后续只需按独立任务处理环境性 EOL/工具缺口。
 - 2026-09-03：复核 PMC v2 流式 WIP 与 GB10 39092 运行结果；证据 `E-PMCV2-STREAM-001`；结论：十五道工序和批次级 WIP 已生成，保留人工发布 Gate。
+- 2026-09-04：完成微信/企业微信及本机下载目录全量只读复核；证据 `E-0904-WECHAT-AUDIT-001`；结论：真实订单、BOM、库存、采购入库、供应商、设备/模具、SOP/IE 时间和历史排产存在，但不能替代生产人员、技能绑定、日历、当前 WIP 与执行回传；真实 PMC 继续保持生产阻断。
