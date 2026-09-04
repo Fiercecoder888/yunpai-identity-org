@@ -23,8 +23,15 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     run_id = created["run_id"]
     assert client.get(f"/runs/{run_id}").json()["task_id"] == created["task_id"]
     assert len(client.get("/runs", params={"tenant_id": "default"}).json()["runs"]) == 1
-    resumed = client.post(f"/runs/{run_id}/resume", json={"decision": "approve", "actor": "steward"}).json()
+    # T5：resume 使用受信 principal 头（X-Actor-User/Roles），body actor 不再被信任。
+    resumed = client.post(
+        f"/runs/{run_id}/resume",
+        json={"decision": "approve", "actor": "steward"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
+    ).json()
     assert resumed["pending_gate"]["type"] == "engineering"
+    # 审计记录 principal 且 body 冒充（actor=steward 之外的伪造）被忽略。
+    assert resumed["approvals"][-1]["principal"]["actor"] == "steward"
     assert len(client.get("/tools", params={"module": "m5"}).json()["tools"]) == 20
 
 
@@ -43,10 +50,18 @@ def test_api_accepts_request_envelope_and_rejects_invalid_resume(tmp_path):
     rejected = client.post(
         f"/runs/{created['run_id']}/resume",
         json={"decision": "reject", "actor": "operator-1"},
+        headers={"X-Actor-User": "operator-1", "X-Actor-Roles": "operator"},
     )
     assert rejected.status_code == 200
     assert rejected.json()["outputs"] == {}
-    conflict = client.post(f"/runs/{created['run_id']}/resume", json={"decision": "approve"})
+    # body actor 冒充受信身份：无受信 principal 头时非受信 actor 只能做 operator 决策；
+    # 一旦 approval/apply 类决策需要角色，冒充会被 403 拒绝。
+    conflict = client.post(
+        f"/runs/{created['run_id']}/resume",
+        json={"decision": "approve", "actor": "not-steward"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
+    )
+    # run 已 failed（reject 终止），重复 resume 报 409 run is not waiting_human
     assert conflict.status_code == 409
     skills = {item["name"]: item for item in client.get("/skills").json()["skills"]}
     assert "business-data-identification" in skills

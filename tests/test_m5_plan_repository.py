@@ -237,3 +237,85 @@ def test_message_double_approve_rejected(repo):
     with pytest.raises(M5RepositoryError) as exc:
         repo.approve_message("D-1", actor="zhb")
     assert exc.value.code == "ILLEGAL_MESSAGE_STATE"
+
+
+# ---------------------------------------------------------------------------
+# T4: Apply Gate 原子发布（draft->approved->released + set_head 单事务 + readback）
+# ---------------------------------------------------------------------------
+
+def _save_draft(repo, result, bundle, *, version_prefix="plan", scenario_id="SC-REPO",
+                report_status=None, purpose="production"):
+    version = f"{version_prefix}-{result['data']['input_hash'][:10]}"
+    report = {"status": report_status or result["data"]["validator"]["status"], "errors": []} if report_status else result["data"]["validator"]
+    repo.save_plan(plan_version=version, scenario_id=scenario_id, tenant_id="t",
+                   task_id="k", lifecycle_status="draft", parent_plan_version=None,
+                   input_hash=result["data"]["input_hash"], solver_hash="s1",
+                   algorithm_version="a", scenario_purpose=purpose,
+                   validation_report=report, bundle=bundle,
+                   schedule=result["data"]["schedule"])
+    return version
+
+
+def test_apply_release_draft_to_released_sets_head_atomically(repo):
+    payload = _strict_payload()
+    result, bundle, _ = _solved(repo, payload)
+    version = _save_draft(repo, result, bundle)
+    # draft 计划直接走人工 Apply Gate：一次事务完成 approved -> released + head CAS
+    applied = repo.apply_release(version, "SC-REPO", tenant_id="t", gate="apply",
+                                 actor="zhb", task_id="k", trace_id="k:apply",
+                                 expected_head_revision=0)
+    assert applied["to_status"] == "released"
+    assert applied["head_revision"] == 1
+    assert applied["transitioned_steps"] == ("draft", "approved", "released")
+    readback = repo.readback_after_release(version, "SC-REPO")
+    assert readback["lifecycle_status"] == "released"
+    assert readback["head_plan_version"] == version
+    assert readback["head_revision"] == 1
+    statuses = [e["to_status"] for e in readback["lifecycle_events"]]
+    assert statuses == ["approved", "released"]
+    last = readback["lifecycle_events"][-1]
+    assert last["gate"] == "apply"
+    assert last["actor"] == "zhb"
+    assert last["task_id"] == "k"
+
+
+def test_apply_release_rejects_stale_head_and_does_not_fake_release(repo):
+    payload = _strict_payload()
+    result, bundle, _ = _solved(repo, payload)
+    version = _save_draft(repo, result, bundle)
+    # head 已被其他计划占用：CAS 冲突 -> 整笔回滚，无假 released、head 不变
+    repo.set_head("SC-REPO", "other-plan")  # revision 1
+    with pytest.raises(M5RepositoryError) as exc:
+        repo.apply_release(version, "SC-REPO", gate="apply", actor="zhb",
+                           expected_head_revision=0)
+    assert exc.value.code == "HEAD_CONFLICT"
+    plan = repo.get_plan(version)
+    assert plan["lifecycle_status"] == "draft"  # 事务回滚，未假 released
+    head = repo.get_head("SC-REPO")
+    assert head["head_plan_version"] == "other-plan"
+    assert len(repo.lifecycle_events(version)) == 0
+
+
+def test_apply_release_rejects_non_production_and_validation_failed(repo):
+    payload = _strict_payload()
+    result, bundle, _ = _solved(repo, payload)
+    pressure_version = _save_draft(repo, result, bundle, version_prefix="pressure-plan", purpose="pressure_only")
+    with pytest.raises(M5RepositoryError) as exc:
+        repo.apply_release(pressure_version, "SC-REPO", gate="apply", actor="zhb")
+    assert exc.value.code == "PURPOSE_NOT_RELEASABLE"
+    failed_version = _save_draft(repo, result, bundle, version_prefix="fail-plan", report_status="fail")
+    with pytest.raises(M5RepositoryError) as exc:
+        repo.apply_release(failed_version, "SC-REPO", gate="apply", actor="zhb")
+    assert exc.value.code == "VALIDATION_FAILED"
+
+
+def test_apply_release_protects_released_plan(repo):
+    payload = _strict_payload()
+    result, bundle, _ = _solved(repo, payload)
+    version = _save_draft(repo, result, bundle)
+    repo.apply_release(version, "SC-REPO", gate="apply", actor="zhb",
+                       expected_head_revision=0)
+    with pytest.raises(M5RepositoryError) as exc:
+        repo.apply_release(version, "SC-REPO", gate="apply", actor="zhb",
+                           expected_head_revision=1)
+    assert exc.value.code == "PLAN_PROTECTED"

@@ -100,3 +100,25 @@ def test_required_capabilities_are_ordered_workflow_tools():
     caps = required_capabilities("m1_m5_document_to_plan")
     assert caps[0] == {"module": "m1", "tool": "ingest_document"}
     assert caps[-1] == {"module": "m5", "tool": "get_m5_schedule"}
+
+
+def test_health_reports_per_module_spec_and_bound():
+    """T0.4：/health 输出各模块 spec/bound；主链必需工具逐模块 bound，
+    不只验证总数。"""
+    from fastapi.testclient import TestClient
+    from yunpai_langgraph.api import create_app
+    from yunpai_langgraph.repository import InMemoryRunRepository
+
+    client = TestClient(create_app(repository=InMemoryRunRepository()))
+    modules = client.get("/health").json()["modules"]
+    # 合并后真实绑定（m0 5, m1 17, m2 1, m3 16, m4 24, m5 18 = 81）
+    assert modules["m0"]["spec"] == 27 and modules["m0"]["bound"] == 5
+    assert modules["m1"]["spec"] == 17 and modules["m1"]["bound"] == 17
+    assert modules["m5"]["spec"] == 20 and modules["m5"]["bound"] == 18
+    # 主链每个 workflow 步骤工具逐模块已 bound
+    from yunpai_langgraph.registry import build_default_registry
+    registry = build_default_registry()
+    for workflow_id in ("m0_m5", "m1_m5_document_to_plan", "canonical_to_m5"):
+        for step in load_workflow(workflow_id)["steps"]:
+            assert step["tool"] in registry.handlers, (
+                f"{workflow_id}/{step['id']} 的 {step['tool']} 未绑定")

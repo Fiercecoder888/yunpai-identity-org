@@ -535,6 +535,119 @@ class M5Repository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def apply_release(self, plan_version: str, scenario_id: str, *,
+                      tenant_id: str = "default", gate: str = "apply",
+                      actor: str = "", task_id: str = "", trace_id: str = "",
+                      revision: str = "", expected_from: str | None = None,
+                      expected_head_revision: int | None = None) -> dict[str, Any]:
+        """人工 Apply Gate 的真实发布落库（任务书 T4）。
+
+        在同一个事务边界内完成：draft -> approved -> released（严格相邻迁移；
+        已 approved 的计划只做 approved -> released）并把 scenario head CAS 推进。
+        - 只接受已持久化的 production plan；非 production 不可 released。
+        - release 前校验 validation report 为 pass。
+        - 已发布计划（released/dispatched/execution）不可覆盖（PLAN_PROTECTED）。
+        - head 预期 revision 不匹配抛 HEAD_CONFLICT，整笔回滚，不留下
+          假 released 或错误 head。
+        - lifecycle audit 记录 gate/actor/task_id/trace_id/revision/时间。
+        """
+        now = _now()
+        with self._lock, self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM m5_plans WHERE plan_version=?", (plan_version,)
+            ).fetchone()
+            if row is None:
+                raise M5RepositoryError("PLAN_NOT_FOUND", f"计划 {plan_version} 不存在")
+            plan = dict(row)
+            plan["validation_report"] = _loads(row["validation_report_json"])
+            from_status = plan["lifecycle_status"]
+            if from_status in PROTECTED_STATUSES:
+                raise M5RepositoryError("PLAN_PROTECTED", f"已发布计划 {plan_version} 不可覆盖")
+            if expected_from is not None and from_status != expected_from:
+                raise M5RepositoryError("STALE_REVISION",
+                                        f"计划 {plan_version} 当前状态为 {from_status}，期望 {expected_from}")
+            if from_status not in {"draft", "approved"}:
+                raise M5RepositoryError("ILLEGAL_TRANSITION",
+                                        f"{from_status} -> released 不是合法 Apply Gate 迁移")
+            if plan.get("scenario_purpose") != "production":
+                raise M5RepositoryError("PURPOSE_NOT_RELEASABLE",
+                                        f"非 production 计划 {plan_version} 不能发布")
+            report = plan.get("validation_report") or {}
+            if report.get("status") != "pass":
+                raise M5RepositoryError("VALIDATION_FAILED",
+                                        f"计划 {plan_version} validation 未通过，不能 release")
+            head_row = db.execute(
+                "SELECT revision, head_plan_version FROM m5_heads WHERE scenario_id=?",
+                (scenario_id,),
+            ).fetchone()
+            current_head_rev = int(head_row["revision"]) if head_row else 0
+            if expected_head_revision is not None and current_head_rev != expected_head_revision:
+                raise M5RepositoryError(
+                    "HEAD_CONFLICT",
+                    f"scenario {scenario_id} head 已被更新（当前 revision={current_head_rev}，期望 {expected_head_revision}）")
+            new_head_rev = current_head_rev + 1
+            if from_status == "draft":
+                db.execute(
+                    "UPDATE m5_plans SET lifecycle_status='approved', updated_at=? WHERE plan_version=?",
+                    (now, plan_version),
+                )
+                db.execute(
+                    """INSERT INTO m5_lifecycle
+                       (plan_version, from_status, to_status, gate, actor, task_id, trace_id, revision, transitioned_at)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (plan_version, "draft", "approved", f"{gate}:review", actor, task_id,
+                     trace_id, revision, now),
+                )
+            db.execute(
+                "UPDATE m5_plans SET lifecycle_status='released', released_at=?, updated_at=? WHERE plan_version=?",
+                (now, now, plan_version),
+            )
+            db.execute(
+                """INSERT INTO m5_lifecycle
+                   (plan_version, from_status, to_status, gate, actor, task_id, trace_id, revision, transitioned_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (plan_version, "approved", "released", gate, actor, task_id, trace_id, revision, now),
+            )
+            db.execute(
+                """INSERT INTO m5_heads (scenario_id, tenant_id, head_plan_version, revision, updated_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(scenario_id) DO UPDATE SET
+                     head_plan_version=excluded.head_plan_version,
+                     revision=excluded.revision,
+                     updated_at=excluded.updated_at""",
+                (scenario_id, tenant_id, plan_version, new_head_rev, now),
+            )
+        return {
+            "plan_version": plan_version,
+            "scenario_id": scenario_id,
+            "to_status": "released",
+            "gate": gate,
+            "actor": actor,
+            "task_id": task_id,
+            "trace_id": trace_id,
+            "revision": revision,
+            "head_revision": new_head_rev,
+            "transitioned_steps": ("draft", "approved", "released"),
+        }
+
+    def readback_after_release(self, plan_version: str, scenario_id: str) -> dict[str, Any]:
+        """发布后回读 plan/lifecycle/head（任务书 T4.7 readback）。"""
+        plan = self.get_plan(plan_version)
+        if plan is None:
+            raise M5RepositoryError("PLAN_NOT_FOUND", f"计划 {plan_version} 不存在")
+        head = self.get_head(scenario_id)
+        return {
+            "plan_version": plan_version,
+            "scenario_id": scenario_id,
+            "lifecycle_status": plan.get("lifecycle_status"),
+            "parent_plan_version": plan.get("parent_plan_version"),
+            "input_hash": plan.get("input_hash"),
+            "validator": plan.get("validation_report"),
+            "head_revision": (head or {}).get("revision"),
+            "head_plan_version": (head or {}).get("head_plan_version"),
+            "lifecycle_events": self.lifecycle_events(plan_version),
+        }
+
     # ------------------------------------------------------------------
     # dispatch (Task 3/5): durable pending dispatch
     # ------------------------------------------------------------------

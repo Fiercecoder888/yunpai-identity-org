@@ -14,7 +14,7 @@ from .repository import RunRepository, SQLiteRunRepository
 
 def create_app(*, repository: RunRepository | None = None, registry: ToolRegistry | None = None):
     try:
-        from fastapi import FastAPI, File, Form, HTTPException
+        from fastapi import FastAPI, File, Form, Header, HTTPException
         from fastapi.responses import StreamingResponse
     except ImportError as exc: raise RuntimeError("安装 fastapi 后才能启动 HTTP API") from exc
     if repository is None:
@@ -24,9 +24,59 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
     graph = YunpaiGraph(registry or build_runtime_registry(), repository)
     app = FastAPI(title="Yunpai LangGraph", version="0.2.0")
 
+    def _principal_from_headers(headers: dict[str, str]) -> tuple[dict[str, Any], bool]:
+        """从受信反向代理/认证中间件读取审批 principal（T5.2）。
+
+        优先 ``X-Yunpai-Principal``（JSON：actor/roles/tenant_id），其次拆分头
+        ``X-Actor-User`` + ``X-Actor-Roles`` + ``X-Tenant-Id``。
+        返回 (principal, trusted)；无受信头且未强制受信时 actor 交由调用方
+        从 body 取（dev/preview 降级），审计标记 principal_source=untrusted_body。
+        """
+        header = headers.get("x-yunpai-principal")
+        if header:
+            try:
+                value = json.loads(header)
+                actor = str(value.get("actor") or "")
+                roles = value.get("roles") if isinstance(value.get("roles"), list) else [str(value.get("role") or "")]
+                tenant = str(value.get("tenant_id") or value.get("tenant") or "")
+                if actor:
+                    return {"actor": actor, "roles": [str(r) for r in roles], "tenant_id": tenant}, True
+            except (ValueError, TypeError):
+                raise HTTPException(400, {"code": "INVALID_PRINCIPAL", "message": "X-Yunpai-Principal 不是合法 JSON"})
+        user = headers.get("x-actor-user") or headers.get("x-yunpai-actor-user")
+        if user:
+            roles = [item.strip() for item in (headers.get("x-actor-roles") or "").split(",") if item.strip()]
+            tenant = headers.get("x-tenant-id") or headers.get("x-yunpai-tenant-id") or ""
+            return {"actor": str(user), "roles": roles, "tenant_id": str(tenant)}, True
+        require_trusted = os.getenv("YUNPAI_REQUIRE_TRUSTED_PRINCIPAL", "0").lower() in {"1", "true", "yes"}
+        if require_trusted:
+            raise HTTPException(403, {"code": "TRUSTED_PRINCIPAL_REQUIRED",
+                                      "message": "必须从受信认证中间件/反向代理提供 X-Yunpai-Principal 或 X-Actor-User 头"})
+        return {}, False
+
+    def _principal_actor(principal: dict[str, Any], trusted: bool, body: dict[str, Any]) -> tuple[str, list[str]]:
+        if trusted:
+            return str(principal.get("actor") or ""), list(principal.get("roles") or [])
+        # dev/preview 降级：不接受 body 冒充受信身份，仅标记非受信。
+        return str(body.get("actor") or "operator"), []
+
     @app.get("/health")
     async def health():
-        payload = {"status": "ok", "module": "yunpai-langgraph", "tools": len(graph.registry.specs), "bound_tools": len(graph.registry.handlers), "skills": len(graph.skills.specs), "planner_model": graph.planner.router.config.public()}
+        from collections import Counter
+
+        specs = graph.registry.specs
+        bound = graph.registry.handlers
+        spec_by_module = Counter(spec.module for spec in specs.values())
+        bound_by_module = Counter()
+        for name in bound:
+            spec = specs.get(name)
+            if spec is not None:
+                bound_by_module[spec.module] += 1
+        modules = {
+            module: {"spec": int(spec_by_module.get(module, 0)), "bound": int(bound_by_module.get(module, 0))}
+            for module in sorted(set(spec_by_module) | set(bound_by_module))
+        }
+        payload = {"status": "ok", "module": "yunpai-langgraph", "tools": len(specs), "bound_tools": len(bound), "skills": len(graph.skills.specs), "planner_model": graph.planner.router.config.public(), "modules": modules}
         environment = getattr(graph.registry, "environment", None)
         if environment:
             payload["environment"] = environment
@@ -197,20 +247,57 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         return graph._public_state(state)
 
     @app.post("/runs/{run_id}/resume")
-    async def resume_run(run_id: str, body: dict[str, Any]):
+    async def resume_run(run_id: str, body: dict[str, Any],
+                         x_yunpai_principal: str | None = Header(None),
+                         x_actor_user: str | None = Header(None),
+                         x_actor_roles: str | None = Header(None),
+                         x_tenant_id: str | None = Header(None)):
         state = graph.repository.get(run_id)
         if state is None: raise HTTPException(404, "run not found")
+        principal, trusted = _principal_from_headers({
+            "x-yunpai-principal": x_yunpai_principal or "",
+            "x-actor-user": x_actor_user or "",
+            "x-actor-roles": x_actor_roles or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
+        actor, roles = _principal_actor(principal, trusted, body)
+        decision = str(body.get("decision", "allow"))
         try:
-            resumed = await graph.resume(state, str(body.get("decision", "allow")), body.get("supplement"), actor=str(body.get("actor", "operator")))
+            graph.validate_resume_decision(state, decision, body.get("supplement"))
+            graph.authorize_gate(state, actor=actor, roles=roles,
+                                 tenant_id=principal.get("tenant_id") or None)
+        except ValueError as exc:
+            status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
+            raise HTTPException(status, str(exc)) from exc
+        try:
+            resumed = await graph.resume(state, decision, body.get("supplement"), actor=actor)
+            if resumed.get("approvals"):
+                resumed["approvals"][-1].setdefault("principal", {
+                    "trusted": trusted, "actor": actor, "roles": roles,
+                    "tenant_id": principal.get("tenant_id") or "",
+                })
+                if not trusted:
+                    resumed["approvals"][-1]["principal"]["source"] = "untrusted_body"
             return graph._public_state(resumed)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
     @app.post("/runs/{run_id}/resume/stream")
-    async def resume_stream(run_id: str, body: dict[str, Any]):
+    async def resume_stream(run_id: str, body: dict[str, Any],
+                            x_yunpai_principal: str | None = Header(None),
+                            x_actor_user: str | None = Header(None),
+                            x_actor_roles: str | None = Header(None),
+                            x_tenant_id: str | None = Header(None)):
         state = graph.repository.get(run_id)
         if state is None:
             raise HTTPException(404, "run not found")
+        principal, trusted = _principal_from_headers({
+            "x-yunpai-principal": x_yunpai_principal or "",
+            "x-actor-user": x_actor_user or "",
+            "x-actor-roles": x_actor_roles or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
+        actor, roles = _principal_actor(principal, trusted, body)
         decision = str(body.get("decision", "allow"))
         if state.get("status") != "waiting_human" or not state.get("pending_gate"):
             raise HTTPException(409, "run is not waiting_human")
@@ -218,15 +305,13 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(409, "unsupported gate decision")
         try:
             graph.validate_resume_decision(state, decision, body.get("supplement"))
+            graph.authorize_gate(state, actor=actor, roles=roles,
+                                 tenant_id=principal.get("tenant_id") or None)
         except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
+            raise HTTPException(status, str(exc)) from exc
         return ndjson_response(
-            graph.stream_resume(
-                state,
-                decision,
-                body.get("supplement"),
-                actor=str(body.get("actor", "operator")),
-            )
+            graph.stream_resume(state, decision, body.get("supplement"), actor=actor)
         )
 
     @app.get("/m0/readback/{batch_id}")

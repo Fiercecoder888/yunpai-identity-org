@@ -338,6 +338,55 @@ class YunpaiGraph:
             if decision not in {"allow", "continue", "retry", "reject", "stop"} or (decision not in {"reject", "stop"} and not supplement):
                 raise ValueError("data gate requires business-data supplement or rejection")
 
+    #: Gate 类型 -> 允许的角色（T5.3）。HTTP /resume 只接受带这些角色的受信
+    #: principal；Graph 内部 actor 参数仅供嵌入/测试。
+    GATE_ALLOWED_ROLES: dict[str, tuple[str, ...]] = {
+        "candidate": ("data-steward", "m0-reviewer", "admin"),
+        "sensitive_data": ("data-steward", "hr-officer", "admin"),
+        "review": ("document-reviewer", "data-steward", "admin"),
+        "engineering": ("engineering-manager", "admin"),
+        "procurement": ("procurement-manager", "purchase-reviewer", "admin"),
+        "apply": ("production-manager", "admin"),
+        "authorization": ("operator", "admin"),
+        "blocked_input": ("data-steward", "engineering-manager", "production-manager", "admin"),
+    }
+
+    @staticmethod
+    def authorize_gate(state: RunState, *, actor: str, roles: list[str],
+                       tenant_id: str | None = None) -> None:
+        """受信 principal 对当前 pending_gate 的授权校验（T5.2/T5.4）。
+
+        - 无 gate（未等待人工）拒绝。
+        - body/principal actor 为空的匿名审批拒绝。
+        - 跨租户审批拒绝（principal tenant 与 run tenant 不一致）。
+        - 角色不在 gate 允许清单内的审批拒绝。
+        任一项失败抛 ValueError（HTTP 调用方映射 403/409），不修改 RunState。
+        """
+        gate = state.get("pending_gate") or {}
+        if not gate:
+            raise ValueError("no pending gate to authorize")
+        if not actor or not actor.strip():
+            raise ValueError("anonymous principal cannot approve a gate")
+        run_tenant = str(state.get("tenant_id") or "default")
+        if tenant_id and str(tenant_id) not in {"", run_tenant}:
+            raise ValueError(f"cross-tenant approval rejected: run tenant={run_tenant}, principal tenant={tenant_id}")
+        gate_type = str(gate.get("type") or "authorization")
+        allowed = YunpaiGraph.GATE_ALLOWED_ROLES.get(gate_type) or ("admin",)
+        principal_roles = [str(role) for role in roles] if isinstance(roles, list) else []
+        if not principal_roles or not (set(principal_roles) & set(allowed)):
+            raise ValueError(
+                f"gate {gate_type} 需要角色 {'/'.join(allowed)}；当前 principal roles={principal_roles or ['(none)']}"
+            )
+
+    @staticmethod
+    def validate_principal_request(body: dict[str, Any]) -> None:
+        """T5.1：/resume 不再信任请求体自报 actor；携带 body actor 的请求必须
+        与受信 principal 一致，否则拒绝（冒充检测在 HTTP 层做）。"""
+        if isinstance(body.get("actor"), str) and body["actor"] != "untrusted":
+            # HTTP 层解析受信 principal 后覆盖；若 body 存在自报 actor 且
+            # 调用方没有提供受信 principal，会由调用方直接拒绝，这里只留钩子。
+            return
+
     def _prepare_resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator") -> RunState:
         self.validate_resume_decision(state, decision, supplement)
         gate = dict(state["pending_gate"])
@@ -362,7 +411,13 @@ class YunpaiGraph:
             state["status"] = "running"
             return self._save(state)
         record["status"] = "completed"
-        self._apply_approval(state, gate)
+        try:
+            self._apply_approval(state, gate, actor=actor)
+        except ValueError:
+            # 冲突（如 HEAD_CONFLICT/STALE_REVISION）：先把 waiting_human +
+            # pending_gate 恢复结果持久化，再向上传播，调用方返回可恢复错误。
+            self._save(state)
+            raise
         state["next_step_index"] = int(gate["step_index"]) + 1
         state["current_result"] = {}
         state["status"] = "running"
@@ -381,15 +436,104 @@ class YunpaiGraph:
         yield self._event(state, "state_snapshot", state=self._public_state(state))
         yield self._event(state, "run_done", state=self._public_state(state))
 
-    def _apply_approval(self, state: RunState, gate: dict[str, Any]) -> None:
+    def _apply_approval(self, state: RunState, gate: dict[str, Any], *, actor: str = "operator") -> dict[str, Any]:
+        """应用人工批准的结果。
+
+        - engineering Gate：把 M2 BOM/SOP 草稿标为 approved（供桥接消费）。
+        - review Gate：接受 M1 复核结果。
+        - apply Gate：调用真实 M5 repository 执行 approved/released + head
+          CAS（T4.4 同事务），成功并回读 lifecycle/head 后才把步骤置为
+          completed；repository 未配置时保持 preview 兼容路径并显式标记
+          fixture，绝不冒充生产已发布。
+
+        返回 ``{"applied": bool, "message": str, "readback": dict | None}``。
+        失败（如 HEAD_CONFLICT）抛 ValueError，resume 层保持 waiting_human。
+        """
         result = state["outputs"].get(gate["tool"], {})
         data = result_data(result)
         if gate["type"] == "engineering":
-            result.setdefault("bom_generation", {})["approval_status"] = "approved"
-        elif gate["type"] == "apply":
-            data["lifecycle_status"] = "released"
-        elif gate["type"] == "review":
+            generation = result.setdefault("bom_generation", {})
+            generation["approval_status"] = "approved"
+            return {"applied": True, "message": "M2 BOM/SOP 已批准", "readback": None}
+        if gate["type"] == "review":
             result["review_status"] = "accepted"
+            return {"applied": True, "message": "M1 复核已接受", "readback": None}
+        if gate["type"] == "apply":
+            return self._apply_m5_release(state, gate, result, data, actor=actor)
+        return {"applied": True, "message": "批准已记录", "readback": None}
+
+    def _apply_m5_release(self, state: RunState, gate: dict[str, Any], result: dict[str, Any],
+                          data: dict[str, Any], *, actor: str) -> dict[str, Any]:
+        """把 M5 draft 计划真实发布到 repository（approved -> released + head CAS）。
+
+        幂等/重放语义：同 plan_version 已 released 且同 head 时直接回读成功
+        视作已应用；已 released 但场景 head 已被其他计划占用时抛 HEAD_CONFLICT。
+        """
+        import os
+
+        plan_version = data.get("plan_version") or ""
+        scenario_id = data.get("scenario_id") or (data.get("schedule") or {}).get("scenario_id") or ""
+        db_path = state.get("request", {}).get("m5_db_path") or os.getenv("YUNPAI_M5_DB")
+        preview = bool(state.get("request", {}).get("legacy_preview")) or not db_path
+        if not plan_version:
+            # 未持久化计划（legacy/preview 求解未启用 repository）：无法真实发布。
+            if preview:
+                data["lifecycle_status"] = "released"
+                data["_release_scope"] = "preview_runstate_only"
+                return {"applied": True, "message": "preview 路径：RunState 标记 released（未触碰 M5 repository）", "readback": None}
+            raise ValueError(f"apply gate: 缺少已持久化 plan_version（tool={gate['tool']}），拒绝只改 RunState JSON")
+        if preview and not db_path:
+            data["lifecycle_status"] = "released"
+            data["_release_scope"] = "preview_runstate_only"
+            return {"applied": True, "message": "preview 路径：RunState 标记 released（未触碰 M5 repository）", "readback": None}
+        from .m5_repository import M5Repository, M5RepositoryError
+        from .orchestration_bridge import BRIDGED_WORKFLOWS
+
+        repo = M5Repository(db_path)
+        request = state.get("request", {})
+        expected_head = request.get("expected_head_revision")
+        expected_head = int(expected_head) if expected_head is not None and str(expected_head).isdigit() else None
+        head = repo.get_head(scenario_id) if scenario_id else None
+        if head is None and expected_head is None:
+            expected_head = 0  # 首次发布场景 head 期望为 0（CAS 防并发覆盖）
+        try:
+            apply_result = repo.apply_release(
+                plan_version, scenario_id,
+                tenant_id=state.get("tenant_id", "default"),
+                gate="apply",
+                actor=str(actor or ""),
+                task_id=state.get("task_id", ""),
+                trace_id=f"{state.get('task_id', 'task')}:apply",
+                expected_head_revision=expected_head,
+            )
+            readback = repo.readback_after_release(plan_version, scenario_id)
+        except M5RepositoryError as exc:
+            # 幂等重放：同计划已是 released（previous apply）且 head 指向它 => 已应用。
+            if exc.code == "PLAN_PROTECTED":
+                existing = repo.get_plan(plan_version)
+                if existing and existing.get("lifecycle_status") == "released":
+                    current_head = repo.get_head(scenario_id) if scenario_id else None
+                    if current_head and current_head.get("head_plan_version") == plan_version:
+                        readback = repo.readback_after_release(plan_version, scenario_id)
+                        data.update(lifecycle_status="released", head_revision=readback.get("head_revision"))
+                        return {"applied": True, "message": "apply 幂等：计划已 released 且 head 一致", "readback": readback}
+            # 其它冲突保持 waiting_human，可恢复（Taskbook T4.8）。
+            state["pending_gate"] = {**gate, "step_index": gate.get("step_index", 0), "conflict": {"code": exc.code, "message": exc.message}, "reopened_at": _now()}
+            state["status"] = "waiting_human"
+            raise ValueError(f"apply gate conflict ({exc.code}): {exc.message}") from exc
+        data.update({
+            "lifecycle_status": "released",
+            "plan_version": apply_result["plan_version"],
+            "head_revision": apply_result.get("head_revision"),
+            "released_at": readback.get("released_at") if isinstance(readback.get("released_at"), str) else None,
+        })
+        result["evidence"] = [*result.get("evidence", []), {
+            "module": "m5", "source_ref": apply_result["plan_version"],
+            "evidence_ref": f"m5:{apply_result['plan_version']}:release",
+            "detail": f"Apply Gate 真实发布：lifecycle=released, head revision={apply_result.get('head_revision')}",
+        }]
+        state["trace"].append({"event": "m5.released", "plan_version": plan_version, "head_revision": apply_result.get("head_revision"), "scenario_id": scenario_id, "at": _now()})
+        return {"applied": True, "message": f"M5 计划已真实发布（head revision={apply_result.get('head_revision')}）", "readback": readback}
 
     def _payload_for(self, state: RunState, tool: str) -> dict[str, Any]:
         request, outputs = state["request"], state.get("outputs", {})

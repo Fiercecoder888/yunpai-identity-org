@@ -25,7 +25,11 @@ def test_stream_api_emits_gate_and_resume_events():
     assert events[0]["task_id"] == events[-1]["task_id"]
     run_id = events[0]["run_id"]
 
-    resumed = client.post(f"/runs/{run_id}/resume/stream", json={"decision": "approve"})
+    resumed = client.post(
+        f"/runs/{run_id}/resume/stream",
+        json={"decision": "approve", "actor": "steward"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
+    )
     resumed_events = read_events(resumed)
     assert resumed_events[0]["type"] == "run_start"
     assert resumed_events[-1]["type"] == "run_done"
