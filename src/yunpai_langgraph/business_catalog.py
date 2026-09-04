@@ -100,6 +100,99 @@ REQUIRED_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
     "procurement": ("supplier_code", "material_code", "quantity"),
 }
 
+# 通用表头别名（非 order/bom 类别字段观察用）：语义字段 -> 可能的中文表头。
+_GENERIC_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "equipment_code": ("设备编码", "设备编号", "编号"),
+    "equipment_name": ("设备名称", "设备名"),
+    "product_code": ("产品编码", "产品编号", "型号", "编码"),
+    "product_name": ("产品名称", "物料名称", "品名", "名称"),
+    "worker_code": ("工号", "人员编码", "员工编号", "工号/姓名"),
+    "worker_name": ("姓名", "员工姓名", "名字"),
+    "skill": ("技能", "技能码", "技能名称"),
+    "material_code": ("物料编码", "料号", "材料编码", "编码"),
+    "material_name": ("材料名称", "物料名称", "品名", "名称"),
+    "warehouse": ("仓库", "仓库名称"),
+    "lot_no": ("批次", "批号", "批次号"),
+    "available_qty": ("现存数量", "可用数量", "数量", "库存量"),
+    "supplier_code": ("供应商编码", "供应商编号"),
+    "supplier_name": ("供应商名称", "供应商"),
+    "operation_code": ("工序编码", "工序编号", "工序号"),
+    "operation_name": ("工序名称", "工序"),
+    "sequence": ("顺序", "序号", "工序顺序"),
+    "standard_minutes": ("标准工时", "标准时间", "工时", "IE秒数", "节拍"),
+    "station_code": ("工位编码", "工位编号", "工位号"),
+    "station_name": ("工位名称", "工位"),
+    "calendar_date": ("日期", "工作日"),
+    "shift": ("班次", "班组"),
+    "start_time": ("开始时间", "上班时间"),
+    "end_time": ("结束时间", "下班时间"),
+    "tooling_code": ("模具编码", "模具编号", "工装编码", "模编号"),
+    "tooling_name": ("模具名称", "工装名称", "模具"),
+    "cost_item": ("成本项目", "费用项目", "成本科目"),
+    "period": ("期间", "月份", "会计期间"),
+    "currency": ("币种", "货币"),
+    "unit_cost": ("单位成本", "成本单价"),
+}
+
+
+def _norm_header(value: Any) -> str:
+    return str(value or "").replace("\n", " ").replace(" ", "").strip().lower()
+
+
+def _generic_field_from_header(value: Any) -> str | None:
+    text = _norm_header(value)
+    if not text:
+        return None
+    # 先精确匹配；再用足够长的别名做子串匹配，避免泛化词（名称/编码）误抢专属字段。
+    for field, aliases in _GENERIC_FIELD_ALIASES.items():
+        if any(_norm_header(alias) == text for alias in aliases):
+            return field
+    for field, aliases in _GENERIC_FIELD_ALIASES.items():
+        if any(len(alias) >= 3 and _norm_header(alias) in text for alias in aliases):
+            return field
+    return None
+
+
+def _generic_observations_from_sheets(extraction: dict[str, Any], kind: str, parser_version: str = "generic.table.v1") -> list[dict[str, Any]]:
+    """从 sample_rows 中找表头行并逐行产出字段观察（raw=normalized）。
+
+    仅对 sample_rows 覆盖的前几行做轻量观察，供候选审核与字段指标测试；
+    深层解析仍由 M1/专用 parser 负责。
+    """
+    observations: list[dict[str, Any]] = []
+    required = set(REQUIRED_FIELDS_BY_KIND.get(kind, ()))
+    if not required:
+        return observations
+    for sheet in extraction.get("sheets", []):
+        rows = sheet.get("sample_rows") or []
+        for header_index, header_row in enumerate(rows):
+            mapping: dict[str, int] = {}
+            for col_index, cell in enumerate(header_row):
+                field = _generic_field_from_header(cell)
+                if field and field not in mapping and (field in required or field in {"skill", "lot_no", "operation_code"}):
+                    mapping[field] = col_index
+            if len(mapping) < 1:
+                continue
+            for row_index in range(header_index + 1, min(header_index + 5, len(rows))):
+                row_values = rows[row_index]
+                for field, col in mapping.items():
+                    if col >= len(row_values) or row_values[col] in (None, ""):
+                        continue
+                    raw = row_values[col]
+                    observations.append({
+                        "field_path": f"$.sheets[{sheet.get('name', '')!r}].rows[{row_index + 1}].{field}",
+                        "sheet": sheet.get("name", ""),
+                        "row": row_index + 1,
+                        "column": col + 1,
+                        "raw_value": raw,
+                        "normalized_value": raw,
+                        "physical_type": _text_type(raw),
+                        "semantic_type": field,
+                        "parser_version": parser_version,
+                    })
+            break
+    return observations
+
 # 表头/内容样本关键词 -> 分类（用于低置信路径分类的内容修正）。
 _CONTENT_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...], float], ...] = (
     ("order", ("订单号", "序号", "型号", "交期", "单价", "采购数量", "金额", "po号", "order"), 0.92),
@@ -499,6 +592,10 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
     order = document if isinstance(document, dict) else {}
     lines = order.get("lines") if isinstance(order.get("lines"), list) else []
     field_observations = []
+    if kind != "order" and kind != "bom" and isinstance(extraction, dict) and (extraction.get("sheets") or extraction.get("sample_rows")):
+        # 通用表头观察器：equipment/worker/inventory/supplier/route/calendar/tooling 等
+        # 非深解析类别也从表头行产出字段级候选观察（raw=normalized + 行列定位）。
+        field_observations.extend(_generic_observations_from_sheets(extraction, kind, parser_version=extraction.get("parser_version") or "generic.table.v1"))
     for field in ("order_id", "order_date", "due_date", "supplier_name", "payment_terms", "delivery_address", "product_code", "quantity", "total_amount"):
         value = order.get(field)
         if value not in (None, ""):
@@ -554,7 +651,7 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
         "order_id": order.get("order_id"),
         "product_code": order.get("product_code"),
         "confidence": document.get("confidence") if isinstance(document, dict) and document.get("confidence") is not None else order.get("confidence", classification_confidence),
-        "review_status": document.get("review_status") if isinstance(document, dict) and document.get("review_status") else ("needs_review" if order else "unclassified"),
+        "review_status": document.get("review_status") if isinstance(document, dict) and document.get("review_status") else ("needs_review" if order else ("candidate" if kind not in {"other", "tabular", "document", "archive"} else "unclassified")),
         **({"sheet_count": document.get("sheet_count"), "bom_line_count": document.get("bom_line_count")} if kind == "bom" and isinstance(document, dict) else {}),
     }
     # 最低字段门槛（任务书 §3.3）：缺少必需字段进入 needs_review 并返回缺失列表，

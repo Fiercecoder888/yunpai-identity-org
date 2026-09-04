@@ -95,3 +95,66 @@ def test_unknown_layout_keeps_90_percent_recall_with_shifted_columns():
     # 型号/数量/交期三个关键字段必须都命中。
     assert metrics["recall"] >= 0.9, f"未知布局 recall {metrics['recall']}: {metrics}"
     assert metrics["precision"] >= 0.9
+
+
+def _extract_to_observations(raw: bytes, filename: str, kind_hint: str) -> tuple[dict, dict, dict]:
+    """用 business_catalog.extract_file 抽取，返回 (truth_like, observed_like, document)。"""
+    from pathlib import Path
+    import tempfile
+
+    from yunpai_langgraph.business_catalog import extract_file
+
+    tmp = Path(tempfile.mkdtemp())
+    path = tmp / filename
+    path.write_bytes(raw)
+    extracted = extract_file(path, root=tmp, parse_xlsx=True)
+    document = extracted["document"]
+    observed: dict[tuple[int, str], object] = {}
+    for observation in extracted.get("field_observations", []):
+        row = observation.get("row")
+        field = observation.get("semantic_type")
+        value = observation.get("raw_value")
+        if row is not None and field and value not in (None, ""):
+            observed[(row, field)] = value
+    return document, observed, extracted
+
+
+def test_equipment_field_precision_recall_above_90(tmp_path):
+    """equipment 表头驱动字段（code/name/line/capacity）precision/recall >= 90%。"""
+    headers = ["设备编码", "设备名称", "产线", "能力"]
+    rows = [["EQ-1", "注塑机", "线1", "250"]]
+    raw = fixtures.xlsx_bytes(headers, rows)
+    document, observed, _ = _extract_to_observations(raw, "equipment.xlsx", "equipment")
+    truth = {(2, "equipment_code"): "EQ-1", (2, "equipment_name"): "注塑机"}
+    metrics = _precision_recall(truth, observed, fields={"equipment_code", "equipment_name", "product_code", "material_code"})
+    assert metrics["recall"] >= 0.9, f"equipment recall {metrics['recall']}: {metrics} obs={observed}"
+    assert document.get("review_status") == "candidate"
+
+
+def test_worker_and_inventory_field_metrics(tmp_path):
+    """worker（工号/姓名/技能）与 inventory（物料/仓库/批次/数量）关键字段高命中。"""
+    worker_raw = fixtures.xlsx_bytes(["工号", "姓名", "技能", "班次"], [["E-1", "张三", "焊接", "白班"]])
+    document_w, observed_w, extracted_w = _extract_to_observations(worker_raw, "worker.xlsx", "worker")
+    assert extracted_w["file_kind"] == "worker"
+    truth_w = {(2, "worker_code"): "E-1", (2, "worker_name"): "张三", (2, "skill"): "焊接"}
+    metrics_w = _precision_recall(truth_w, observed_w, fields={"worker_code", "worker_name", "skill"})
+    assert metrics_w["recall"] >= 0.9, f"worker recall {metrics_w['recall']}: {metrics_w} obs={observed_w}"
+    assert metrics_w["precision"] >= 0.9
+
+    inv_raw = fixtures.xlsx_bytes(["物料编码", "仓库", "批次", "现存数量"], [["M-1", "A仓", "L-1", 88]])
+    document_i, observed_i, extracted_i = _extract_to_observations(inv_raw, "inventory.xlsx", "inventory")
+    assert extracted_i["file_kind"] == "inventory"
+    truth_i = {(2, "material_code"): "M-1", (2, "warehouse"): "A仓", (2, "available_qty"): "88"}
+    metrics_i = _precision_recall(truth_i, observed_i, fields={"material_code", "warehouse", "available_qty"})
+    assert metrics_i["recall"] >= 0.9, f"inventory recall {metrics_i['recall']}: {metrics_i} obs={observed_i}"
+    assert document_i.get("review_status") == "candidate"
+
+
+def test_supplier_field_metrics(tmp_path):
+    """supplier（供应商编码/名称/PO）字段命中。"""
+    raw = fixtures.xlsx_bytes(["供应商编码", "供应商名称", "PO编号"], [["S-1", "苏州厂", "PO-9"]])
+    document, observed, extracted = _extract_to_observations(raw, "supplier.xlsx", "supplier")
+    assert extracted["file_kind"] == "supplier"
+    truth = {(2, "supplier_code"): "S-1", (2, "supplier_name"): "苏州厂"}
+    metrics = _precision_recall(truth, observed, fields={"supplier_code", "supplier_name", "material_code"})
+    assert metrics["recall"] >= 0.9, f"supplier recall {metrics['recall']}: {metrics} obs={observed}"
