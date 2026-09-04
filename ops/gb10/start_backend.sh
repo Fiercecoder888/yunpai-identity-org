@@ -7,14 +7,14 @@ export PYTHONPATH="$ROOT/src"
 export YUNPAI_RUN_DB="${YUNPAI_RUN_DB:-$ROOT/runtime/yunpai-runs.sqlite}"
 export YUNPAI_M5_DB="${YUNPAI_M5_DB:-$ROOT/runtime/yunpai-m5.sqlite}"
 export YUNPAI_TOOL_TRANSPORT="${YUNPAI_TOOL_TRANSPORT:-http}"
-export YUNPAI_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m0,m1,m2,m3,m4,m5}"
-export M0_URL="${M0_URL:-http://127.0.0.1:49503}"
-export M1_URL="${M1_URL:-http://127.0.0.1:50180}"
-export M2_URL="${M2_URL:-http://127.0.0.1:8765}"
-export M3_URL="${M3_URL:-http://127.0.0.1:49108}"
-export M4_URL="${M4_URL:-http://127.0.0.1:49114}"
-export M5_URL="${M5_URL:-http://127.0.0.1:49115}"
 export QWEN_ROUTER_ENABLED="${QWEN_ROUTER_ENABLED:-true}"
+GB10_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m0,m1,m2,m3,m4,m5}"
+GB10_M0_URL="${M0_URL:-http://127.0.0.1:49503}"
+GB10_M1_URL="${M1_URL:-http://127.0.0.1:50180}"
+GB10_M2_URL="${M2_URL:-http://127.0.0.1:8765}"
+GB10_M3_URL="${M3_URL:-http://127.0.0.1:49108}"
+GB10_M4_URL="${M4_URL:-http://127.0.0.1:49114}"
+GB10_M5_URL="${M5_URL:-http://127.0.0.1:49115}"
 if [[ -z "${QWEN_API_KEY:-}" && -r /home/soft/yunpai/dev-39085/config/deploy.env ]]; then
   set -a
   # Reuse the GB10-managed orchestration credential without copying secrets.
@@ -27,6 +27,16 @@ else
   export QWEN_BASE_URL="${QWEN_BASE_URL:-http://127.0.0.1:18085/v1}"
   export QWEN_MODEL="${QWEN_MODEL:-qwen3.6-35b-a3b-fp8-gpu0-200k}"
 fi
+
+# deploy.env may contain legacy module endpoints; restore the values captured
+# before loading it so all modules remain reachable in HTTP mode.
+export YUNPAI_HTTP_MODULES="$GB10_HTTP_MODULES"
+export M0_URL="$GB10_M0_URL"
+export M1_URL="$GB10_M1_URL"
+export M2_URL="$GB10_M2_URL"
+export M3_URL="$GB10_M3_URL"
+export M4_URL="$GB10_M4_URL"
+export M5_URL="$GB10_M5_URL"
 
 # T2 端点守卫：Planner/Qwen 代理地址必须可达且端口正确（18085 是 GB10 的
 # OpenAI-compatible 代理；严禁 127.0.0.1:9/8081/11434 之类未代理端口混入，
