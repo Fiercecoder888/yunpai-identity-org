@@ -14,6 +14,7 @@ export type AgentUiState = {
   pendingGate: Gate | null;
   response: string;
   error?: string;
+  uploadSummary?: Record<string, any>;
   messages: ChatMessage[];
   activity: Activity[];
 };
@@ -40,6 +41,7 @@ export function mergeRunState(current: AgentUiState, state: RunState): AgentUiSt
     outputs: asObject<Record<string, any>>(state.outputs, current.outputs ?? {}),
     pendingGate: state.pending_gate && typeof state.pending_gate === 'object' && !Array.isArray(state.pending_gate) ? state.pending_gate : null,
     response: state.response ?? current.response,
+    uploadSummary: state.upload_summary && typeof state.upload_summary === 'object' ? state.upload_summary as Record<string, any> : current.uploadSummary,
     error: Array.isArray(state.errors) && state.errors.at(-1)?.message ? String(state.errors.at(-1)?.message) : current.error,
   };
 }
@@ -115,7 +117,16 @@ export function summarizeResult(state: AgentUiState) {
     purchaseCount: Array.isArray(m4?.suggestions) ? m4.suggestions.length : undefined,
     scheduleMinutes: typeof metrics.makespan_minutes === 'number' ? metrics.makespan_minutes : undefined,
     lifecycle: typeof m5.lifecycle_status === 'string' ? m5.lifecycle_status : undefined,
+    onTimeRate: metrics.on_time_rate != null ? Number(metrics.on_time_rate) : undefined,
+    tardinessMinutes: metrics.total_tardiness_minutes != null ? Number(metrics.total_tardiness_minutes) : undefined,
+    resourceLoadMinutes: metrics.resource_load_minutes != null ? Number(metrics.resource_load_minutes) : undefined,
   };
+}
+
+export function deriveUploadSummary(state: AgentUiState): Record<string, any> | undefined {
+  // /runs/upload/batch 返回顶层 upload_summary；Skill 输出也可能带 upload_summary。
+  const skillSummary = asObject<Record<string, any>>(state.outputs?.['business-data-identification']?.upload_summary, {});
+  return state.uploadSummary ?? (Object.keys(skillSummary).length ? skillSummary : undefined);
 }
 
 export function moduleName(id: string) {

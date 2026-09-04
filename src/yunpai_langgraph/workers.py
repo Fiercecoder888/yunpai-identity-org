@@ -56,16 +56,34 @@ async def m0_import(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, A
         "id": batch_id, "batch_id": batch_id,
         "status": "awaiting_review" if candidates or quarantined else "failed",
         "candidates": candidates, "quarantined": quarantined,
-        "evidence": [_evidence("m0", "import", f"{len(candidates)} candidates")],
+        # 本地 fixture 语义：候选不是 M0 canonical；生产发布需 HTTP transport + 真实 M0 回读。
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "readback": {"available": False, "detail": "本地 fixture 只登记候选，未发布 canonical；需要 YUNPAI_TOOL_TRANSPORT=http 与真实 M0 base URL/审核授权"},
+        "evidence": [_evidence("m0", "import", f"{len(candidates)} candidates (local fixture, non-canonical)")],
     }
 
 
 async def m0_commit(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    batch_id = str(payload.get("batch_id") or "")
     return {
-        "status": "committed", "batch_id": payload["batch_id"],
-        "master_counts": {"published_batches": 1},
-        "revision": "m0-v1", "ledger_id": f"ledger-{ctx['task_id'][-10:]}",
-        "evidence": [_evidence("m0", payload["batch_id"], "人工批准后的 canonical 发布")],
+        # 任务书 §1.4：data_import_commit=committed 只有在 canonical entity/version、
+        # ledger、outbox 可回读时才成立。本地 fixture 无真实 M0 表，故只记录意图，
+        # 状态显式标记 fixture_recorded，不得表述为已发布 canonical。
+        "status": "fixture_recorded",
+        "batch_id": batch_id,
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "revision": "",
+        "ledger_id": "",
+        "master_counts": {},
+        "readback": {
+            "available": False,
+            "detail": "local transport 无 M0 canonical 表与回读接口；真实发布需部署方提供 M0 URL、PostgreSQL schema/权限、审核授权和写入回读接口",
+        },
+        "evidence": [_evidence("m0", batch_id or "fixture", "本地 fixture 记录发布意图；未发布 canonical、无 ledger/outbox 回读，需人工 Gate 后才可对接真实 M0")],
     }
 
 
@@ -187,12 +205,35 @@ async def m4_purchase(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
 
 
 async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-    # Explicit WIP/v2 facts are handled by the frozen constrained scheduler.
-    # The legacy branch remains available for older lightweight fixtures.
-    if payload.get("pmc_v2") or payload.get("pmc_v2_bundle") or payload.get("calendar_windows") or any(
+    # PMC P1：显式 priority_sort 时按交期/优先级重排订单（不改变默认输入顺序语义）。
+    if str(payload.get("priority_sort") or "").lower() in {"true", "1", "yes"}:
+        orders = payload.get("orders") or []
+        priority_weight = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
+
+        def _sort_key(order: dict[str, Any]) -> tuple:
+            due = str(order.get("due_time") or "")
+            return (priority_weight.get(str(order.get("priority") or "normal").lower(), 2), due, str(order.get("order_id") or ""))
+
+        if orders:
+            payload["orders"] = sorted(orders, key=_sort_key)
+    # PMC P0（补充确认）：显式生产请求（production_use_allowed=true）强制 v2；
+    # legacy 贪心仅允许显式 preview 或本地 fixture 编排（无生产授权标记）。
+    purpose = str(payload.get("scenario_purpose") or "production")
+    explicit_production = bool(payload.get("production_use_allowed")) and str(payload.get("production_use_allowed")).lower() in {"true", "1", "yes"}
+    has_v2_facts = bool(payload.get("pmc_v2") or payload.get("pmc_v2_bundle") or payload.get("calendar_windows") or any(
         isinstance(step, dict) and (step.get("standard_minutes") is not None or step.get("std_minutes") is not None)
         for step in payload.get("routing_steps", [])
-    ):
+    ))
+    legacy_preview = bool(payload.get("legacy_preview")) or str(payload.get("scenario_purpose") or "").lower() in {"preview", "wip_pmc", "wip_pmc_review"}
+    if explicit_production and not has_v2_facts and not legacy_preview:
+        return {
+            "success": False, "code": "BLOCKED_INPUT",
+            "errors": [{"code": "LEGACY_PREVIEW_ONLY", "message": "production_use_allowed=true 的排程必须携带 v2 事实（日历/标准工时/资源快照）；legacy 贪心仅允许显式 preview", "details": []}],
+            "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}}, "scenario_purpose": purpose, "lifecycle_status": "blocked", "input_hash": "", "production_blocked": True},
+            "trace_id": _trace(ctx, "m5-pmc-production-v2-only"),
+            "evidence": [_evidence("m5", "legacy", "显式生产请求缺 v2 事实，拒绝 legacy 贪心排程")],
+        }
+    if has_v2_facts:
         from .pmc_v2_adapter import PmcError, run_pmc_v2
         try:
             result = run_pmc_v2(payload)
@@ -205,7 +246,7 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
             result["trace_id"] = result.get("trace_id") or _trace(ctx, "m5-pmc-v2")
             return result
         except PmcError as exc:
-            return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": payload.get("scenario_purpose", "production"), "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902"}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
+            return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": purpose, "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902"}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
     resources = {str(item["resource_id"]): item for item in payload["resources"]}
     if payload.get("orders") and not payload.get("routing_steps"):
         return {

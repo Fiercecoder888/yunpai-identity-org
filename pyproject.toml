@@ -22,6 +22,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
+# 真实格式解析（非强制：缺库时 file_sniff/xls_reader/archive_extract 会明确
+# unsupported/error，绝不静默降级成二进制摘要）
+parsers = [
+  "xlrd>=2.0.1",    # .xls (BIFF) 真实表头/行/Sheet 抽取
+  "py7zr>=1.0",     # 7z 归档安全解包
+]
 
 [project.scripts]
 yunpai-mcp = "yunpai_langgraph.mcp:main"

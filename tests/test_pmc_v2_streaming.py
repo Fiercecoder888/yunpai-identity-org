@@ -68,3 +68,74 @@ def test_streaming_adapter_satisfies_registered_m5_output_contract():
     assert result["data"]["tracking_task_id"] == "TASK-PMCV2-REGISTRY"
     assert result["data"]["schedule"]["execution_model"] == "STREAMING_FLOW"
     assert result["data"]["schedule"]["production_blocked"] is True
+
+
+def test_production_request_without_v2_facts_is_blocked_not_legacy():
+    from yunpai_langgraph.workers import m5_schedule
+
+    payload = {
+        "scenario_purpose": "production",
+        "production_use_allowed": True,
+        "orders": [{"order_id": "PO-1", "product_id": "P-1", "quantity": 5}],
+        "routing_steps": [{"product_id": "P-1", "operation_id": "OP-1", "sequence": 1, "processing_minutes": 1, "eligible_resources": [{"resource_id": "R-1", "processing_minutes": 1}]}],
+        "resources": [{"resource_id": "R-1", "status": "available"}],
+        "idempotency_key": "ik-prod-block",
+    }
+    result = __import__("asyncio").run(m5_schedule(payload, {"task_id": "TASK-PROD-V2"}))
+    assert result["success"] is False
+    assert result["errors"][0]["code"] == "LEGACY_PREVIEW_ONLY"
+    assert result["data"]["production_blocked"] is True
+    # 同请求显式 preview 标记 -> 允许走 legacy 验证路径。
+    payload["legacy_preview"] = True
+    result = __import__("asyncio").run(m5_schedule(payload, {"task_id": "TASK-PREVIEW"}))
+    assert result["success"] is True
+    assert result["data"]["lifecycle_status"] == "draft"
+
+
+def test_priority_sort_reorders_orders_by_due_and_priority():
+    from yunpai_langgraph.workers import m5_schedule
+
+    payload = {
+        "scenario_purpose": "preview",
+        "legacy_preview": True,
+        "priority_sort": True,
+        "orders": [
+            {"order_id": "PO-LOW", "product_id": "P-1", "quantity": 1, "due_time": "2026-09-30T17:00:00+08:00", "priority": "normal"},
+            {"order_id": "PO-URGENT", "product_id": "P-2", "quantity": 1, "due_time": "2026-09-05T17:00:00+08:00", "priority": "urgent"},
+        ],
+        "routing_steps": [
+            {"product_id": "P-1", "operation_id": "OP-1", "sequence": 1, "processing_minutes": 2, "eligible_resources": [{"resource_id": "R-1", "processing_minutes": 2}]},
+            {"product_id": "P-2", "operation_id": "OP-1", "sequence": 1, "processing_minutes": 2, "eligible_resources": [{"resource_id": "R-1", "processing_minutes": 2}]},
+        ],
+        "resources": [{"resource_id": "R-1", "status": "available"}],
+        "idempotency_key": "ik-priority",
+    }
+    result = __import__("asyncio").run(m5_schedule(payload, {"task_id": "TASK-PRIORITY"}))
+    assert result["success"] is True
+    # urgent 交期靠前 -> 其工序先于 normal 排程。
+    operations = result["data"]["schedule"]["operations"]
+    assert operations[0]["order_id"] == "PO-URGENT"
+    assert operations[1]["order_id"] == "PO-LOW"
+
+
+def test_production_v2_request_requires_explicit_facts_no_defaults():
+    """production_use_allowed=true 的 v2 请求禁止默认值注入。"""
+    import pytest
+
+    from yunpai_langgraph.pmc_v2_adapter import PmcError, run_pmc_v2
+
+    payload = {
+        "scenario_purpose": "production",
+        "production_use_allowed": True,
+        "route_approval_ref": "APPROVED-ROUTE-20260903",
+        "route_version": "v2-approved-1",
+        "orders": [{"order_id": "PO-1", "product_id": "P-1", "quantity": 5}],
+        "calendar_windows": [{"date": "2026-09-03"}],  # 无显式 start_at/end_at
+        "resources": [{"resource_id": "EQ-1", "resource_type": "EQUIPMENT"}],  # 无 capacity/efficiency
+        "routing_steps": [{"product_id": "P-1", "operation_id": "OP-1", "sequence": 1, "standard_minutes": 2, "required_equipment_codes": ["EQ-1"]}],
+        "idempotency_key": "ik-strict",
+    }
+    with pytest.raises(PmcError) as excinfo:
+        run_pmc_v2(payload)
+    assert excinfo.value.code == "BLOCKED_INPUT"
+    assert any(token in excinfo.value.message for token in ("MISSING_CALENDAR_WINDOW", "MISSING_APPROVAL_REF", "MISSING_ROUTE_VERSION"))

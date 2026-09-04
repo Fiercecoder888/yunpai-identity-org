@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, emptyAgentState, moduleProgress, summarizeResult } from './agentState';
+import { applyEvent, deriveUploadSummary, emptyAgentState, mergeRunState, moduleProgress, summarizeResult } from './agentState';
 
 const event = (type: any, payload: any = {}) => ({ type, run_id: 'run-1', task_id: 'task-1', at: '2026-09-03T00:00:00Z', ...payload });
 
@@ -21,5 +21,21 @@ describe('agent state reducer', () => {
       solve_scheduling: { data: { lifecycle_status: 'released', schedule: { metrics: { makespan_minutes: 10 } } } },
     } } }));
     expect(summarizeResult(state)).toEqual({ shortage: 4, purchaseCount: 1, scheduleMinutes: 10, lifecycle: 'released' });
+  });
+
+  it('merges upload summary and derives it from skill outputs', () => {
+    let state = mergeRunState(emptyAgentState(), { run_id: 'run-1', task_id: 'task-1', status: 'completed', upload_summary: { mode: 'master_data', total: 3, accepted: 2, skipped: 1, needs_review: 0, parse_failed: 0 } });
+    expect(state.uploadSummary?.total).toBe(3);
+    expect(deriveUploadSummary(state)?.skipped).toBe(1);
+
+    const fromOutputs = mergeRunState(emptyAgentState(), { run_id: 'run-2', task_id: 'task-2', status: 'completed', outputs: { 'business-data-identification': { upload_summary: { mode: 'directory', total: 1, accepted: 1 } } } });
+    expect(deriveUploadSummary(fromOutputs)?.accepted).toBe(1);
+  });
+
+  it('summarizes PMC P1 objective metrics', () => {
+    const state = applyEvent(emptyAgentState(), event('run_done', { state: { run_id: 'run-1', task_id: 'task-1', status: 'completed', outputs: {
+      solve_scheduling: { data: { lifecycle_status: 'draft', schedule: { metrics: { makespan_minutes: 120, on_time_rate: 0.5, total_tardiness_minutes: 90, resource_load_minutes: 180 } } } },
+    } } }));
+    expect(summarizeResult(state)).toEqual({ scheduleMinutes: 120, lifecycle: 'draft', onTimeRate: 0.5, tardinessMinutes: 90, resourceLoadMinutes: 180 });
   });
 });

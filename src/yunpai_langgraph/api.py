@@ -14,7 +14,7 @@ from .repository import RunRepository, SQLiteRunRepository
 
 def create_app(*, repository: RunRepository | None = None, registry: ToolRegistry | None = None):
     try:
-        from fastapi import FastAPI, File, HTTPException
+        from fastapi import FastAPI, File, Form, HTTPException
         from fastapi.responses import StreamingResponse
     except ImportError as exc: raise RuntimeError("安装 fastapi 后才能启动 HTTP API") from exc
     if repository is None:
@@ -26,7 +26,11 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "module": "yunpai-langgraph", "tools": len(graph.registry.specs), "bound_tools": len(graph.registry.handlers), "skills": len(graph.skills.specs), "planner_model": graph.planner.router.config.public()}
+        payload = {"status": "ok", "module": "yunpai-langgraph", "tools": len(graph.registry.specs), "bound_tools": len(graph.registry.handlers), "skills": len(graph.skills.specs), "planner_model": graph.planner.router.config.public()}
+        environment = getattr(graph.registry, "environment", None)
+        if environment:
+            payload["environment"] = environment
+        return payload
 
     @app.get("/tools")
     async def list_tools(module: str | None = None):
@@ -92,6 +96,76 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         except (KeyError, ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @app.post("/runs/upload/batch")
+    async def upload_batch_run(files: list[Any] = File(...), message: str = Form("请识别并登记这些业务资料"), mode: str = Form(...), tenant_id: str = Form("default")):
+        """目录/基础资料/订单批量上传：显式 mode，逐文件返回状态与批次摘要。
+
+        与单文件 /runs/upload 不同，本端点不靠用户文案猜测模式；缺 content_b64、
+        坏 base64、超限或空文件都会以 skipped/parse_failed 状态逐文件返回，
+        而不是静默继续或整批 400。mode 必须是 order/master_data/directory。
+        """
+        from .uploads import (
+            MAX_BATCH_BYTES,
+            MAX_BATCH_FILES,
+            MAX_FILE_BYTES,
+            UPLOAD_MODES,
+            UploadSummary,
+            sha256_of,
+            to_attachment_record,
+        )
+
+        mode = str(mode).strip()
+        if mode not in UPLOAD_MODES:
+            raise HTTPException(422, {"code": "INVALID_UPLOAD_MODE", "message": f"mode 必须为 {'/'.join(UPLOAD_MODES)} 之一", "allowed": list(UPLOAD_MODES)})
+        if len(files) > MAX_BATCH_FILES:
+            raise HTTPException(413, {"code": "BATCH_TOO_LARGE", "message": f"单批文件数超过 {MAX_BATCH_FILES}"})
+        summary = UploadSummary(mode=mode)
+        attachments: list[dict[str, Any]] = []
+        batch_bytes = 0
+        for index, file in enumerate(files, start=1):
+            raw = await file.read()
+            if not raw:
+                summary.add(to_attachment_record({"filename": str(file.filename or f"upload-{index}.bin")}, mode=mode, status="skipped", reason="empty_content"))
+                continue
+            if len(raw) > MAX_FILE_BYTES:
+                summary.add(to_attachment_record({"filename": str(file.filename or f"upload-{index}.bin"), "size": len(raw)}, mode=mode, status="skipped", reason=f"exceeds_single_file_limit_{MAX_FILE_BYTES}"))
+                continue
+            batch_bytes += len(raw)
+            if batch_bytes > MAX_BATCH_BYTES:
+                summary.add(to_attachment_record({"filename": str(file.filename or f"upload-{index}.bin"), "size": len(raw)}, mode=mode, status="skipped", reason="exceeds_batch_size_limit"))
+                continue
+            digest = sha256_of(raw)
+            attachment = {
+                "id": f"{str(file.filename or f'upload-{index}')}-{index}",
+                "kind": mode if mode in {"order", "master_data"} else "master_data",
+                "filename": str(file.filename or f"upload-{index}.bin"),
+                "relative_path": str(file.filename or f"upload-{index}.bin"),
+                "content_type": file.content_type or "application/octet-stream",
+                "content_b64": base64.b64encode(raw).decode("ascii"),
+                "size": len(raw),
+                "sha256": digest,
+            }
+            attachments.append(attachment)
+            summary.add(to_attachment_record(attachment, mode=mode, status="accepted"))
+        if not attachments:
+            return {
+                "run_id": "", "task_id": "", "status": "failed",
+                "upload_summary": summary.as_dict(),
+                "error": {"code": "NO_ACCEPTED_FILES", "message": "没有可识别的文件"},
+            }
+        request: dict[str, Any] = {
+            "message": message,
+            "upload_mode": mode,
+            "attachments": attachments,
+        }
+        try:
+            state = await graph.run(new_state(request, tenant_id=tenant_id))
+            public = graph._public_state(state)
+            public["upload_summary"] = summary.as_dict()
+            return public
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     @app.get("/runs")
     async def list_runs(tenant_id: str | None = None, limit: int = 100):
         return {"runs": [graph._public_state(state) for state in graph.repository.list(tenant_id=tenant_id, limit=limit)]}
@@ -134,6 +208,50 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
                 actor=str(body.get("actor", "operator")),
             )
         )
+
+    # ---- PMC 计划/执行双轨只读与管理端点（本地 fixture 语义；HTTP 真实 M5 由部署方提供） ----
+
+    def _plan_store_path() -> Path:
+        path = Path(os.getenv("YUNPAI_PLAN_DB", "runtime/yunpai-plans.sqlite"))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @app.get("/plans/{scenario_id}")
+    async def list_plans(scenario_id: str):
+        from .pmc_plan_store import PmcPlanStore
+
+        return {"scenario_id": scenario_id, "versions": PmcPlanStore(_plan_store_path()).list_versions(scenario_id)}
+
+    @app.get("/plans/{scenario_id}/diff")
+    async def diff_plans(scenario_id: str, left: str, right: str):
+        from .pmc_plan_store import PmcPlanStore
+
+        try:
+            return PmcPlanStore(_plan_store_path()).diff_versions(scenario_id, left, right)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/plans/{scenario_id}/{plan_version}/transition")
+    async def transition_plan(scenario_id: str, plan_version: str, body: dict[str, Any]):
+        from .pmc_plan_store import PmcPlanStore
+
+        target = str(body.get("target") or "")
+        try:
+            result = PmcPlanStore(_plan_store_path()).transition(
+                scenario_id=scenario_id, plan_version=plan_version, target=target,
+                actor=str(body.get("actor") or "operator"), task_id=str(body.get("task_id") or ""),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return result
+
+    @app.get("/pmc/execution/{plan_version}")
+    async def pmc_execution_summary(plan_version: str):
+        from .pmc_execution import PmcExecutionStore
+
+        db_path = Path(os.getenv("YUNPAI_EXEC_DB", "runtime/yunpai-execution.sqlite"))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        return PmcExecutionStore(db_path).execution_summary(plan_version)
     return app
 
 

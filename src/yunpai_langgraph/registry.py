@@ -175,10 +175,18 @@ def _extract_uploads(body: dict[str, Any]) -> list[tuple[str, tuple[str, bytes, 
 
 def build_runtime_registry() -> ToolRegistry:
     registry = build_default_registry()
-    if os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower() == "http":
+    transport = os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower()
+    env = os.getenv("YUNPAI_ENV", "sandbox").lower()
+    if env == "production" and transport != "http":
+        # 生产环境护栏：拒绝用 local fixture 当生产工具面；必须由部署方提供 M0-M5 URL。
+        raise RuntimeError("YUNPAI_ENV=production 要求 YUNPAI_TOOL_TRANSPORT=http（本地 fixture 仅限 sandbox/preview）")
+    if transport == "http":
         urls = {
             module: os.getenv(f"{module.upper()}_URL", registry.tools_for(module)[0].base_url if registry.tools_for(module) else "")
             for module in ("m0", "m1", "m2", "m3", "m4", "m5")
         }
         registry.bind_http({module: url for module, url in urls.items() if url})
+        registry.environment = {"env": env, "transport": "http", "local_fixture": False}  # type: ignore[attr-defined]
+    else:
+        registry.environment = {"env": env, "transport": "local", "local_fixture": True}  # type: ignore[attr-defined]
     return registry
