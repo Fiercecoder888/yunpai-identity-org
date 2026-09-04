@@ -39,6 +39,7 @@
 按时间倒序追加：日期、完成事项、证据 ID、遗留问题、下一步和确认来源。不要覆盖旧记录。
 
 - 2026-09-05：完成 M1-M5 Orchestrator 集成代码与本地验收；集成 origin/dev(M5)+origin/main(M3/M4)+M1 分支到 dev；新增 m1_m5_document_to_plan/canonical_to_m5 workflow、多格式上传入口、required-capability Gate、orchestration_bridge 六类 snapshot、Apply Gate 真实 M5 release（单事务 draft→approved→released+head CAS）、受信 principal/角色 Gate、MES durable pending 边界；完整后端 292 passed、2 skipped，账本/diff 通过；证据 E-M1M5-ORCH-CODE-001；遗留为 GB10 真实订单发布回读需人工审批角色与样本；确认来源：本次实施与验证。
+- 2026-09-05：完成本地/远端未合并代码审计；确认 DeepSeek M1/M2 `6045624` 及其合并提交已在 `origin/main`/`origin/dev`，PMC/M1 Skill 分支的运行时代码已有等价主线实现，剩余未合入提交为重复补丁或文档；远端两分支随后统一到 `c6cbcb5`；证据 E-GIT-MERGE-AUDIT-20260905；遗留仍为 M0 canonical、产品/BOM/SOP 和 M3-M5 真实数据阻塞；确认来源：本次 Git 审计。
 - 2026-09-05：在 GB10 创建隔离 release `20260905013000` 部署 `dev@05d4cba`，39094 health 为 114/112 bound、M0-M5 HTTP 端点可探测；Qwen 从加载中恢复后 Planner 正常。真实订单 run `run-5b4eeb4812184ceb88b975b2c2c65e44` 通过 M1 review 和 M0 candidate Gate，M0 批次 `613a3b4744de` 显示 5 行 incomplete/无实体，随后已回滚；流程在 M2 `BLOCKED_INPUT` 数据 Gate 停止。证据 E-GB10-M1M5-REAL-001；确认真实 GB10 联调已开始但 M1 订单行语义与 M2 权威 BOM/SOP 仍阻塞，39092/current 未改动；确认来源：用户授权本次隔离部署与实测。
 
 - 2026-09-04：生成不依赖聊天历史的 M1-M5 Orchestrator 直接执行任务书；证据 `E-PLAN-M1M5-ORCH-001`；任务书列明当前工具分支、全部基础资料位置、GB10/Qwen、九个流程断点、六项实施任务、真实 E2E 门槛和最终回执；当前只完成规划与任务交接，尚未实施或声明生产闭环完成；确认来源：用户请求。
