@@ -213,4 +213,30 @@ def run_pmc_v2(payload: dict[str, Any]) -> dict[str, Any]:
         "summary_metrics": wip["summary_metrics"],
         "wip_source_ref": wip["source_ref"],
     })
-    return {"success": not blocks, "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": schedule, "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": digest, "algorithm_version": "pmc-v2-frozen-20260902", "input_package": {"order_snapshots": bundle["order_snapshots"], "routes": bundle["routes"], "resource_snapshot": bundle["resource_snapshot"], "calendar_snapshot": bundle["calendar_snapshot"], "supply_snapshot": bundle["supply_snapshot"], "constraint_snapshot": bundle["constraint_snapshot"]}, "validator": schedule["validation_report"], "blocks": blocks, "wip": bundle["supply_snapshot"].get("entries", []), "wip_pmc": wip}, "errors": [{"code": "BLOCKED_INPUT", "message": b.get("reason", "") , "details": [b]} for b in blocks], "trace_id": f"m5:pmc-v2:{digest[:12]}", "evidence": [{"module": "m5", "source_ref": "pmc_v2_frozen", "evidence_ref": "pmc-v2-frozen-20260902", "detail": "WIP/工时/产能/换型/日历约束求解"}, {"module": "m5", "source_ref": "wip-pmc-reuse-20260901", "evidence_ref": "wip-pmc-reuse-20260901", "detail": "工位状态段、工位间 WIP、人工利用率投影"}]}
+    result = {"success": not blocks, "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": schedule, "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": digest, "algorithm_version": "pmc-v2-frozen-20260902", "input_package": {"order_snapshots": bundle["order_snapshots"], "routes": bundle["routes"], "resource_snapshot": bundle["resource_snapshot"], "calendar_snapshot": bundle["calendar_snapshot"], "supply_snapshot": bundle["supply_snapshot"], "constraint_snapshot": bundle["constraint_snapshot"]}, "validator": schedule["validation_report"], "blocks": blocks, "wip": bundle["supply_snapshot"].get("entries", []), "wip_pmc": wip}, "errors": [{"code": "BLOCKED_INPUT", "message": b.get("reason", "") , "details": [b]} for b in blocks], "trace_id": f"m5:pmc-v2:{digest[:12]}", "evidence": [{"module": "m5", "source_ref": "pmc_v2_frozen", "evidence_ref": "pmc-v2-frozen-20260902", "detail": "WIP/工时/产能/换型/日历约束求解"}, {"module": "m5", "source_ref": "wip-pmc-reuse-20260901", "evidence_ref": "wip-pmc-reuse-20260901", "detail": "工位状态段、工位间 WIP、人工利用率投影"}]}
+    # PMC P0 计划持久化（可选）：提供 plan_store_db 时把本次求解写为 draft，
+    # 回填持久 plan_version 与 solver_hash；不改变默认 local 求解行为。
+    plan_db = payload.get("plan_store_db") or payload.get("plan_db_path")
+    if plan_db:
+        try:
+            from .pmc_plan_store import PmcPlanStore
+
+            store = PmcPlanStore(plan_db)
+            solver_hash = f"pmc-v2:{digest[:16]}"
+            scenario_id = str(payload.get("scenario_id") or f"scenario-{digest[:8]}")
+            plan = store.save_draft(
+                scenario_id=scenario_id, purpose=str(payload.get("scenario_purpose") or "production"),
+                payload=payload, input_hash=digest, solver_hash=solver_hash,
+                idempotency_key=str(payload.get("idempotency_key") or f"ik-{digest[:12]}"),
+                task_id=str(payload.get("tracking_task_id") or ""),
+            )
+            data = result.setdefault("data", {})
+            schedule.setdefault("plan_version", plan.get("plan_version"))
+            data["plan_version"] = plan.get("plan_version")
+            data["solver_hash"] = solver_hash
+            data["scenario_id"] = scenario_id
+            data["plan_store"] = {"scenario_id": scenario_id, "plan_version": plan.get("plan_version"), "lifecycle_status": "draft", "head": plan.get("head")}
+            data.setdefault("evidence", [])
+        except Exception as exc:  # 持久化失败不吞求解结果，附加错误可见。
+            result.setdefault("data", {})["plan_store_error"] = str(exc)
+    return result
