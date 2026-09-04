@@ -2,7 +2,7 @@
 
 申请人：DeepSeek Harness（run `20260905-m1m2-023101`，分支
 `dsh/m1-m2-remediation-20260905`）
-状态：**待集成负责人/授权人批准后执行**（本任务不自行重启/修改 GB10）
+状态：**已批准并执行（2026-09-05）**，结果见 docs/DEEPSEEK_M1M2_EVIDENCE_20260905.md §4；run run-c9dd3120aa5b432ba99433292f5ee152、M0 batch 33951efa82a2（已回滚）、M2 health 127.0.0.1:9（冻结实例未改）
 
 ## 目的
 

@@ -98,3 +98,37 @@ SHA-256：`9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341`
   M3/M4 业务实现、其他 session 文件（主工作区 `.project-to-act/*` 未触碰）。
 - 受限说明：真实 M1/M2 冻结服务联调与 M0 canonical 行为需 GB10 隔离 release
   重放确认（另见重放申请）；本地证据不代表 GB10 真实链路已验收。
+
+## 4. GB10 隔离重放结果（2026-09-05，批准后执行）
+
+- 隔离 release：`releases/20260905031050`（本分支 8b13a9a 源码，独立 runtime DB）；
+  backend `127.0.0.1:9002`，proxy `0.0.0.0:39094`（前端复用保留 release 的 dist）；
+  M0-M5 复用共享冻结实例 `49503/49506/49507/49508/49514/49515`（只读/候选/回滚，
+  未写 canonical）；正式 `39092`/`current`/`9000` 全程未动。
+- 真实上传 run：`run-c9dd3120aa5b432ba99433292f5ee152`（tenant
+  `dsh-m1m2-20260905`，task `task-991bf9eab2034b4fb7a0117125a9c290`）。
+- **M1（外部真实冻结栈 49506）**：返回 `m1.document.v2` 且本次已含有效订单头
+  `order_number=WX20241220001`（evidence：sheet 1 / cell B2）与 **2 条订单行**
+  （line_id `1:8`/`1:9`，model=无(占位)、name_raw 2.0版本HDMI…、spec 15M/20M、
+  quantity 500/500），`needs_review=true` → orchestrator 打开 `type=review` Gate；
+  review_assessment blockers：`MODEL_DUPLICATE(无)`、缺 unit、order_number 置信 0.75
+  等 → 人工复核后再放行（符合“缺字段/低置信进入 review Gate”）。
+  `semantic_supplement` **未附加**（外部结果已含订单号+行，规则仅在真实缺口时
+  触发，外部结果未被覆盖/改写）。
+- **M0（外部真实冻结栈 49503）**：data_import_run 生成 batch
+  `33951efa82a2`，M0 `m0-table-v1` 仍把同一样本判为 `domain=inventory`、
+  `confidence=0.99`、`rows.incomplete=5`、`entities={}` —— 与 run-5b4eeb 相同，
+  说明“订单被识别成库存”根因在**冻结 M0 自身内容解析/判类**（仓库外）。
+  本任务未改冻结 M0；已对 batch 执行 rollback（`status=rolled_back`），未写
+  canonical。建议集成方：M0 导入改消费 M1 已复核 `m1.document.v2`
+  （header/lines/证据），或让 `m0-table-v1` 支持该订单表头布局（冻结栈补丁）。
+- **M2**：`GET 127.0.0.1:49507/api/health` 返回
+  `{"status":"unavailable","base_url":"http://127.0.0.1:9",...}` —— 共享冻结 M2
+  实例 env 仍未指向 18085 代理（未修改正式/冻结实例）；编排器端不可达映射为
+  可恢复 `BLOCKED_INPUT` 数据 Gate 已由本地单测证明
+  （`tests/test_m2_qwen_endpoint.py`）。隔离重放中未强行跑 M3/M4/M5。
+- 清理：隔离 backend/proxy 进程已停（9002/39094 释放），M0 batch 已回滚，
+  release `20260905031050` 保留，证据文件
+  `replay-state-1.json`/`replay-state-2.json` 已在 run 目录 evidence/ 留档。
+- 结论：M1 真实重放达到验收（有效订单头+2 订单行 + review Gate）；
+  M0/M2 真实验收仍被冻结栈行为阻塞（已定位根因与建议补丁，属仓库外）。
