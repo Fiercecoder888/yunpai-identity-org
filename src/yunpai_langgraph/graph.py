@@ -30,6 +30,28 @@ def _file_object(filename: str, value: Any) -> dict[str, str]:
     }
 
 
+def _batch_id_from_result(value: Any) -> str | None:
+    """Extract an M0 batch id from local or HTTP-wrapped tool output.
+
+    The standalone M0 service wraps upload responses as
+    ``{"success": true, "data": {"id": "..."}}`` while the local handler
+    returns ``batch_id`` at the top level.  Workflow continuation must use the
+    service's batch id, not the wrapper object or an unrelated import id.
+    """
+    if not isinstance(value, dict):
+        return None
+    data = result_data(value)
+    candidates: list[Any] = [data.get("batch_id"), data.get("id")]
+    batch = data.get("batch")
+    if isinstance(batch, dict):
+        candidates.extend((batch.get("batch_id"), batch.get("id")))
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return None
+
+
 def _due_time(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -593,10 +615,10 @@ class YunpaiGraph:
             }
         if tool == "data_import_commit":
             imported = outputs.get("data_import_run", {})
-            return {"batch_id": imported.get("batch_id") or imported.get("id")}
+            return {"batch_id": _batch_id_from_result(imported) or ""}
         if tool == "data_import_preview":
             imported = outputs.get("data_import_run", {})
-            return {"batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id")}
+            return {"batch_id": request.get("batch_id") or _batch_id_from_result(imported) or ""}
         if tool == "data_import_resolve":
             imported = outputs.get("data_import_run", {})
             kind = request.get("kind")
@@ -606,7 +628,7 @@ class YunpaiGraph:
             if action not in {"approve", "reject"}:
                 raise ValueError("data_import_resolve 需要显式 action(approve|reject)，禁止伪造裁决")
             return {
-                "batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id"),
+                "batch_id": request.get("batch_id") or _batch_id_from_result(imported) or "",
                 "kind": kind, "id": request.get("id", 0), "action": action,
             }
         if tool == "ingest_document":

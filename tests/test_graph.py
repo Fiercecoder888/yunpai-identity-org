@@ -125,6 +125,18 @@ async def test_m5_payload_preserves_all_m1_order_lines():
     assert [(item["product_id"], item["quantity"]) for item in payload["orders"]] == [("P-1", 2), ("P-2", 1)]
 
 
+def test_m0_commit_payload_unwraps_http_batch_response():
+    graph = YunpaiGraph()
+    state = new_state({"workflow": "m0_m5", "message": "提交 M0 批次"})
+    state["outputs"] = {
+        "data_import_run": {
+            "success": True,
+            "data": {"id": "batch-http-001", "status": "ready"},
+        }
+    }
+    assert graph._payload_for(state, "data_import_commit") == {"batch_id": "batch-http-001"}
+
+
 @pytest.mark.asyncio
 async def test_unbound_free_tool_fails_closed():
     graph = YunpaiGraph()
