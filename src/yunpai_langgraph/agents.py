@@ -21,12 +21,25 @@ INTENT_TO_TOOL = (
 
 BUSINESS_DATA_SKILL = "business-data-identification"
 
+# 任务书 5.1 的使用顺序：高阶 Skill 多步提案必须满足此偏序。
+SKILL_USAGE_ORDER = (
+    "business-data-identification",
+    "yunpai-m1-document-parser",
+    "yunpai-m0-data-foundation",
+    "yunpai-m2-bom-sop",
+    "yunpai-m3-material-planning",
+    "yunpai-m4-procurement",
+    "yunpai-m5-pmc",
+    "yunpai-m5-pmc-lifecycle",
+)
+
 INTENT_TO_SKILL = (
     (("主数据治理", "canonical", "资料治理"), "yunpai-m0-data-foundation"),
     (("文档智能", "文档审核", "解析报告"), "yunpai-m1-document-parser"),
     (("工程控制", "bom审核", "sop审核"), "yunpai-m2-bom-sop"),
     (("物料齐套", "物料计划", "mrp分析"), "yunpai-m3-material-planning"),
     (("采购跟踪", "供应商跟踪", "采购预警"), "yunpai-m4-procurement"),
+    (("排程求解", "智能排程", "排程检查", "排程就绪", "资源负载"), "yunpai-m5-pmc"),
     (("排程生命周期", "排程版本", "生产执行", "派工", "报工", "执行回传", "flow board"), "yunpai-m5-pmc-lifecycle"),
 )
 
@@ -37,6 +50,11 @@ class PlannerAgent:
     def __init__(self, router: QwenRouter | None = None, skills: SkillRegistry | None = None) -> None:
         self.router = router or QwenRouter()
         self.skills = skills or build_default_skill_registry()
+        # QwenRouter 构建 prompt 时读取同一 Skill catalog（含版本），模型只做提案。
+        try:
+            self.router.skills = self.skills  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     def plan(self, request: dict[str, Any], registry: ToolRegistry) -> dict[str, Any]:
         return self._deterministic_plan(request, registry, self.skills)
@@ -78,6 +96,9 @@ class PlannerAgent:
                 "model": model_result.get("model", {}),
             }
         proposed = self._model_plan(decision, registry, self.skills)
+        if isinstance(proposed, dict) and proposed.get("_invalid_reason"):
+            invalid_reason = str(proposed["_invalid_reason"])
+            return {**fallback, "intent": {"name": decision.get("intent", "unknown"), "confidence": decision.get("confidence", 0.0), "source": "qwen_rejected"}, "route_decision": {"source": "deterministic_fallback", "model_status": "invalid_decision", "model_proposal": decision, "reject_reason": invalid_reason}, "model": model_result.get("model", {})}
         if proposed is None:
             return {**fallback, "intent": {"name": decision.get("intent", "unknown"), "confidence": decision.get("confidence", 0.0), "source": "qwen_rejected"}, "route_decision": {"source": "deterministic_fallback", "model_status": "invalid_decision", "model_proposal": decision}, "model": model_result.get("model", {})}
         if proposed.get("route") == "chat" and not proposed.get("response"):
@@ -93,16 +114,32 @@ class PlannerAgent:
             workflow = load_workflow("m0_m5")
             return {"route": "workflow", "steps": [{**step, "mode": "workflow"} for step in workflow["steps"]], "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": decision.get("reason") or "Qwen 判定为 M0→M5 受控业务目标"}
         if route == "free":
-            tools = [name for name in decision.get("tools", []) if name in registry.specs]
-            if any(name not in registry.handlers for name in tools):
-                return None
-            skill_names = [name for name in decision.get("skills", []) if skills and name in skills.specs]
+            requested_tools = [str(name) for name in decision.get("tools", [])]
+            requested_skills = [str(name) for name in decision.get("skills", [])] if skills else []
+            invalid_tools = [name for name in requested_tools if name not in registry.specs]
+            invalid_skills = [name for name in requested_skills if skills is None or name not in skills.specs]
+            if invalid_tools or invalid_skills:
+                return {"_invalid_reason": f"模型提案含未注册工具或 Skill: tools={invalid_tools} skills={invalid_skills}"}
+            tools = [name for name in requested_tools if name in registry.handlers]
+            if any(name not in registry.handlers for name in requested_tools):
+                return {"_invalid_reason": "模型提案包含未绑定 handler 的工具，拒绝执行"}
+            skill_names = [name for name in requested_skills if skills and name in skills.specs]
             if not tools and not skill_names:
                 return None
+            if not PlannerAgent._respects_skill_order(skill_names):
+                return {"_invalid_reason": f"Skill 提案违反任务书使用顺序: {skill_names}"}
             steps = [{"id": f"free-{index}", "module": registry.specs[name].module, "tool": name, "mode": "free", "http_method": registry.specs[name].method} for index, name in enumerate(tools)]
             steps.extend({"id": f"skill-{index}", "module": "orchestrator", "tool": name, "kind": "skill", "mode": "free"} for index, name in enumerate(skill_names, start=len(steps)))
             return {"route": "free", "steps": steps, "reason": decision.get("reason") or "Qwen 路由到自由工具/Skill 路径"}
         return None
+
+    @staticmethod
+    def _respects_skill_order(skill_names: list[str]) -> bool:
+        """多个高阶 Skill 提案必须满足 SKILL_USAGE_ORDER 偏序；单 Skill 恒通过。"""
+        if len(skill_names) <= 1:
+            return True
+        positions = [SKILL_USAGE_ORDER.index(name) for name in skill_names if name in SKILL_USAGE_ORDER]
+        return positions == sorted(positions)
 
     def _deterministic_plan(self, request: dict[str, Any], registry: ToolRegistry, skills: SkillRegistry | None = None) -> dict[str, Any]:
         text = str(request.get("message") or request.get("task") or "").lower()
@@ -114,6 +151,9 @@ class PlannerAgent:
                 raise ValueError(f"未注册 Skill: {requested_skill}")
             return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": str(requested_skill), "kind": "skill", "mode": "free"}], "reason": f"显式选择已注册 Skill: {requested_skill}"}
         if skills:
+            upload_mode = str(request.get("upload_mode") or request.get("business_data_mode") or "")
+            if upload_mode in {"master_data", "directory"} and BUSINESS_DATA_SKILL in skills.specs:
+                return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": BUSINESS_DATA_SKILL, "kind": "skill", "mode": "free"}], "reason": f"显式上传模式 {upload_mode} 绑定业务资料识别 Skill"}
             for keywords, skill_name in INTENT_TO_SKILL:
                 if skill_name in skills.specs and any(keyword in text for keyword in keywords):
                     return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": skill_name, "kind": "skill", "mode": "free"}], "reason": f"语义匹配高阶 Skill: {skill_name}"}
@@ -122,6 +162,9 @@ class PlannerAgent:
             workflow = load_workflow("m0_m5")
             steps = [{**step, "mode": "workflow"} for step in workflow["steps"]]
             return {"route": "workflow", "steps": steps, "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": "识别为 M0→M5 受控业务目标"}
+        upload_mode = str(request.get("upload_mode") or request.get("business_data_mode") or "")
+        if upload_mode == "order" and "ingest_document" in registry.specs:
+            return {"route": "free", "steps": [{"id": "free-0", "module": registry.specs["ingest_document"].module, "tool": "ingest_document", "mode": "free", "http_method": registry.specs["ingest_document"].method}], "reason": "显式上传模式 order 绑定订单解析工具"}
 
         requested_tools: list[str] = []
         if isinstance(request.get("tools"), list):
@@ -165,7 +208,21 @@ class PlannerAgent:
     @staticmethod
     def _business_skill_requested(request: dict[str, Any]) -> bool:
         text = str(request.get("message") or request.get("task") or "").lower()
-        return bool(request.get("business_data_root") or request.get("root_path") or request.get("business_data_mode") or any(keyword in text for keyword in ("业务资料", "业务数据", "资料识别", "识别并落库", "文件落库")))
+        if bool(request.get("business_data_root") or request.get("root_path") or request.get("business_data_mode")):
+            return True
+        # 基础资料/业务资料上传显式绑定 business-data-identification，不依赖文案猜测。
+        upload_mode = str(request.get("upload_mode") or "")
+        upload_items = list(request.get("documents", [])) + list(request.get("attachments", []))
+        has_upload = any(isinstance(item, dict) and item.get("content_b64") for item in upload_items)
+        has_order_kind = any(isinstance(item, dict) and item.get("kind") in {"order", "directory"} for item in upload_items)
+        has_master_data_kind = any(isinstance(item, dict) and item.get("kind") == "master_data" for item in upload_items)
+        if upload_mode in {"master_data", "directory"}:
+            return True
+        if has_master_data_kind:
+            return True
+        if has_upload and not has_order_kind and any(keyword in text for keyword in ("基础资料", "业务资料", "业务数据", "资料识别", "识别并落库", "文件落库", "主数据", "设备资料", "人员资料", "库存资料", "供应商资料")):
+            return True
+        return any(keyword in text for keyword in ("业务资料", "业务数据", "资料识别", "识别并落库", "文件落库"))
 
 
 class WorkerAgent:
@@ -243,6 +300,11 @@ class ReviewerAgent:
         if effective_tool in {"data_import_run", "business-data-identification"}:
             if result.get("status") == "failed":
                 return {"approved": False, "terminal": True, "error": {"code": "IMPORT_FAILED", "message": "M0 未生成可审核候选"}}
+            sensitivity = result.get("sensitivity_summary") if isinstance(result.get("sensitivity_summary"), dict) else {}
+            sensitive = {kind: count for kind, count in sensitivity.items() if kind in {"hr", "financial"} and int(count) > 0}
+            if sensitive and effective_tool == "business-data-identification":
+                detail = "、".join(f"{kind}={count}" for kind, count in sensitive.items())
+                return self._gate("sensitive_data", effective_module, effective_tool, f"候选包含敏感资料（{detail}）；必须由授权人员复核后才可进入 M0 canonical 发布", ["授权复核", "拒绝", "终止"])
             message = "业务资料候选已写入识别库，必须审核后才能进入 M0 canonical 发布" if effective_tool == "business-data-identification" else "M0 候选必须审核后才能发布 canonical 事实"
             return self._gate("candidate", effective_module, effective_tool, message, ["批准候选", "补充裁决", "终止"])
         if effective_tool == "ingest_document" and (result.get("needs_review") or float(result.get("overall_confidence") or 0) < 0.8):

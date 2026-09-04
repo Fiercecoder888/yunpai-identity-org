@@ -131,31 +131,52 @@ async def test_unbound_free_tool_fails_closed():
 
 @pytest.mark.asyncio
 async def test_free_side_effect_tool_requires_pre_execution_authorization():
+    import base64
+    import json
+
     calls = []
     graph = YunpaiGraph()
     original = graph.registry.handlers["data_import_commit"]
 
-    async def tracked(payload, context):
-        calls.append((payload, context))
-        return await original(payload, context)
+    # 先用 data_import_run 登记真实 sandbox batch（commit 的合同前置）。
+    import os
+    import tempfile
 
-    graph.registry.handlers["data_import_commit"] = tracked
-    state = await graph.run(new_state({
-        "tool": "data_import_commit",
-        "payloads": {"data_import_commit": {"batch_id": "batch-1"}},
-    }))
-    assert state["status"] == "waiting_human"
-    assert state["pending_gate"]["type"] == "authorization"
-    assert state["pending_gate"]["pre_execution"] is True
-    assert state["steps"] == []
-    assert calls == []
+    sandbox_db = os.path.join(tempfile.mkdtemp(), "m0-sandbox.sqlite")
+    prior_env = os.environ.get("YUNPAI_M0_SANDBOX_DB")
+    os.environ["YUNPAI_M0_SANDBOX_DB"] = sandbox_db
+    try:
+        run_result = await graph.registry.call("data_import_run", {
+            "files": [{"filename": "order.json", "content_b64": base64.b64encode(json.dumps({"records": [{"kind": "order"}]}).encode()).decode()}],
+        }, {"task_id": "TASK-AUTH-1", "tenant_id": "default"})
+        batch_id = run_result["batch_id"]
 
-    state = await graph.resume(state, "approve", actor="operator-1")
-    assert state["status"] == "completed"
-    assert len(calls) == 1
-    assert len(state["steps"]) == 1
-    assert state["steps"][0]["status"] == "completed"
-    assert state["authorized_steps"] == ["free-0"]
+        async def tracked(payload, context):
+            calls.append((payload, context))
+            return await original(payload, context)
+
+        graph.registry.handlers["data_import_commit"] = tracked
+        state = await graph.run(new_state({
+            "tool": "data_import_commit",
+            "payloads": {"data_import_commit": {"batch_id": batch_id}},
+        }))
+        assert state["status"] == "waiting_human"
+        assert state["pending_gate"]["type"] == "authorization"
+        assert state["pending_gate"]["pre_execution"] is True
+        assert state["steps"] == []
+        assert calls == []
+
+        state = await graph.resume(state, "approve", actor="operator-1")
+        assert state["status"] == "completed"
+        assert len(calls) == 1
+        assert len(state["steps"]) == 1
+        assert state["steps"][0]["status"] == "completed"
+        assert state["authorized_steps"] == ["free-0"]
+    finally:
+        if prior_env is None:
+            os.environ.pop("YUNPAI_M0_SANDBOX_DB", None)
+        else:
+            os.environ["YUNPAI_M0_SANDBOX_DB"] = prior_env
 
 
 @pytest.mark.asyncio

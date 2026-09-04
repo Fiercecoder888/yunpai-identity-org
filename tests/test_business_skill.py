@@ -20,7 +20,28 @@ def test_planner_selects_business_data_skill_for_upload_intent():
     assert decision["steps"][0]["kind"] == "skill"
 
 
-def test_high_level_skills_are_registered_with_tool_descriptions():
+def test_master_data_attachment_binds_identification_skill_without_keyword():
+    planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
+    decision = planner.plan({
+        "message": "请导入并审核这些文件",
+        "attachments": [{"kind": "master_data", "filename": "设备台账.xlsx", "content_b64": "AA=="}],
+    }, build_default_registry())
+    assert decision["route"] == "free"
+    assert decision["steps"][0]["tool"] == "business-data-identification"
+
+
+def test_order_attachment_does_not_bind_identification_skill_by_kind():
+    planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
+    decision = planner.plan({
+        "message": "根据订单附件执行订单到排程",
+        "attachments": [{"kind": "order", "filename": "order.xlsx", "content_b64": "AA=="}],
+        "workflow": "m0_m5",
+    }, build_default_registry())
+    assert decision["route"] == "workflow"
+    assert decision["steps"][0]["tool"] == "data_import_run"
+
+
+def test_skill_catalog_exposes_versioned_skill_ids():
     catalog = {item["name"]: item for item in build_default_skill_registry().catalog()}
     expected = {
         "business-data-identification",
@@ -36,6 +57,19 @@ def test_high_level_skills_are_registered_with_tool_descriptions():
     assert "solve_scheduling" in catalog["yunpai-m5-pmc"]["tools"]
     assert "dispatch_m5_schedule" in catalog["yunpai-m5-pmc-lifecycle"]["tools"]
     assert all(item["description"] for item in catalog.values())
+    assert all(item["version"] for item in catalog.values())
+    assert all(item["skill_id"] == f"{item['name']}@{item['version']}" for item in catalog.values())
+
+
+def test_skill_execution_records_versioned_evidence_and_contract():
+    from yunpai_langgraph.contracts import ToolSpec
+    from yunpai_langgraph.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec("get_m5_schedule", "m5", "查询排程", {"type": "object"}, {"type": "object"}), None)
+    result = build_default_skill_registry().specs["yunpai-m5-pmc-lifecycle"]
+    assert result.version >= "1.0.0"
+    assert result.contract_version == "yunpai.skill-contract.v1"
 
 
 def test_planner_routes_explicit_and_semantic_pmc_lifecycle_skill():
@@ -119,3 +153,22 @@ async def test_business_data_skill_runs_after_planner_and_opens_review_gate(tmp_
     assert state["pending_gate"]["type"] == "candidate"
     assert any(event.get("event") == "agent.intent" for event in state["trace"])
     assert any(event.get("event") == "agent.route" and "business-data-identification" in event.get("selected_tools", []) for event in state["trace"])
+
+
+@pytest.mark.asyncio
+async def test_worker_data_opens_sensitive_data_gate(tmp_path):
+    from openpyxl import Workbook
+
+    root = tmp_path / "hr"
+    root.mkdir()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["工号", "姓名", "技能", "班次"])
+    sheet.append(["E-01", "张三", "焊接", "白班"])
+    workbook.save(root / "员工技能表.xlsx")
+    graph = YunpaiGraph()
+    graph.planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), graph.skills)
+    state = await graph.run(new_state({"message": "识别并落库业务资料", "business_data_root": str(root), "business_catalog_db": str(tmp_path / "catalog.sqlite")}))
+    assert state["status"] == "waiting_human"
+    assert state["pending_gate"]["type"] == "sensitive_data"
+    assert "敏感" in state["pending_gate"]["message"]

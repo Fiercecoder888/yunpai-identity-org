@@ -19,6 +19,9 @@ class SkillSpec:
     handler: SkillHandler
     tags: tuple[str, ...] = field(default_factory=tuple)
     tools: tuple[str, ...] = field(default_factory=tuple)
+    version: str = "1.0.0"
+    # 与 registry 工具/上游 Skill 的契约版本，用于回归兼容与证据引用
+    contract_version: str = "yunpai.skill-contract.v1"
 
 
 class SkillRegistry:
@@ -46,12 +49,28 @@ class SkillRegistry:
     async def call(self, name: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if name not in self.specs:
             raise KeyError(f"unknown skill: {name}")
-        return await self.specs[name].handler(payload, context)
+        spec = self.specs[name]
+        result = await spec.handler(payload, context)
+        if isinstance(result, dict):
+            result = {
+                **result,
+                "skill": name,
+                "skill_version": spec.version,
+                "skill_contract": spec.contract_version,
+                "evidence": [
+                    *([item for item in result.get("evidence", [])] if isinstance(result.get("evidence"), list) else []),
+                    {"module": "orchestrator", "source_ref": name, "evidence_ref": f"skill:{name}@{spec.version}", "detail": f"Skill 调用 {name}@{spec.version} 已执行"},
+                ],
+            }
+        return result
 
     def catalog(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": spec.name,
+                "skill_id": f"{spec.name}@{spec.version}",
+                "version": spec.version,
+                "contract_version": spec.contract_version,
                 "description": spec.description,
                 "tags": list(spec.tags),
                 "tools": list(spec.tools),
@@ -66,36 +85,94 @@ def _safe_name(filename: str) -> str:
 
 
 async def identify_business_data(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    """识别外部资料或上传文件，并写入可审核候选库。"""
+    """识别外部资料或上传文件，并写入可审核候选库。
+
+    上传文件逐个返回状态（accepted/needs_review/unsupported/parse_failed/
+    skipped），缺失 content_b64 的文件标记 skipped 而不是静默 continue；
+    没有任何 accepted 文件时返回失败而非 candidate_created 空批次。
+    """
+    from .uploads import UPLOAD_MODES, UploadSummary, require_content_b64, to_attachment_record, validate_mode
+
     db_path = payload.get("db_path") or "runtime/yunpai-business-catalog.sqlite"
     root_path = payload.get("root_path") or payload.get("business_data_root")
+    mode = validate_mode(payload.get("mode") or "master_data")
+    summary = UploadSummary(mode=mode)
     if root_path:
         result = ingest_tree(root_path, db_path, batch_id=f"batch-{context.get('task_id', 'skill')}")
+        total = int(result.get("file_count") or 0)
+        for item in result.get("errors", []):
+            summary.add(to_attachment_record(
+                {"filename": str(item.get("path") or "upload")}, mode=mode,
+                status="parse_failed", reason=str(item.get("error") or "ingest error"),
+            ))
+        summary.accepted = max(0, total - summary.parse_failed)
+        summary.total = max(summary.total, total)
+        batch_result = result
     else:
         files = payload.get("files") or []
         if not isinstance(files, list) or not files:
             raise ValueError("业务资料 Skill 需要 root_path 或 files")
         staging = Path(payload.get("staging_dir") or "runtime/business-upload-staging") / str(context.get("task_id", "skill"))
         staging.mkdir(parents=True, exist_ok=True)
+        accepted = 0
         for index, item in enumerate(files, start=1):
-            if not isinstance(item, dict):
+            filename = str(item.get("filename") or "upload.bin") if isinstance(item, dict) else "upload.bin"
+            try:
+                raw = require_content_b64(item, filename=filename)
+            except ValueError as exc:
+                summary.add(to_attachment_record(
+                    item if isinstance(item, dict) else {}, mode=mode,
+                    status="skipped", reason=str(exc),
+                ))
                 continue
-            encoded = item.get("content_b64")
-            if not isinstance(encoded, str):
-                continue
-            raw = base64.b64decode(encoded, validate=True)
-            digest = hashlib.sha256(raw).hexdigest()[:16]
+            digest = hashlib.sha256(raw).hexdigest()
             # Include the upload index so same-name/same-content files do not
             # overwrite one another in the staging batch.
-            (staging / f"{digest}-{index:03d}-{_safe_name(str(item.get('filename') or 'upload.bin'))}").write_bytes(raw)
-        result = ingest_tree(staging, db_path, batch_id=f"batch-{context.get('task_id', 'skill')}", parse_xlsx=True, deep_limit_bytes=12_000_000)
+            (staging / f"{digest[:16]}-{index:03d}-{_safe_name(filename)}").write_bytes(raw)
+            summary.add(to_attachment_record(
+                {**(item if isinstance(item, dict) else {}), "sha256": digest},
+                mode=mode, status="accepted",
+            ))
+            accepted += 1
+        if accepted == 0:
+            return {
+                "skill": "business-data-identification",
+                "status": "failed",
+                "code": "NO_ACCEPTED_FILES",
+                "message": "上传批次中没有可识别文件；缺失 content_b64、格式不支持或超限文件已逐文件跳过",
+                "schema_version": "yunpai.business-catalog.v2",
+                "upload_summary": summary.as_dict(),
+                "evidence": [{"module": "orchestrator", "source_ref": "files", "evidence_ref": f"business-catalog:{context.get('task_id', 'skill')}", "detail": "无 accepted 文件，未创建候选"}],
+            }
+        batch_result = ingest_tree(staging, db_path, batch_id=f"batch-{context.get('task_id', 'skill')}", parse_xlsx=True, deep_limit_bytes=12_000_000)
+        for item in batch_result.get("errors", []):
+            summary.add(to_attachment_record(
+                {"filename": str(item.get("path") or "upload")}, mode=mode,
+                status="parse_failed", reason=str(item.get("error") or "ingest error"),
+            ))
+    sensitivity_summary = _candidate_sensitivity_summary(db_path)
     return {
         "skill": "business-data-identification",
+        "skill_mode": mode,
         "status": "candidate_created",
-        "schema_version": "yunpai.business-catalog.v1",
-        "batch": result,
-        "evidence": [{"module": "orchestrator", "source_ref": result["root_path"], "evidence_ref": f"business-catalog:{result['batch_id']}", "detail": "文件哈希、分类和字段观察已写入候选库"}],
+        "schema_version": "yunpai.business-catalog.v2",
+        "upload_summary": summary.as_dict(),
+        "sensitivity_summary": sensitivity_summary,
+        "batch": batch_result,
+        "evidence": [{"module": "orchestrator", "source_ref": batch_result["root_path"], "evidence_ref": f"business-catalog:{batch_result['batch_id']}", "detail": "文件哈希、分类和字段观察已写入候选库"}],
     }
+
+
+def _candidate_sensitivity_summary(db_path: str) -> dict[str, int]:
+    """从候选库读取 sensitivity 计数（普通/内部/HR/财务），供 Reviewer 决定 Gate。"""
+    import sqlite3
+
+    try:
+        with sqlite3.connect(db_path) as db:
+            rows = db.execute("SELECT sensitivity_classification, count(*) FROM document_candidates GROUP BY sensitivity_classification").fetchall()
+        return {str(kind): int(count) for kind, count in rows}
+    except Exception:
+        return {}
 
 
 async def _dispatch_registered_tool(
@@ -233,7 +310,7 @@ def build_default_skill_registry() -> SkillRegistry:
         description="统一 M5 PMC 求解、WIP/资源检查、计划版本、重排、派工、报工和执行摘要；生产发布必须通过 Gate。",
         handler=m5_pmc_control,
         tags=("m5", "pmc", "wip", "schedule", "execution"),
-        tools=("solve_scheduling", "get_m5_schedule", "get_m5_pmc_progress", "replan_m5_schedule", "list_m5_schedules", "dispatch_m5_schedule", "get_m5_execution_summary", "report_workload", "bind_worker_to_order"),
+        tools=("solve_scheduling", "get_m5_schedule", "get_m5_pmc_progress", "list_m5_schedules", "get_m5_material_readiness", "replan_m5_schedule", "advise_m5_schedule", "run_m5_intelligent_schedule", "dispatch_m5_schedule", "get_m5_execution_summary", "ingest_m5_planning_snapshot", "generate_m5_material_procurement_plan", "report_workload", "bind_worker_to_order"),
     ))
     registry.register(SkillSpec(
         name="yunpai-m5-pmc-lifecycle",

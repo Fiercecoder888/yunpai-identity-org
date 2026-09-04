@@ -13,7 +13,7 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     assert health["status"] == "ok"
     assert health["module"] == "yunpai-langgraph"
     assert health["tools"] == 114
-    assert health["bound_tools"] == 7
+    assert health["bound_tools"] == 10
     assert health["skills"] == 8
     assert health["planner_model"]["provider"] == "qwen"
     created = client.post("/runs", json=workflow_request()).json()
@@ -92,3 +92,96 @@ def test_api_rejects_non_xlsx_upload_with_controlled_status(tmp_path):
     )
     assert response.status_code == 415
     assert response.json()["detail"]["code"] == "UNSUPPORTED_FILE_TYPE"
+
+
+def test_api_batch_upload_requires_explicit_mode(tmp_path):
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["P6"] = "PO-BATCH-001"
+    sheet["E10"] = 1
+    sheet["I10"] = "W-H909"
+    sheet["R10"] = 4000
+    output = BytesIO()
+    workbook.save(output)
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "batch.sqlite")))
+    missing_mode = client.post(
+        "/runs/upload/batch",
+        files=[("files", ("order.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
+    )
+    assert missing_mode.status_code == 422
+    invalid_mode = client.post(
+        "/runs/upload/batch",
+        data={"mode": "随便猜"},
+        files=[("files", ("order.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
+    )
+    assert invalid_mode.status_code == 422
+    assert invalid_mode.json()["detail"]["code"] == "INVALID_UPLOAD_MODE"
+
+    created = client.post(
+        "/runs/upload/batch",
+        data={"mode": "master_data", "message": "识别这些基础资料"},
+        files=[("files", ("设备台账.json", b'{"records":[{"kind":"equipment"}]}', "application/json"))],
+    )
+    assert created.status_code == 200
+    state = created.json()
+    assert state["route"] == "free"
+    assert state["plan"][0]["kind"] == "skill"
+    assert state["plan"][0]["tool"] == "business-data-identification"
+    summary = state["upload_summary"]
+    assert summary["mode"] == "master_data"
+    assert summary["total"] == 1
+    assert summary["accepted"] == 1
+    assert summary["files"][0]["status"] == "accepted"
+    assert summary["files"][0]["sha256"]
+
+
+def test_api_batch_upload_flags_empty_files_as_skipped(tmp_path):
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "batch-empty.sqlite")))
+    response = client.post(
+        "/runs/upload/batch",
+        data={"mode": "directory"},
+        files=[
+            ("files", ("a.xlsx", b"", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+            ("files", ("b.json", b"{}", "application/json")),
+        ],
+    )
+    assert response.status_code == 200
+    summary = response.json()["upload_summary"]
+    assert summary["total"] == 2
+    statuses = {item["filename"]: item["status"] for item in summary["files"]}
+    assert statuses["a.xlsx"] == "skipped"
+    assert any(item["reason"] for item in summary["files"])
+
+
+def test_api_pmc_plan_and_execution_endpoints(tmp_path, monkeypatch):
+    import json
+
+    from yunpai_langgraph.pmc_plan_store import PmcPlanStore
+
+    plan_db = tmp_path / "plans.sqlite"
+    exec_db = tmp_path / "exec.sqlite"
+    monkeypatch.setenv("YUNPAI_PLAN_DB", str(plan_db))
+    monkeypatch.setenv("YUNPAI_EXEC_DB", str(exec_db))
+    store = PmcPlanStore(plan_db)
+    store.save_draft(scenario_id="SC-API-1", purpose="production", payload={"orders": []}, input_hash="h", solver_hash="s", idempotency_key="ik-1", task_id="T-1")
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "api-pmc.sqlite")))
+
+    versions = client.get("/plans/SC-API-1").json()
+    assert versions["versions"][0]["plan_version"] == "SC-API-1::v1"
+
+    transitioned = client.post("/plans/SC-API-1/SC-API-1::v1/transition", json={"target": "approved", "actor": "zhb"})
+    assert transitioned.status_code == 200
+    assert transitioned.json()["lifecycle_status"] == "approved"
+
+    # approved -> released 合法；跳过状态的 approved -> execution 非法 -> 409。
+    released = client.post("/plans/SC-API-1/SC-API-1::v1/transition", json={"target": "released", "actor": "zhb"})
+    assert released.status_code == 200
+    assert released.json()["lifecycle_status"] == "released"
+    rejected = client.post("/plans/SC-API-1/SC-API-1::v1/transition", json={"target": "execution"})
+    assert rejected.status_code == 409
+
+    summary = client.get("/pmc/execution/SC-API-1::v1").json()
+    assert summary["event_count"] == 0
