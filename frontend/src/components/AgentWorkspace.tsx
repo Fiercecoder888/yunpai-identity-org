@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Check, ChevronRight, CircleDot, FileBox, FileSpreadsheet, Menu, Paperclip, Plus, RefreshCw, Send, ShieldCheck, Square, Upload, X, Zap } from 'lucide-react';
-import { getRun, getRuns, streamResume, streamRun } from '../lib/agentApi';
+import { diffPlanVersions, getRun, getRuns, listPlanVersions, streamResume, streamRun, transitionPlan } from '../lib/agentApi';
 import { applyEvent, deriveUploadSummary, emptyAgentState, mergeRunState, moduleName, moduleProgress, summarizeResult, type AgentUiState } from '../lib/agentState';
 import { formatBytes, isAllowedFile, toAttachment } from '../lib/upload';
 import type { Attachment, AttachmentKind, Gate, RunState } from '../lib/types';
@@ -95,7 +95,66 @@ function PmcSchedulePanel({ state }: { state: AgentUiState }) {
     <div className="pmc-detail-grid"><div><h4>工位利用率</h4><div className="pmc-table-wrap"><table className="pmc-table"><thead><tr><th>工位</th><th>已分配</th><th>可用</th><th>利用率</th></tr></thead><tbody>{stations.map((item: any) => <tr key={item.station_id}><td><strong>{item.station_name}</strong><small>{item.station_id}</small></td><td>{item.assigned_minutes} min</td><td>{item.available_minutes} min</td><td>{(Number(item.utilization || 0) * 100).toFixed(1)}%</td></tr>)}</tbody></table></div></div><div><h4>人工利用率</h4><div className="pmc-table-wrap"><table className="pmc-table"><thead><tr><th>人员</th><th>已分配 / 可用</th><th>占用</th><th>有效运行</th></tr></thead><tbody>{workers.map((item: any) => <tr key={item.worker_id}><td><strong>{item.worker_name}</strong><small>{item.worker_id} · {item.station_id || '未绑定工位'}</small></td><td>{item.assigned_minutes} / {item.available_minutes} min</td><td>{(Number(item.planned_occupancy_rate || 0) * 100).toFixed(1)}%</td><td>{(Number(item.effective_running_rate || 0) * 100).toFixed(1)}%</td></tr>)}</tbody></table></div></div></div>
     <div><h4>工位间 WIP</h4><div className="pmc-table-wrap"><table className="pmc-table"><thead><tr><th>衔接</th><th>上游工位 → 下游工位</th><th>等待</th><th>目标</th><th>状态</th></tr></thead><tbody>{wipEdges.map((edge: any) => <tr key={edge.edge_id}><td>{edge.from_operation_id} → {edge.to_operation_id}</td><td>{edge.from_station_id || '-'} → {edge.to_station_id || '-'}</td><td>{edge.current_wip_minutes} min</td><td>{edge.target_wip_minutes} min</td><td><span className="pmc-state">{edge.current_wip_minutes ? '有 WIP 等待' : '无等待'}</span></td></tr>)}</tbody></table></div></div>
     <div><h4>工位状态段 <small>{stateSegments.length} 段</small></h4><div className="pmc-state-strip">{stateSegments.slice(0, 24).map((segment: any, index: number) => <span key={`${segment.operation_id}-${segment.start}-${index}`} className={`pmc-state-segment pmc-state-${segment.state}`} title={`${segment.operation_id} · ${segment.station_id} · ${segment.reason_code}`}>{segment.operation_id} · {segment.station_id} · {segment.state} · {segment.duration_minutes}m</span>)}</div></div>
+    <PlanVersionStrip data={data} />
   </section>;
+}
+
+const PLAN_TRANSITIONS: Array<{ from: string; to: string; label: string }> = [
+  { from: 'draft', to: 'approved', label: '批准' },
+  { from: 'approved', to: 'released', label: '发布' },
+  { from: 'released', to: 'dispatched', label: '派工' },
+  { from: 'dispatched', to: 'execution', label: '执行' },
+];
+
+function PlanVersionStrip({ data }: { data: any }) {
+  const planStore = data?.plan_store;
+  const [versions, setVersions] = useState<Array<Record<string, any>> | null>(null);
+  const [error, setError] = useState('');
+  const [diff, setDiff] = useState<{ left: string; right: string; change_count: number } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const scenarioId = planStore?.scenario_id || data?.scenario_id;
+  const currentVersion = planStore?.plan_version || data?.plan_version;
+  const currentStatus = planStore?.lifecycle_status || data?.lifecycle_status || 'draft';
+  if (!scenarioId || !currentVersion) return null;
+
+  const refresh = async () => {
+    setRefreshing(true);
+    setError('');
+    try {
+      setVersions(await listPlanVersions(String(scenarioId)));
+    } catch (caught) {
+      setError((caught as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  useEffect(() => { void refresh(); }, [scenarioId]);
+
+  const next = PLAN_TRANSITIONS.find((item) => item.from === currentStatus)?.to;
+  const onAdvance = async () => {
+    if (!next) return;
+    setError('');
+    try {
+      await transitionPlan(String(scenarioId), String(currentVersion), next);
+      await refresh();
+    } catch (caught) {
+      setError((caught as Error).message);
+    }
+  };
+  const onDiff = async (left: string, right: string) => {
+    setError('');
+    try {
+      const result = await diffPlanVersions(String(scenarioId), left, right);
+      setDiff({ left, right, change_count: result.change_count });
+    } catch (caught) {
+      setError((caught as Error).message);
+    }
+  };
+  return <div className="pmc-versions" data-testid="pmc-versions"><div className="pmc-versions-heading"><ShieldCheck size={14} /><strong>计划版本与生命周期</strong><small>当前 {currentVersion} · {currentStatus}</small></div>
+    {error && <p className="field-error" role="alert">{error}</p>}
+    {versions && <div className="pmc-version-list">{versions.map((item) => <button type="button" className={`pmc-version-chip ${item.plan_version === currentVersion ? 'is-current' : ''}`} key={item.plan_version} onClick={() => onDiff(String(currentVersion), String(item.plan_version))} title="点击对比当前版本与所选版本"><span>{item.plan_version}</span><small>{item.lifecycle_status}{diff && diff.right === item.plan_version ? ` · ${diff.change_count} 处差异` : ''}</small></button>)}</div>}
+    <div className="pmc-version-actions">{next && <button type="button" className="button-primary" onClick={onAdvance} disabled={refreshing}>推进到 {next}</button>}<button type="button" className="button-secondary" onClick={refresh} disabled={refreshing}>刷新版本</button></div>
+  </div>;
 }
 
 function GateCard({ gate, onDecision, busy }: { gate: Gate; onDecision: (decision: string, supplement?: Record<string, unknown>) => void; busy: boolean }) {

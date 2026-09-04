@@ -76,3 +76,35 @@ export async function getRun(runId: string): Promise<RunState> {
   if (!response.ok) throw new Error(`运行详情加载失败：HTTP ${response.status}`);
   return (await response.json()) as RunState;
 }
+
+export type PlanVersionRow = {
+  scenario_id: string;
+  plan_version: string;
+  head: number;
+  lifecycle_status: string;
+  purpose: string;
+  parent_version?: string;
+  task_id?: string;
+};
+
+export async function listPlanVersions(scenarioId: string): Promise<PlanVersionRow[]> {
+  const response = await fetch(apiUrl(`/plans/${encodeURIComponent(scenarioId)}`));
+  if (!response.ok) throw new Error(`计划版本加载失败：HTTP ${response.status}`);
+  return ((await response.json()) as { versions: PlanVersionRow[] }).versions;
+}
+
+export async function transitionPlan(scenarioId: string, planVersion: string, target: string): Promise<{ lifecycle_status: string }> {
+  const response = await fetch(apiUrl(`/plans/${encodeURIComponent(scenarioId)}/${encodeURIComponent(planVersion)}/transition`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, actor: 'operator' }),
+  });
+  if (!response.ok) throw new Error(`计划状态迁移失败：HTTP ${response.status}`);
+  return (await response.json()) as { lifecycle_status: string };
+}
+
+export async function diffPlanVersions(scenarioId: string, left: string, right: string): Promise<{ change_count: number; changes: Array<Record<string, unknown>> }> {
+  const response = await fetch(apiUrl(`/plans/${encodeURIComponent(scenarioId)}/diff?left=${encodeURIComponent(left)}&right=${encodeURIComponent(right)}`));
+  if (!response.ok) throw new Error(`计划差异加载失败：HTTP ${response.status}`);
+  return (await response.json()) as { change_count: number; changes: Array<Record<string, unknown>> };
+}
