@@ -60,3 +60,26 @@
   - `.venv/bin/python -m pytest -q` → 109 passed / exit 0
 - 阻塞：GB10/真实 M5 服务读回仍不可达（无 m5-api；39092 为旧版部署 bound_tools=13）；按用户流程验证通过前不提交 dev。该阻塞自 Round 1 起持续。
 - 证据：远端 origin/pmctooldev（待提交本轮报告）。
+
+### 2026-09-04（Round 4/5：dev 合并 + GB10 隔离验收 release）
+
+- 计划：用户 10 步集成计划——worktree 合入 origin/dev；冲突解决；测试门槛；推 pmctooldev；DEPLOY_LOCK；192.168.110.19 隔离 release；HTTP/DB 验收。
+- 实际修改：
+  - 独立 worktree `/Users/murkydoubloon45/Desktop/dsh-worktrees/yunpai-gragh0903-pmctooldev-20260904`（pmctooldev-merge @ 0284901 → 合并 origin/dev a3384379 → `54ded86`）
+  - 冲突解决：skills.py（保留任务书 13/7 M5 白名单，无 report_workload/bind_worker）、tests/test_api.py、tests/test_registry.py（bound_tools 27 = dev 10 + pmctooldev 17）、test_skill_registry_consistency.py（op map fixture 对齐 13/7）
+  - replan 真实事件应用修复：`61382f2`（schema 事件 insert_order/order_cancel/equipment_down 等应用到父 bundle 副本并重算 checksum）
+  - 本地测试：110 passed（主工作区基线）；worktree 全量 201 passed；前端 6 passed/build 0；账本 --validate valid=true
+- 推送：origin/pmctooldev = `61382f2`（未触碰 dev/main）
+- GB10 隔离 release：`/home/wjc/yunpai-langgraph/releases/20260904-pmctooldev-m5-accept`（独立 venv .venv-accept、后端 127.0.0.1:9001、前端代理 39093、YUNPAI_M5_DB=runtime/yunpai-m5-acceptance.sqlite；未动 39092/9000；未启 m5-api）
+- HTTP/DB 验收（全部通过）：
+  - /health：tools=114, bound_tools=27, skills=8；m5 /tools：20 中 18 bound，report_workload/bind_worker_to_order 未绑定
+  - solve(HTTP, apply Gate) → plan_version plan-SC-ACCEPT-HDMI-85e6057457
+  - get_m5_schedule/list_m5_schedules（HTTP）读回成功
+  - actor 过渡 approved→released + set_head（repository，Gate actor integration-zhb）
+  - dispatch HTTP → pending；同键重放 replayed=True
+  - execution event 落库 → summary event_count=1；progress released/head 读回（2 ops）
+  - replan HTTP insert_order → 新版本 replan-plan-...-7dcce314，parent 保留，bundle 含 SO-ACCEPT-2（insert 真实生效）
+  - 同键异输入 → HTTP 409 IDEMPOTENCY_CONFLICT(data gate reject)；CAS 陈旧 head → HEAD_CONFLICT；pressure_only 非法 release → PURPOSE_NOT_RELEASABLE
+  - sqlite 回读：六类 snapshot、plan status/lifecycle audit、dispatch(pending)、execution events
+- 阻塞/说明：无新阻塞。39093 仅转发 /api/*（/tools 404 属代理范围预期，M5 绑定经 9001 /tools?module=m5 验证）。dev/main 未推送（等待集成负责人）。
+- 证据：远端 origin/pmctooldev（61382f2）、GB10 release 目录与 sqlite、本报告、IMPLEMENTATION_NOTES。
