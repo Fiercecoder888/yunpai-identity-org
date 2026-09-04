@@ -1,48 +1,81 @@
-# M5 PMC v2 完善 — pmctooldev 实现设计笔记
+# M5 PMC v2 完善 — pmctooldev 实现状态与验收证据
 
 - 分支：`pmctooldev`（基于 `origin/main` @ 1829888a58855b0fd6064fa5b8ee4a858823c191）
-- 任务书：`handoff/m5-pmc-v2-completion-20260904/TASKBOOK.md` 及同目录其余文档
-- 关联任务书：`docs/DEEPSEEK_HARNESS_IMPLEMENTATION_TASKBOOK_20260904.md`、`docs/dsh/PMC_P0P2_DSH_SUPPLEMENT_CONFIRMATION_20260904.md`
-- 用户决策（2026-09-04）：先在独立 `pmctooldev` 分支开发并做 GB10 验证；验证无误后把改动提交到 `dev` 等待合并；不直接推 `main`；`dev` 上其它 session 的未提交改动不得触碰。
+- 任务书：`handoff/m5-pmc-v2-completion-20260904/TASKBOOK.md` 及同目录文档
+- 用户流程决策：先在 `pmctooldev` 完成开发与本地验证；验证通过后再提交 `dev` 等待合并；不直接推 `main`；`dev` 上其它 session 未提交改动未触碰。
 
-## 1. 核对一致的现状（2026-09-04 实测）
+## 1. 完成状态（2026-09-04 实测）
+
+| 任务 | 状态 | 提交 |
+|---|---|---|
+| Task 1 严格化 PMC v2 输入（删隐式默认/legacy 显式 preview/规范化 hash） | 完成 | `55f3c86` |
+| Task 2 snapshot/plan sqlite repository（幂等/CAS/已发布保护/生命周期迁移） | 完成 | `f2f3dc4` |
+| Task 3/4/5 17 个 handler + lifecycle + progress/readiness + messages/knowledge/procurement | 完成 | `2a189f4` |
+| Task 6 Skill operation 映射与 agents Gate 同步 | 完成 | 同 `2a189f4` |
+| 测试矩阵（strict/tool binding/skill ops/http+metrics/lifecycle tools） | 完成 | `b437c32` |
+
+本地回归：**99 passed**（原 60 passed 基线全部保留并按新合同等价升级；新增约 39 项 M5 测试）。
+
+Registry 数量实测：工具总数 **114**、M5 manifest **20**、Skill **8**；M5 已绑定 **18**（17 新增 + solve_scheduling），排除工具 `report_workload`/`bind_worker_to_order` 保持未绑定且不在任何 Skill。
+
+## 2. Task1 关键改动
+
+- `pmc_v2_adapter.py`：`_strict_production()` 识别 production（非 legacy_preview）；删 date-only 日历默认 08:00-17:00、资源 capacity 60/efficiency 1/equipment_type 默认、route `APPROVED-ROUTE`/`route_version`/`route_code` 默认；缺 supply/readiness → `MISSING_SUPPLY`；`input_hash = sha256(canonical_bytes(bundle))`。
+- `pmc_v2_scheduler.py`：无绑定设备的工序时长不再用隐式 60/h、效率 1（直接用显式 standard minutes）。
+- `workers.py::m5_schedule`：production 且无 v2 事实且未显式 `legacy_preview` → `LEGACY_PRODUCTION_BLOCKED`；legacy 仅显式 preview/sandbox。
+- `graph.py`：m0_m5 演示链路 fixture 显式 `legacy_preview: true`（fixture/sandbox 语义）。
+- 反例测试：`tests/test_m5_pmc_v2_strict_input.py`（10 项）。
+
+## 3. Repository 语义（sqlite，`runtime/yunpai-m5.sqlite`，可用 ctx `m5_db_path`/env `YUNPAI_M5_DB` 覆盖）
+
+- 六类 snapshot（order/routes/resource/calendar/supply/constraint）按 scenario 持久化并可读回。
+- plan 表：plan_version/lifecycle_status/parent/input_hash/solver_hash/algorithm_version/validation/bundle/schedule/released_at。
+- idempotency：同键同输入重放；save 已 released 计划 → `PLAN_PROTECTED`。
+- scenario head CAS：`set_head(expected_revision=...)`，冲突 `HEAD_CONFLICT`。
+- lifecycle：`draft→approved→released→dispatched→execution` 相邻迁移 + `m5_lifecycle` 审计日志。
+- 追加：dispatch（pending durable）、execution events（幂等）、department messages（pending_approval→approved→outbox）、knowledge、procurement proposals。
+
+## 4. 17 个本地 handler（m5_tools.py，registry 绑定已验证）
+
+get_m5_schedule / list_m5_schedules / get_m5_pmc_progress / get_m5_material_readiness /
+get_m5_integration_contracts / ingest_m5_planning_snapshot / replan_m5_schedule /
+dispatch_m5_schedule / get_m5_execution_summary / search_m5_knowledge / record_m5_knowledge /
+prepare_m5_department_message / get_m5_department_message / get_m5_department_message_delivery /
+advise_m5_schedule / run_m5_intelligent_schedule / generate_m5_material_procurement_plan
+
+边界遵守：
+- dispatch 仅 released；无 MES sender → 只回 pending，不声称已发送。
+- execution summary 只汇总持久化事件，不伪造实际执行。
+- record/search knowledge 仅引用已持久化 plan。
+- department message 只到 pending_approval；approved→outbox 由人工 actor 触发。
+- procurement 只生成 proposal，不写库存/采购事实。
+- pressure_only/preview/validation-failed 不进入 release/dispatch（progress 只接受 released+production+head，其它 raise/blocked）。
+- LLM 不修改硬约束/snapshot/状态。
+
+## 5. Skill/Agent
+
+- `skills.py`：`yunpai-m5-pmc` 白名单 13 个工具、`yunpai-m5-pmc-lifecycle` 7 个工具；删 `report_workload`/`bind_worker_to_order`；每个 operation 有唯一工具映射。
+- `agents.py`：`_READ_ONLY_SKILL_OPERATIONS` 同步（pmc：schedule/progress/contracts/readiness/knowledge_search/message_get/message_delivery/advise/intelligent；lifecycle：default/schedule/versions/progress/execution）。
+
+## 6. 测试矩阵（tests/）
+
+- `test_m5_pmc_v2_strict_input.py`：默认值禁止 / v2-only / 缺事实阻断 / canonical hash。
+- `test_m5_plan_repository.py`：六类 snapshot 读回、幂等 replay、同键异输入、head CAS、released 保护、合法/非法迁移。
+- `test_m5_lifecycle_tools.py`：release→progress→dispatch→execution；replan 从服务端恢复父 bundle；messages pending→approved→outbox；knowledge；readiness；procurement；ingest/get/list。
+- `test_m5_tool_bindings.py`：17 个绑定、2 排除未绑定、schema pass。
+- `test_m5_skill_operations.py`：白名单与 Scope 完全一致、operation→tool 映射、跨模块/排除工具拒绝、只读 Gate。
+- `test_m5_http_metrics.py`：HTTP method/path 合同、路径参数替换、metrics 不伪造、dispatch replay。
+
+## 7. 验收结论（TEST_ACCEPTANCE 格式）
 
 | 项 | 值 |
 |---|---|
-| `build_default_registry()` 工具总数 | 114（M0 27 / M1 17 / M2 7 / M3 17 / M4 26 / M5 20）|
-| M5 manifest | 20 工具；`solve_scheduling` 唯一绑定本地 handler |
-| `build_default_skill_registry()` | 8 个 Skill |
-| M5 两个 Skill 现状 | `yunpai-m5-pmc` tools 元组含排除工具；`yunpai-m5-pmc-lifecycle` 缺 ingest 等 |
-| 本地 pytest 基线 | **60 passed**（任务书写 59，已 +1）|
-| 真实服务 | 本工作区无 `m5-api:8000`；T8 历史代码与 0902 测试在 Desktop 其他目录 |
+| local_tests_passed | ✅ 99 passed（.venv/bin/python -m pytest -q，exit 0） |
+| contract_tests_passed | ✅ strict/binding/skill/http/metrics/lifecycle 契约测试全绿 |
+| real_http_readback | ❌ 阻塞：本工作区无 `m5-api:8000`/GB10 M5 服务可读（未运行） |
+| real_db_readback | ⚠️ 本地 sqlite 读回已验证（runtime/yunpai-m5.sqlite 语义）；生产 DB 读回待 GB10 联调 |
+| lifecycle_verified | ✅ 本地 repository 状态机 + 事件日志（approved/released/dispatched/execution） |
+| execution_verified | ✅ 本地 execution events 幂等落库 + summary（非真实 MES） |
+| blockers | GB10 真实 HTTP/DB 联调未执行（用户要求验证无误后合 dev） |
 
-## 2. 范围与数字口径
-
-- M5 manifest 20 = 在范围 18（两个 Skill 工具并集 13+7−共享 2）+ 排除 2。
-- `solve_scheduling` 已完成 → 本任务补 **17** 个 handler：`get_m5_schedule`、`list_m5_schedules`、`get_m5_pmc_progress`、`get_m5_material_readiness`、`get_m5_integration_contracts`、`replan_m5_schedule`、`dispatch_m5_schedule`、`get_m5_execution_summary`、`ingest_m5_planning_snapshot`、`generate_m5_material_procurement_plan`、`advise_m5_schedule`、`run_m5_intelligent_schedule`、`search_m5_knowledge`、`record_m5_knowledge`、`prepare_m5_department_message`、`get_m5_department_message`、`get_m5_department_message_delivery`。
-- 排除（保持 unbound、不进任何 Skill）：`report_workload`、`bind_worker_to_order`。
-- 数量不变量：注册表 114、M5 manifest 20、Skill 8。
-
-## 3. 任务书文字与基线回归的冲突处置口径（重要）
-
-任务 1（删隐式默认、production 强制 v2、legacy 仅显式 preview）会与现有回归 fixture 冲突：
-`tests/test_pmc_v2_streaming.py`（日历只有 start/end、资源无容量/效率、无 approval_ref）、
-`tests/test_graph.py`（production 默认走 legacy 贪心、apply 后内存置 released）等。
-
-**处置口径**：代码按任务书严格化（删默认 → BLOCKED_INPUT）；现有回归测试若因“隐式默认被删”而失败，
-按“等价升级 fixture”（补显式 calendar_ref/shift/capacity/efficiency/approval_ref；legacy 请求显式加
-`legacy_preview: true` 标记）使其在新合同下仍全绿，并在测试/报告中说明。不允许改动既有通过语义断言来“刷绿”。
-
-## 4. 实现层次规划（自底向上）
-
-1. 内核层：`pmc_v2_adapter.py` / `pmc_v2_snapshots.py` / `pmc_v2_scheduler.py` — 删隐式默认、canonical input_hash。
-2. 仓库层：新增 `m5_repository.py`（SQLite，仿 `SQLiteRunRepository`），保存六类 snapshot、plan、版本/CAS、lifecycle、execution、message、knowledge、procurement proposal；幂等 replay / 同键冲突 / released 保护。
-3. 服务层：17 个 handler（workers/HANDLERS 或独立模块注册）按 m5.json 输入/输出 schema 实现本地语义，输出可过 schema 校验。
-4. 生命周期：draft→approved→released→dispatched→execution；replan 从服务端 base_plan_version 恢复 bundle。
-5. Skill/Agent：`skills.py` 两个 Skill operation map 对齐、白名单只含范围工具；`agents.py` 只读 op 与 Gate 规则同步；删 report_workload/bind_worker。
-6. 测试：任务书建议的 test_m5_* 矩阵 + HTTP mock + 真实读回记录（不可达则记为阻塞）。
-
-## 5. 验收报告口径
-
-按 `TEST_ACCEPTANCE.md` 记录：local_tests_passed / contract_tests_passed / real_http_readback /
-real_db_readback / lifecycle_verified / execution_verified / blockers。无真实服务读回时不得声称生产 PMC 完成。
+未完成项：GB10 真实服务读回；因此本交付不声称“生产 PMC 已完成”。
