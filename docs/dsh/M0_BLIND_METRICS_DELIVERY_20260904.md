@@ -1,7 +1,7 @@
 # M0 阶段一盲测指标与交付记录（DSH）
 
-- 关联：docs/DEEPSEEK_HARNESS_IMPLEMENTATION_TASKBOOK_20260904.md §5.3/§6.2 + DSH 阶段一任务书 §7
-- 分支：dsh/m0-ingest-20260904（worktree yunpai-gragh0903-20260904-155229-m0ingest）
+- 关联：docs/DEEPSEEK_HARNESS_IMPLEMENTATION_TASKBOOK_20260904.md §5.3/§6.2 + DSH 本机阶段一任务书 §五
+- 分支：dsh/m0-local-20260904（worktree yunpai-gragh0903-20260904-162353-m0local）
 - 日期：2026-09-04
 
 ## 逐类分类准确率（本地合同实测，fixture 见 tests/test_skill_blind_metrics.py TWELVE_KINDS）
@@ -25,6 +25,29 @@
 实测：13/13 正例命中，0 反例误报（覆盖任务书 12 类；equipment/tooling 拆为两类、route 覆盖 operation 语义）。
 关键类别（order/bom/equipment/worker/inventory）正例命中 100%（≥90% 目标满足）。
 无文件名特例：所有用例以任意文件名+表头内容驱动分类。
+
+## 未知布局盲测（任务书 §五.2）
+
+每类一份"列序打乱 + 混入无关列"的未知布局样本（UNKNOWN_LAYOUT_KINDS），
+13/13 命中对应类别（≥90%），验证对未见布局的泛化。
+
+## 关键字段 precision/recall（任务书 §五.3，目标 ≥90%）
+
+tests/test_field_metrics.py：以 golden 行折 ground truth，对解析器/候选的字段证据
+逐字段计算 precision/recall（评估限定关键字段集，失败样例带 missing_fields/review_issues）：
+
+| 类别 | 评估字段 | 实测 |
+|---|---|---|
+| order | order_id/product_code/quantity/due_date/unit_price | ≥90% |
+| order（未知布局列序打乱） | product_code/quantity/due_date | ≥90% |
+| equipment | equipment_code/equipment_name | ≥90% |
+| worker | worker_code/worker_name/skill | ≥90% |
+| inventory | material_code/warehouse/available_qty | ≥90% |
+| supplier | supplier_code/supplier_name | ≥90% |
+
+equipment/worker/inventory/supplier 等的字段证据来自通用表头->字段观察器
+（business_catalog._generic_observations_from_sheets，非 order/bom 深解析类别也有
+row/col/parser_version 定位）。
 
 ## Skill 路由与缺字段阻断
 
