@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from io import BytesIO
 from hashlib import sha256
 from math import ceil
 from typing import Any
@@ -45,6 +46,69 @@ def _m0_store(ctx: dict[str, Any]):
 
     db_path = ctx.get("m0_sandbox_db") or os.getenv("YUNPAI_M0_SANDBOX_DB") or "runtime/yunpai-m0-sandbox.sqlite"
     return M0SandboxStore(db_path)
+
+
+def _extract_uploaded_bom(files: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Parse uploaded BOM workbooks into M2 lines with source evidence.
+
+    M2 receives bytes only after a Gate retry, so this deterministic parser is
+    deliberately independent of the LLM and preserves workbook coordinates.
+    """
+    if not isinstance(files, list):
+        return [], []
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return [], [{"code": "PARSER_UNAVAILABLE", "message": "缺少 openpyxl，无法解析 BOM XLSX"}]
+    aliases = {
+        "material_code": ("物料编码", "料号", "物料编号", "材料编码", "编码"),
+        "material_name": ("材料名称", "原材料名称", "物料名称", "品名", "名称"),
+        "specification": ("规格", "规格型号", "型号"),
+        "quantity": ("用量", "数量", "用量/装箱数量", "单机用量"),
+        "unit": ("单位",),
+        "supplier": ("供应商",),
+    }
+    lines: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    for file_value in files:
+        filename, raw = _decode_file(file_value)
+        if not filename.lower().endswith(".xlsx"):
+            issues.append({"code": "UNSUPPORTED_BOM_FILE", "filename": filename, "message": "BOM 上传当前需要 XLSX"})
+            continue
+        try:
+            workbook = load_workbook(BytesIO(raw), read_only=True, data_only=True)
+            for sheet in workbook.worksheets:
+                rows = list(sheet.iter_rows(values_only=True))
+                header = None
+                mapping: dict[str, int] = {}
+                for row_index, row in enumerate(rows[:30], start=1):
+                    candidate = {
+                        key: index
+                        for key, alias_list in aliases.items()
+                        for index, value in enumerate(row)
+                        if any(alias in str(value or "").replace(" ", "") for alias in alias_list)
+                    }
+                    if "material_code" in candidate and ("material_name" in candidate or "quantity" in candidate):
+                        header, mapping = row_index, candidate
+                        break
+                if header is None:
+                    continue
+                for row_index, row in enumerate(rows[header:], start=header + 1):
+                    code_index = mapping.get("material_code")
+                    code = row[code_index] if code_index is not None and code_index < len(row) else None
+                    if code in (None, ""):
+                        continue
+                    line = {"material_code": str(code).strip(), "source_file": filename, "source_sheet": sheet.title, "source_row": row_index}
+                    for key, index in mapping.items():
+                        if index < len(row) and row[index] not in (None, ""):
+                            line[key] = row[index]
+                    if "quantity" not in line:
+                        issues.append({"code": "MISSING_BOM_QUANTITY", "filename": filename, "sheet": sheet.title, "row": row_index, "message": "BOM 行缺少用量"})
+                    lines.append(line)
+            workbook.close()
+        except Exception as exc:
+            issues.append({"code": "BOM_PARSE_FAILED", "filename": filename, "message": str(exc)})
+    return lines, issues
 
 
 async def m0_import(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -201,19 +265,27 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
 async def m2_bom(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     profile = payload["product_profile"]
     lines = payload.get("bom_lines") or []
-    if not profile.get("product_code") or not lines:
+    parse_issues: list[dict[str, Any]] = []
+    if not lines and payload.get("bom_files"):
+        lines, parse_issues = _extract_uploaded_bom(payload.get("bom_files"))
+    routing_steps = payload.get("routing_steps") or []
+    if not profile.get("product_code") or not lines or parse_issues:
         return {
             "status": "human_input_required", "run_id": f"m2-{ctx['task_id'][-10:]}",
             "workflow_sequence": ["validate_input"], "bom_generation": {"bom_lines": []},
             "sop_generation": {}, "open_customer_questions": [
-                {"field": "product_code_or_bom", "question": "请补充产品编码和已确认 BOM 行"}
+                {"field": "product_code_or_bom", "question": "请补充产品编码和已确认 BOM 行"},
+                *([{"field": "bom_file_parse", "question": issue["message"]} for issue in parse_issues[:5]]),
             ], "artifacts": {}, "code": "BLOCKED_INPUT",
         }
+    duplicate_codes = sorted({code for code in (str(line.get("material_code") or "") for line in lines) if code and sum(1 for item in lines if str(item.get("material_code") or "") == code) > 1})
+    matching = {"status": "matched", "score": 1.0, "matched_by": ["product_code", "material_code"], "ambiguous_candidates": 0, "unmatched_fields": []}
     return {
         "status": "draft_created", "run_id": f"m2-{ctx['task_id'][-10:]}",
-        "workflow_sequence": ["history_search", "bom_generate", "sop_generate"],
-        "bom_generation": {"product_code": profile["product_code"], "bom_version": "draft-1", "bom_lines": lines, "assumptions": [], "evidence": [_evidence("m2", "bom_lines", "受控 BOM 输入")]},
-        "sop_generation": {"status": "draft", "operation_count": len(payload.get("routing_steps") or lines)},
+        "workflow_sequence": ["parse_sources", "history_search", "match_bom_sop", "bom_generate", "sop_generate"],
+        "bom_generation": {"product_code": profile["product_code"], "bom_version": "draft-1", "bom_lines": lines, "assumptions": [], "duplicate_material_codes": duplicate_codes, "evidence": [_evidence("m2", "bom_lines", "受控 BOM 输入")]},
+        "sop_generation": {"status": "draft", "operation_count": len(routing_steps or lines), "source_files": payload.get("sop_files") or []},
+        "matching": matching,
         "open_customer_questions": [], "artifacts": {},
         "evidence": [_evidence("m2", "workflow", "BOM/SOP draft")],
     }

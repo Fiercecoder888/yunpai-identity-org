@@ -111,7 +111,10 @@ class ToolRegistry:
                     headers["X-Yunpai-Tenant-ID"] = str(context["tenant_id"])
                 if context.get("idempotency_key"):
                     headers["Idempotency-Key"] = str(context["idempotency_key"])
-                files = _extract_uploads(body)
+                # The standalone M2 API consumes uploaded source files as
+                # base64 JSON and stages them itself; other modules use the
+                # generic multipart adapter.
+                files = [] if _spec.module == "m2" else _extract_uploads(body)
                 request_kwargs: dict[str, Any] = {"headers": headers}
                 if files:
                     request_kwargs["files"] = files
@@ -126,7 +129,13 @@ class ToolRegistry:
                 async with httpx.AsyncClient(timeout=_spec.timeout_s or timeout_s) as client:
                     response = await client.request(_spec.method, _base.rstrip("/") + path, **request_kwargs)
                     response.raise_for_status()
-                    return response.json()
+                    value = response.json()
+                    # The standalone M2 web adapter wraps its workflow result
+                    # in {"result": ...}; normalize that transport envelope
+                    # so ReviewerAgent sees the declared tool output directly.
+                    if isinstance(value, dict) and set(value) == {"result"}:
+                        return value["result"]
+                    return value
 
             self.handlers[name] = http_handler
 
@@ -181,9 +190,15 @@ def build_runtime_registry() -> ToolRegistry:
         # 生产环境护栏：拒绝用 local fixture 当生产工具面；必须由部署方提供 M0-M5 URL。
         raise RuntimeError("YUNPAI_ENV=production 要求 YUNPAI_TOOL_TRANSPORT=http（本地 fixture 仅限 sandbox/preview）")
     if transport == "http":
+        # 选择性 HTTP 模块绑定（origin/dev M2：YUNPAI_HTTP_MODULES 控制哪些模块走远程）。
+        selected = {
+            item.strip().lower()
+            for item in os.getenv("YUNPAI_HTTP_MODULES", "m0,m1,m2,m3,m4,m5").split(",")
+            if item.strip()
+        }
         urls = {
             module: os.getenv(f"{module.upper()}_URL", registry.tools_for(module)[0].base_url if registry.tools_for(module) else "")
-            for module in ("m0", "m1", "m2", "m3", "m4", "m5")
+            for module in selected
         }
         registry.bind_http({module: url for module, url in urls.items() if url})
         registry.environment = {"env": env, "transport": "http", "local_fixture": False}  # type: ignore[attr-defined]

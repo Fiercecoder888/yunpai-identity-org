@@ -102,6 +102,7 @@ function GateCard({ gate, onDecision, busy }: { gate: Gate; onDecision: (decisio
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [editError, setEditError] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
   const submitEdit = () => {
     try {
       const value = draft.trim() ? JSON.parse(draft) : {};
@@ -113,7 +114,20 @@ function GateCard({ gate, onDecision, busy }: { gate: Gate; onDecision: (decisio
       setEditError(caught instanceof SyntaxError ? 'JSON 格式无效，请检查引号、逗号和括号' : (caught as Error).message);
     }
   };
-  return <section className="gate-card" data-testid="gate-card"><div className="gate-ribbon"><AlertTriangle size={16} /><span>需要人工确认</span><span className="gate-type">{gateTitle[gate.type] ?? gate.type}</span></div><div className="gate-card-content"><h3>{gate.message}</h3><p>模块：{moduleName(gate.module)} · 工具：<code>{gate.tool}</code></p>{editing ? <div className="gate-editor"><label htmlFor="gate-supplement">补充或修改数据</label><textarea id="gate-supplement" value={draft} aria-invalid={Boolean(editError)} onChange={(event) => { setDraft(event.target.value); setEditError(''); }} placeholder='例如：{"supplier_by_material":{"MAT-1":"SUP-1"}}' />{editError && <p className="field-error" role="alert">{editError}</p>}<div className="gate-actions"><button type="button" className="button-secondary" onClick={() => { setEditing(false); setEditError(''); }}>取消</button><button type="button" className="button-primary" onClick={submitEdit} disabled={busy}><Check size={15} />提交修改</button></div></div> : <div className="gate-actions"><button type="button" className="button-primary" onClick={() => onDecision('approve')} disabled={busy}><Check size={15} />接收</button><button type="button" className="button-danger" onClick={() => onDecision('reject')} disabled={busy}><X size={15} />拒绝</button><button type="button" className="button-secondary" onClick={() => { setDraft(''); setEditError(''); setEditing(true); }} disabled={busy}><RefreshCw size={15} />修改</button></div>}</div></section>;
+  const uploadSupplement = async (file?: File) => {
+    if (!file) return;
+    try {
+      const attachment = await toAttachment(file, 'master_data');
+      const isBom = /\.(xlsx|xls|xlsm|csv)$/i.test(file.name) || /bom|物料清单/i.test(file.name);
+      onDecision('retry', isBom ? { bom_files: [attachment] } : { sop_files: [attachment] });
+      setEditError('');
+    } catch (caught) {
+      setEditError((caught as Error).message);
+    } finally {
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  };
+  return <section className="gate-card" data-testid="gate-card"><div className="gate-ribbon"><AlertTriangle size={16} /><span>需要人工确认</span><span className="gate-type">{gateTitle[gate.type] ?? gate.type}</span></div><div className="gate-card-content"><h3>{gate.message}</h3><p>模块：{moduleName(gate.module)} · 工具：<code>{gate.tool}</code></p><input ref={fileInput} className="hidden-file-input" type="file" accept=".xlsx,.xls,.xlsm,.csv,.pdf,.docx,.doc,.png,.jpg,.jpeg" onChange={(event) => { void uploadSupplement(event.target.files?.[0]); }} />{editing ? <div className="gate-editor"><label htmlFor="gate-supplement">补充或修改数据</label><textarea id="gate-supplement" value={draft} aria-invalid={Boolean(editError)} onChange={(event) => { setDraft(event.target.value); setEditError(''); }} placeholder='例如：{"bom_lines":[{"material_code":"MAT-1","quantity_per":1}]}' />{editError && <p className="field-error" role="alert">{editError}</p>}<div className="gate-actions"><button type="button" className="button-secondary" onClick={() => { setEditing(false); setEditError(''); }}>取消</button><button type="button" className="button-primary" onClick={submitEdit} disabled={busy}><Check size={15} />提交修改</button></div></div> : <div className="gate-actions"><button type="button" className="button-primary" onClick={() => onDecision('approve')} disabled={busy}><Check size={15} />接收</button><button type="button" className="button-danger" onClick={() => onDecision('reject')} disabled={busy}><X size={15} />拒绝</button><button type="button" className="button-secondary" onClick={() => { setDraft(''); setEditError(''); setEditing(true); }} disabled={busy}><RefreshCw size={15} />修改</button><button type="button" className="button-secondary" onClick={() => fileInput.current?.click()} disabled={busy}><Upload size={15} />上传 BOM/SOP</button></div>}</div></section>;
 }
 
 function Conversation({ state, onDecision, busy }: { state: AgentUiState; onDecision: (decision: string, supplement?: Record<string, unknown>) => void; busy: boolean }) {

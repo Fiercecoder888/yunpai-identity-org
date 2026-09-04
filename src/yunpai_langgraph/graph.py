@@ -415,7 +415,62 @@ class YunpaiGraph:
         if tool == "run_bom_sop_workflow":
             product = dict(request.get("product") or {})
             product.setdefault("product_name", product.get("product_code") or "")
-            return {"product_profile": product, "bom_lines": request.get("bom_lines", []), "routing_steps": request.get("routing_steps", []), "use_demo_sources": False}
+            bom_lines = request.get("bom_lines", []) or []
+            bom_items = [
+                {
+                    "item_no": str(line.get("line_id") or index),
+                    "material_code": str(line.get("material_code") or ""),
+                    "name": str(line.get("material_name") or line.get("material_code") or "未命名物料"),
+                    "specification": str(line.get("specification") or ""),
+                    "quantity": str(line.get("quantity_per", line.get("quantity", ""))),
+                    "note": str(line.get("note") or ""),
+                }
+                for index, line in enumerate(bom_lines, start=1)
+                if isinstance(line, dict)
+            ]
+            routing_steps = []
+            for item in (request.get("routing_steps", []) or []):
+                if not isinstance(item, dict):
+                    continue
+                if "standard_time" in item:
+                    standard_time_s = float(item.get("standard_time") or 0)
+                elif "standard_time_s" in item:
+                    standard_time_s = float(item.get("standard_time_s") or 0)
+                else:
+                    standard_time_s = float(item.get("processing_minutes") or 0) * 60
+                routing_steps.append({
+                    "name": str(item.get("name") or item.get("operation_name") or item.get("operation_id") or "未命名工序"),
+                    "description": str(item.get("description") or ""),
+                    "station": str(item.get("station") or item.get("station_code") or ""),
+                    # M2's HTTP contract names this value `standard_time` and
+                    # interprets it as seconds; retain the internal alias too.
+                    "standard_time": standard_time_s,
+                    "standard_time_s": standard_time_s,
+                })
+            attachments = [
+                item for item in request.get("attachments", [])
+                if isinstance(item, dict) and item.get("kind") == "master_data"
+            ]
+            return {
+                "product_profile": product,
+                "bom_lines": bom_lines,
+                "bom_items": bom_items,
+                "routing_steps": routing_steps,
+                "requirement_text": str(request.get("requirement_text") or request.get("message") or ""),
+                "rule_package_path": str(request.get("rule_package_path") or "/home/soft/yunpai/prod-39092/app/m8/material_numbering"),
+                "document_no": str(request.get("document_no") or product.get("product_code") or "M2-DRAFT"),
+                "history_bom_paths": request.get("history_bom_paths") or [],
+                "history_sop_paths": request.get("history_sop_paths") or [],
+                "template_confirmation": request.get("template_confirmation") or {"confirmed": False},
+                "customer_answers": request.get("customer_answers") or {},
+                "machine_hints": request.get("machine_hints") or [],
+                "station": str(request.get("station") or ""),
+                "enable_bom_model": bool(request.get("enable_bom_model", False)),
+                "enable_sop_model": bool(request.get("enable_sop_model", False)),
+                "bom_files": request.get("bom_files") or attachments,
+                "sop_files": request.get("sop_files") or attachments,
+                "use_demo_sources": False,
+            }
         if tool == "run_m3_procurement_requirements":
             m1 = outputs.get("ingest_document", {})
             order = dict(m1.get("order") or m1.get("extraction", {}).get("order") or request.get("order") or {})
