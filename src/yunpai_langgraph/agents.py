@@ -300,6 +300,11 @@ class ReviewerAgent:
         if effective_tool in {"data_import_run", "business-data-identification"}:
             if result.get("status") == "failed":
                 return {"approved": False, "terminal": True, "error": {"code": "IMPORT_FAILED", "message": "M0 未生成可审核候选"}}
+            sensitivity = result.get("sensitivity_summary") if isinstance(result.get("sensitivity_summary"), dict) else {}
+            sensitive = {kind: count for kind, count in sensitivity.items() if kind in {"hr", "financial"} and int(count) > 0}
+            if sensitive and effective_tool == "business-data-identification":
+                detail = "、".join(f"{kind}={count}" for kind, count in sensitive.items())
+                return self._gate("sensitive_data", effective_module, effective_tool, f"候选包含敏感资料（{detail}）；必须由授权人员复核后才可进入 M0 canonical 发布", ["授权复核", "拒绝", "终止"])
             message = "业务资料候选已写入识别库，必须审核后才能进入 M0 canonical 发布" if effective_tool == "business-data-identification" else "M0 候选必须审核后才能发布 canonical 事实"
             return self._gate("candidate", effective_module, effective_tool, message, ["批准候选", "补充裁决", "终止"])
         if effective_tool == "ingest_document" and (result.get("needs_review") or float(result.get("overall_confidence") or 0) < 0.8):

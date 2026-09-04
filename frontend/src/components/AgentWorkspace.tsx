@@ -7,7 +7,7 @@ import type { Attachment, AttachmentKind, Gate, RunState } from '../lib/types';
 import { MODULES } from '../lib/types';
 
 const labelForStatus: Record<string, string> = { idle: '待启动', running: '执行中', completed: '已完成', waiting: '待确认', failed: '失败' };
-const gateTitle: Record<string, string> = { candidate: '候选数据确认', engineering: '工程草稿确认', procurement: '采购信息确认', apply: '排程发布确认', review: '识别结果复核', data: '补充权威数据' };
+const gateTitle: Record<string, string> = { candidate: '候选数据确认', sensitive_data: '敏感资料授权复核', engineering: '工程草稿确认', procurement: '采购信息确认', apply: '排程发布确认', review: '识别结果复核', data: '补充权威数据' };
 
 function timeLabel(value?: string) {
   if (!value) return '';

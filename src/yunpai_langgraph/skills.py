@@ -150,15 +150,29 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
                 {"filename": str(item.get("path") or "upload")}, mode=mode,
                 status="parse_failed", reason=str(item.get("error") or "ingest error"),
             ))
+    sensitivity_summary = _candidate_sensitivity_summary(db_path)
     return {
         "skill": "business-data-identification",
         "skill_mode": mode,
         "status": "candidate_created",
         "schema_version": "yunpai.business-catalog.v2",
         "upload_summary": summary.as_dict(),
+        "sensitivity_summary": sensitivity_summary,
         "batch": batch_result,
         "evidence": [{"module": "orchestrator", "source_ref": batch_result["root_path"], "evidence_ref": f"business-catalog:{batch_result['batch_id']}", "detail": "文件哈希、分类和字段观察已写入候选库"}],
     }
+
+
+def _candidate_sensitivity_summary(db_path: str) -> dict[str, int]:
+    """从候选库读取 sensitivity 计数（普通/内部/HR/财务），供 Reviewer 决定 Gate。"""
+    import sqlite3
+
+    try:
+        with sqlite3.connect(db_path) as db:
+            rows = db.execute("SELECT sensitivity_classification, count(*) FROM document_candidates GROUP BY sensitivity_classification").fetchall()
+        return {str(kind): int(count) for kind, count in rows}
+    except Exception:
+        return {}
 
 
 async def _dispatch_registered_tool(
