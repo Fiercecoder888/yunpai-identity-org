@@ -49,3 +49,14 @@
 - 验证：`.venv/bin/python -m pytest -q` → **109 passed / exit 0**；`git diff --check` 通过；registry 114/20/8、M5 bound 18、排除 2 未绑定；已推送 origin/pmctooldev。
 - 阻塞：仍无 `m5-api:8000` 可达；192.168.110.19:39092 为旧版编排部署（bound_tools=13，不含新 M5 handler），无法作为本次代码的真实读回证据。GB10 新 release 部署/联调属集成负责人操作。按用户流程，GB10 验证通过前不提交 dev。
 - 证据：远端 origin/pmctooldev（9505cfd 最新）。
+
+### 2026-09-04（Round 3：本地 HTTP 冒烟证据）
+
+- 实际修改：无代码改动；启动本地 uvicorn（127.0.0.1:9631）做 HTTP 层冒烟。
+- 验证：
+  - `GET /health` → `tools=114, bound_tools=24, skills=8`
+  - `GET /tools?module=m5` → 20 个工具中 18 bound；`report_workload`/`bind_worker_to_order` 未绑定
+  - `POST /runs` with tool=`get_m5_integration_contracts` → completed，output.success=true（本地 handler 经真实 HTTP 编排读回）
+  - `.venv/bin/python -m pytest -q` → 109 passed / exit 0
+- 阻塞：GB10/真实 M5 服务读回仍不可达（无 m5-api；39092 为旧版部署 bound_tools=13）；按用户流程验证通过前不提交 dev。该阻塞自 Round 1 起持续。
+- 证据：远端 origin/pmctooldev（待提交本轮报告）。
