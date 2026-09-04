@@ -17,8 +17,9 @@ SCHEMA_VERSION = "yunpai.business-catalog.v1"
 IGNORED_NAMES = {".DS_Store"}
 IGNORED_PREFIXES = ("._", "~$")
 SUPPORTED_EXTENSIONS = {
-    ".xlsx", ".xls", ".csv", ".tsv", ".json", ".pdf", ".docx", ".txt", ".md",
-    ".dwg", ".et", ".zip", ".rar", ".7z", ".py", ".ps1",
+    ".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".json", ".pdf", ".docx",
+    ".txt", ".md", ".dwg", ".et", ".zip", ".rar", ".7z", ".py", ".ps1",
+    ".png", ".jpg", ".jpeg", ".doc", ".pptx",
 }
 
 
@@ -262,22 +263,76 @@ def _extract_text(path: Path) -> dict[str, Any]:
 def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, parse_xlsx: bool = False) -> dict[str, Any]:
     kind, subtype, classification_confidence = classify_path(path)
     suffix = path.suffix.lower()
-    extraction: dict[str, Any]
     size = path.stat().st_size
-    if suffix == ".xlsx" and (not parse_xlsx or size > deep_limit_bytes):
-        extraction = {"extraction_skipped": "xlsx_deferred_to_m1_parser", "size_bytes": size}
+    raw = path.read_bytes() if size <= 16 * 1024 * 1024 else b""
+    sniffed: dict[str, Any] = {}
+    if raw:
+        from .file_sniff import sniff_format
+
+        verdict = sniff_format(raw, path.name)
+        sniffed = {
+            "sniffed_format": verdict.detected_format,
+            "sniffed_mime": verdict.mime_type,
+            "declared_suffix": verdict.declared_suffix,
+            "magic_match": verdict.match,
+            "mismatch_reason": verdict.reason,
+        }
+    extraction: dict[str, Any]
+    if suffix in {".zip", ".rar", ".7z"} and raw:
+        from .archive_extract import unpack_archive
+
+        unpacked = unpack_archive(raw, filename=path.name)
+        extraction = {
+            "archive_format": unpacked.get("archive_format"),
+            "member_count": unpacked.get("member_count", 0),
+            "members": [
+                {key: member[key] for key in ("relative_path", "size_bytes", "status", "reason") if key in member}
+                for member in unpacked.get("members", [])
+            ],
+            "unpack_error": unpacked.get("error"),
+            "parent_sha256": _sha256(path),
+            "size_bytes": size,
+        }
+        if unpacked.get("error"):
+            extraction["extraction_skipped"] = "archive_unsupported_or_corrupt"
+    elif suffix == ".xls" and raw:
+        from .xls_reader import extract_xls
+
+        xls_result = extract_xls(path)
+        extraction = {
+            "parser_version": xls_result.get("parser_version"),
+            "sheet_count": xls_result.get("sheet_count", 0),
+            "sheets": xls_result.get("sheets", []),
+            "xls_error": xls_result.get("error"),
+            "size_bytes": size,
+        }
+        if xls_result.get("error"):
+            extraction["extraction_skipped"] = "xls_parse_error"
+    elif suffix in {".png", ".jpg", ".jpeg"} and raw:
+        extraction = {
+            "image_format": sniffed.get("sniffed_format") if sniffed.get("magic_match") else "unsupported",
+            "size_bytes": size,
+            "image_prefix_sha256": hashlib.sha256(raw[:4096]).hexdigest(),
+        }
+        if not sniffed.get("magic_match"):
+            extraction["extraction_skipped"] = "image_magic_mismatch"
+    elif suffix in {".doc", ".pptx"} and raw:
+        extraction = {"format": suffix.lstrip("."), "size_bytes": size, "declared_only": True}
+    elif suffix == ".xlsx" and (not parse_xlsx or size > deep_limit_bytes):
+        extraction = {"extraction_skipped": "xlsx_deferred_to_m1_parser", "size_bytes": size, **sniffed}
     elif size > deep_limit_bytes and suffix in {".pdf", ".docx"}:
-        extraction = {"extraction_skipped": "large_file", "size_bytes": size}
+        extraction = {"extraction_skipped": "large_file", "size_bytes": size, **sniffed}
     elif suffix == ".xlsx":
         extraction = _extract_bom_xlsx(path) if kind == "bom" else _extract_xlsx(path, kind)
+        extraction = {**extraction, **sniffed}
     elif suffix in {".csv", ".tsv"}:
-        extraction = _extract_delimited(path)
+        extraction = {**_extract_delimited(path), **sniffed}
     elif suffix == ".json":
-        extraction = _extract_json(path)
+        extraction = {**_extract_json(path), **sniffed}
     elif suffix in {".pdf", ".docx", ".txt", ".md"}:
-        extraction = _extract_text(path)
+        extraction = {**_extract_text(path), **sniffed}
     else:
-        extraction = {"binary_prefix_sha256": hashlib.sha256(_read_prefix(path)).hexdigest()}
+        extraction = {"binary_prefix_sha256": hashlib.sha256(_read_prefix(path)).hexdigest(), **sniffed}
     document = extraction.get("order_document") if isinstance(extraction, dict) else None
     order = document if isinstance(document, dict) else {}
     lines = order.get("lines") if isinstance(order.get("lines"), list) else []
