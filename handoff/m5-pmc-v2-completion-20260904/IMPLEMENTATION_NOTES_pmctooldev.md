@@ -16,9 +16,10 @@
 | solve 落库幂等（registry 真实入口 replay/conflict） | 完成 | `a7a89b6` |
 | session 报告 | 完成 | `27fac5f` |
 | 服务端生命周期守卫（pressure_only/validation-failed 不可 release）＋ ingest 只建快照不求解 | 完成 | `06fb51c` |
-| replan 保留 event/freeze/locks 元数据＋progress 只挂持久化执行证据 | 完成 | 待提交 |
+| replan 保留 event/freeze/locks 元数据＋progress 只挂持久化执行证据 | 完成 | `3f20373` |
+| progress 订单状态/完成率由持久化 execution events 推导（不伪造）＋事件/消息幂等负向 | 完成 | `7e090db` 等 |
 
-本地回归：**107 passed**（原 60 passed 基线全部保留并按新合同等价升级；新增 47 项 M5 测试）。
+本地回归：**109 passed**（原 60 passed 基线全部保留并按新合同等价升级；新增 49 项 M5 测试）。
 
 Registry 数量实测：工具总数 **114**、M5 manifest **20**、Skill **8**；M5 已绑定 **18**（17 新增 + solve_scheduling），排除工具 `report_workload`/`bind_worker_to_order` 保持未绑定且不在任何 Skill。
 
