@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from copy import deepcopy
 import json
+import os
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, Callable
