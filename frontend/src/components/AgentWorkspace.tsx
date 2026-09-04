@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Check, ChevronRight, CircleDot, FileBox, FileSpreadsheet, Menu, Paperclip, Plus, RefreshCw, Send, ShieldCheck, Square, Upload, X, Zap } from 'lucide-react';
 import { getRun, getRuns, streamResume, streamRun } from '../lib/agentApi';
-import { applyEvent, emptyAgentState, mergeRunState, moduleName, moduleProgress, summarizeResult, type AgentUiState } from '../lib/agentState';
+import { applyEvent, deriveUploadSummary, emptyAgentState, mergeRunState, moduleName, moduleProgress, summarizeResult, type AgentUiState } from '../lib/agentState';
 import { formatBytes, isAllowedFile, toAttachment } from '../lib/upload';
 import type { Attachment, AttachmentKind, Gate, RunState } from '../lib/types';
 import { MODULES } from '../lib/types';
@@ -60,9 +60,10 @@ function ProgressRail({ state, onClose }: { state: AgentUiState; onClose?: () =>
 
 function ResultSummary({ state }: { state: AgentUiState }) {
   const result = summarizeResult(state);
-  const visible = result.shortage !== undefined || result.purchaseCount !== undefined || result.scheduleMinutes !== undefined;
+  const upload = deriveUploadSummary(state);
+  const visible = result.shortage !== undefined || result.purchaseCount !== undefined || result.scheduleMinutes !== undefined || Boolean(upload);
   if (!visible) return null;
-  return <div className="result-summary" data-testid="result-summary"><div className="result-summary-heading"><ShieldCheck size={16} /><strong>结果摘要</strong><span>来源：LangGraph 输出</span></div><div className="metric-grid">{result.shortage !== undefined && <div><span>缺料数量</span><strong>{result.shortage}</strong><small>件</small></div>}{result.purchaseCount !== undefined && <div><span>采购建议</span><strong>{result.purchaseCount}</strong><small>条</small></div>}{result.scheduleMinutes !== undefined && <div><span>排程总时长</span><strong>{result.scheduleMinutes}</strong><small>分钟</small></div>}{result.lifecycle && <div><span>计划生命周期</span><strong className="metric-state">{result.lifecycle === 'released' ? '已发布' : result.lifecycle}</strong></div>}</div></div>;
+  return <div className="result-summary" data-testid="result-summary"><div className="result-summary-heading"><ShieldCheck size={16} /><strong>结果摘要</strong><span>来源：LangGraph 输出</span></div><div className="metric-grid">{upload && <div className="metric-span"><span>文件上传</span><strong>{upload.accepted ?? 0} 成功 · {upload.needs_review ?? 0} 复核 · {upload.skipped ?? 0} 跳过 · {upload.parse_failed ?? 0} 失败</strong><small>共 {upload.total ?? 0} 个文件 · 模式 {String(upload.mode ?? '-')}</small></div>}{result.shortage !== undefined && <div><span>缺料数量</span><strong>{result.shortage}</strong><small>件</small></div>}{result.purchaseCount !== undefined && <div><span>采购建议</span><strong>{result.purchaseCount}</strong><small>条</small></div>}{result.scheduleMinutes !== undefined && <div><span>排程总时长</span><strong>{result.scheduleMinutes}</strong><small>分钟</small></div>}{result.lifecycle && <div><span>计划生命周期</span><strong className="metric-state">{result.lifecycle === 'released' ? '已发布' : result.lifecycle}</strong></div>}{result.onTimeRate !== undefined && <div><span>准时率</span><strong>{(result.onTimeRate * 100).toFixed(1)}%</strong><small>on_time_rate</small></div>}{result.tardinessMinutes !== undefined && <div><span>总延迟</span><strong>{result.tardinessMinutes}</strong><small>分钟</small></div>}{result.resourceLoadMinutes !== undefined && <div><span>资源负载</span><strong>{result.resourceLoadMinutes}</strong><small>分钟</small></div>}</div></div>;
 }
 
 function PmcSchedulePanel({ state }: { state: AgentUiState }) {
