@@ -407,14 +407,43 @@ class YunpaiGraph:
         if tool == "run_bom_sop_workflow":
             product = dict(request.get("product") or {})
             product.setdefault("product_name", product.get("product_code") or "")
+            bom_lines = request.get("bom_lines", []) or []
+            bom_items = [
+                {
+                    "item_no": str(line.get("line_id") or index),
+                    "material_code": str(line.get("material_code") or ""),
+                    "name": str(line.get("material_name") or line.get("material_code") or "未命名物料"),
+                    "specification": str(line.get("specification") or ""),
+                    "quantity": str(line.get("quantity_per", line.get("quantity", ""))),
+                    "note": str(line.get("note") or ""),
+                }
+                for index, line in enumerate(bom_lines, start=1)
+                if isinstance(line, dict)
+            ]
+            routing_steps = [
+                {
+                    "name": str(item.get("name") or item.get("operation_name") or item.get("operation_id") or "未命名工序"),
+                    "description": str(item.get("description") or ""),
+                    "station": str(item.get("station") or item.get("station_code") or ""),
+                    "standard_time_s": float(item.get("standard_time_s", item.get("processing_minutes", 0)) or 0) * 60,
+                }
+                for item in (request.get("routing_steps", []) or [])
+                if isinstance(item, dict)
+            ]
             attachments = [
                 item for item in request.get("attachments", [])
                 if isinstance(item, dict) and item.get("kind") == "master_data"
             ]
             return {
                 "product_profile": product,
-                "bom_lines": request.get("bom_lines", []),
-                "routing_steps": request.get("routing_steps", []),
+                "bom_lines": bom_lines,
+                "bom_items": bom_items,
+                "routing_steps": routing_steps,
+                "requirement_text": str(request.get("requirement_text") or request.get("message") or ""),
+                "rule_package_path": str(request.get("rule_package_path") or "/app/m2_bom_sop_agent/bom"),
+                "document_no": str(request.get("document_no") or product.get("product_code") or "M2-DRAFT"),
+                "history_bom_paths": request.get("history_bom_paths") or [],
+                "history_sop_paths": request.get("history_sop_paths") or [],
                 "bom_files": request.get("bom_files") or attachments,
                 "sop_files": request.get("sop_files") or attachments,
                 "use_demo_sources": False,
