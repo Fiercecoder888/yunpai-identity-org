@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from yunpai_langgraph.contracts import ToolSpec
+from yunpai_langgraph.m1_tooling import M1_ADAPTER_TOOL_NAMES, M1_HTTP_ADAPTER_TOOL_NAMES, M1_TOOL_NAMES
 from yunpai_langgraph.m3_m4_tooling import M3_ADAPTER_TOOL_NAMES, M4_ADAPTER_TOOL_NAMES
 from yunpai_langgraph.registry import ToolRegistry, build_default_registry, build_runtime_registry
 
@@ -16,9 +17,14 @@ def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
     assert len(registry.specs) == 114
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
-    assert len(registry.handlers) == 45
+    # 7 local handlers + 15 M3 + 23 M4 + 16 M1 HTTP adapters = 61.
+    assert len(registry.handlers) == 61
     assert all(name in registry.handlers for name in M3_ADAPTER_TOOL_NAMES)
     assert all(name in registry.handlers for name in M4_ADAPTER_TOOL_NAMES)
+    # All 17 M1 tools are bound in the default registry: ingest_document stays
+    # on the local fixture handler, the remaining 16 use the M1 HTTP adapter.
+    assert all(name in registry.handlers for name in M1_TOOL_NAMES)
+    assert all(name in registry.handlers for name in M1_ADAPTER_TOOL_NAMES)
     assert "receive_m3_material_demand" not in registry.handlers
     assert "receive_m4_schedule_impact_proposal" not in registry.handlers
     assert "import_m4_purchase_suggestions" not in registry.handlers

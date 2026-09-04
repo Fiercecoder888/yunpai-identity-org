@@ -212,6 +212,8 @@ class ToolRegistry:
 
 
 def build_default_registry() -> ToolRegistry:
+    from .m1_tooling import M1_HTTP_ADAPTER_TOOL_NAMES, bind_m1_http
+    from .m1_http_adapter import module_m1_auth_headers
     from .m3_m4_tooling import M3_M4_ADAPTER_TOOL_NAMES
     from .workers import HANDLERS
     registry = ToolRegistry()
@@ -220,6 +222,18 @@ def build_default_registry() -> ToolRegistry:
     for name, handler in HANDLERS.items():
         if name in registry.specs:
             registry.handlers[name] = handler
+    # The M1 module uses a dedicated adapter: tenant/actor header mapping
+    # (X-Tenant-ID/X-Actor-ID/X-Actor-Roles), 202 bounded polling and stable
+    # error mapping.  ingest_document keeps its local fixture handler here
+    # (overwrite=False) and is replaced by the real M1 HTTP adapter in
+    # production transport.
+    bind_m1_http(
+        registry,
+        urls=_module_urls(registry, {"m1"}),
+        headers_by_module={"m1": module_m1_auth_headers()},
+        tool_names=M1_HTTP_ADAPTER_TOOL_NAMES,
+        overwrite=False,
+    )
     registry.bind_http(
         _module_urls(registry, {"m3", "m4"}),
         headers_by_module=_module_auth_headers({"m3", "m4"}),
@@ -346,6 +360,8 @@ def _extract_uploads(body: dict[str, Any]) -> list[tuple[str, tuple[str, bytes, 
 def build_runtime_registry() -> ToolRegistry:
     registry = build_default_registry()
     if os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower() == "http":
+        from .m1_tooling import M1_HTTP_ADAPTER_TOOL_NAMES, bind_m1_http
+        from .m1_http_adapter import module_m1_auth_headers
         from .m3_m4_tooling import EXCLUDED_M3_M4_TOOL_NAMES
 
         selected = {
@@ -358,4 +374,15 @@ def build_runtime_registry() -> ToolRegistry:
             headers_by_module=_module_auth_headers(selected),
             tool_names=set(registry.specs) - set(EXCLUDED_M3_M4_TOOL_NAMES),
         )
+        if "m1" in selected:
+            # Replace the generic HTTP binding for M1 with the dedicated M1
+            # adapter so tenant/actor headers, 202 polling and error mapping
+            # follow the standalone M1 service contract.
+            bind_m1_http(
+                registry,
+                urls=_module_urls(registry, {"m1"}),
+                headers_by_module={"m1": module_m1_auth_headers()},
+                tool_names=M1_HTTP_ADAPTER_TOOL_NAMES,
+                overwrite=True,
+            )
     return registry

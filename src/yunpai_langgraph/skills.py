@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from .business_catalog import ingest_tree
+from .m1_tooling import (
+    M1_SKILL_OPERATION_MAP,
+    unique_tools as m1_unique_tools,
+)
 from .m3_m4_tooling import (
     M3_SKILL_OPERATION_MAP,
     M4_SKILL_OPERATION_MAP,
@@ -151,7 +155,7 @@ async def m0_governance(payload: dict[str, Any], context: dict[str, Any]) -> dic
 async def m1_document_intelligence(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     return await _dispatch_registered_tool(
         "yunpai-m1-document-parser", payload, context,
-        {"default": "ingest_document", "parse": "ingest_document", "review": "submit_m1_review", "report": "generate_m1_report"},
+        M1_SKILL_OPERATION_MAP,
     )
 
 
@@ -207,10 +211,10 @@ def build_default_skill_registry() -> SkillRegistry:
     ))
     registry.register(SkillSpec(
         name="yunpai-m1-document-parser",
-        description="解析订单、图纸、表格和归档，保留字段级证据并将低置信度结果送人工复核。",
+        description="解析订单、图纸、表格、CAD 与归档并保留字段级证据；支持任务/批次轮询、订单与文档检索、导出、人工审核队列与提交、报告和 Governed Wiki 知识查询。低置信度结果送人工复核，不拥有 M0 canonical 事实。",
         handler=m1_document_intelligence,
-        tags=("m1", "ocr", "document", "review"),
-        tools=("ingest_document", "submit_m1_review", "generate_m1_report"),
+        tags=("m1", "ocr", "document", "review", "knowledge", "archive"),
+        tools=m1_unique_tools(M1_SKILL_OPERATION_MAP),
     ))
     registry.register(SkillSpec(
         name="yunpai-m2-bom-sop",
