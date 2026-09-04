@@ -89,3 +89,9 @@
 - 实际修改：无代码变更；仅最终一致性核验。
 - 验证：worktree(pmctooldev-merge) 全量 pytest **201 passed / exit 0**；registry 114 / m5 20 / m5 bound 18 / 排除 2 未绑定 / skills 8 / pmc 13 / lifecycle 7；origin/dev 最新 a3384379 已被 HEAD 包含。
 - 状态：本分支交付完毕，等待集成负责人合入 dev。
+
+### 2026-09-04（Round 5：merge-readiness 审计）
+
+- 实际修改：无代码变更；执行合并就绪审计。
+- 验证：HEAD 包含 origin/dev（ancestor PASS）；origin/dev..HEAD = 21 个自有提交 / 24 文件（M5 handler/repo/lifecycle/tests/reports），未改动 dev 的 M0/M1/M2 文件；worktree pytest 201 passed。
+- 状态：等待集成负责人将 origin/pmctooldev（62ab339）合入 origin/dev。
