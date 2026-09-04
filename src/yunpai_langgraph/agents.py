@@ -335,6 +335,10 @@ class ReviewerAgent:
             return self._gate("review", effective_module, effective_tool, message, ["修正并重试", "接受结果", "终止"])
         if effective_tool == "run_bom_sop_workflow":
             if result.get("status") == "human_input_required":
+                canonical_match = result.get("canonical_bom_match")
+                if isinstance(canonical_match, dict) and canonical_match.get("status") == "matched":
+                    count = canonical_match.get("line_count") or 0
+                    return self._gate("engineering", effective_module, effective_tool, f"M0 已匹配并审核 {count} 条 BOM；SOP/工艺约束仍需工程确认", ["批准 BOM/SOP", "补充 SOP", "终止"])
                 return self._gate("data", effective_module, effective_tool, "M2 缺少产品/BOM 权威输入", ["补充数据", "终止"])
             if result.get("status") == "draft_created":
                 return self._gate("engineering", effective_module, effective_tool, "BOM/SOP 草稿必须由工程人员批准", ["批准 BOM/SOP", "修改后重试", "终止"])

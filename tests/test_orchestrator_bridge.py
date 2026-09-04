@@ -12,7 +12,7 @@ import pytest
 
 from yunpai_langgraph.models import new_state
 import yunpai_langgraph.orchestration_bridge as orchestration_bridge
-from yunpai_langgraph.orchestration_bridge import bridge_payload
+from yunpai_langgraph.orchestration_bridge import bridge_payload, merge_m2_canonical_bom
 from yunpai_langgraph.planning_snapshot import (
     assemble_bundle, bundle_checksum, checksum_of, finalize, snapshot_header,
     verify_bundle,
@@ -96,6 +96,17 @@ def test_m2_payload_ignores_unapproved_or_wrong_product_m0_bom(monkeypatch):
     })
     payload = bridge_payload(state, "run_bom_sop_workflow")
     assert payload["bom_lines"] == []
+
+
+def test_m2_result_preserves_canonical_bom_match_for_engineering_gate():
+    result = {"status": "human_input_required", "bom_generation": {"bom_lines": []}}
+    payload = {"product_profile": {"product_code": "P-1"}, "bom_lines": [{"material_code": "MAT-1"}]}
+    enriched = merge_m2_canonical_bom(result, payload)
+    assert enriched["bom_generation"]["bom_lines"] == [{"material_code": "MAT-1"}]
+    assert enriched["canonical_bom_match"] == {
+        "status": "matched", "source": "m0.get_m0_product_overview",
+        "product_code": "P-1", "line_count": 1, "review_status": "approved",
+    }
 
 
 def test_m3_without_approved_bom_returns_blocked_input():

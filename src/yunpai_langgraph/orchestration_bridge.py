@@ -187,6 +187,29 @@ def _read_m0_product_overview(state: RunState, product_code: str) -> dict[str, A
         return {}
 
 
+def merge_m2_canonical_bom(result: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Preserve an M0-approved BOM when the M2 generator cannot consume it directly."""
+    if not isinstance(result, dict) or result.get("status") != "human_input_required":
+        return result
+    lines = payload.get("bom_lines") if isinstance(payload, dict) else None
+    if not isinstance(lines, list) or not lines:
+        return result
+    generation = result.setdefault("bom_generation", {})
+    if not isinstance(generation, dict):
+        generation = {}
+        result["bom_generation"] = generation
+    if not generation.get("bom_lines"):
+        generation["bom_lines"] = [line for line in lines if isinstance(line, dict)]
+    result["canonical_bom_match"] = {
+        "status": "matched",
+        "source": "m0.get_m0_product_overview",
+        "product_code": str((payload.get("product_profile") or {}).get("product_code") or ""),
+        "line_count": len(generation.get("bom_lines") or []),
+        "review_status": "approved",
+    }
+    return result
+
+
 def read_approved_route(state: RunState) -> list[dict[str, Any]]:
     request = state.get("request", {})
     steps = request.get("routing_steps") or []

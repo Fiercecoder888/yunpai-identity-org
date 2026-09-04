@@ -270,6 +270,9 @@ class YunpaiGraph:
             state["trace"].append({"event": "react.observation", "tool": step["tool"], "status": "failed", "at": _now()})
             return self._save(state)
         result = outcome["result"]
+        if step["tool"] == "run_bom_sop_workflow" and state.get("route") == "workflow" and state.get("workflow_id") in BRIDGED_WORKFLOWS:
+            from .orchestration_bridge import merge_m2_canonical_bom
+            result = merge_m2_canonical_bom(result, payload)
         state["current_result"] = result
         state["outputs"][step["tool"]] = result
         state["outputs"][step["module"]] = result
