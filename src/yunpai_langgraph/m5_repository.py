@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS m5_plans (
     validation_report_json TEXT NOT NULL DEFAULT '{"status":"unknown","errors":[]}',
     bundle_json TEXT NOT NULL,
     schedule_json TEXT NOT NULL,
+    released_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -100,6 +101,105 @@ CREATE TABLE IF NOT EXISTS m5_lifecycle (
 );
 CREATE INDEX IF NOT EXISTS idx_m5_plans_scenario ON m5_plans(scenario_id);
 CREATE INDEX IF NOT EXISTS idx_m5_lifecycle_plan ON m5_lifecycle(plan_version);
+CREATE TABLE IF NOT EXISTS m5_dispatch (
+    dispatch_id TEXT PRIMARY KEY,
+    plan_version TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    task_id TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL,
+    operation_keys_json TEXT NOT NULL,
+    target_system TEXT NOT NULL DEFAULT 'mes',
+    status TEXT NOT NULL DEFAULT 'pending',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    requested_by TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (plan_version, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS m5_execution_events (
+    event_id TEXT PRIMARY KEY,
+    plan_version TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    task_id TEXT NOT NULL DEFAULT '',
+    order_id TEXT NOT NULL DEFAULT '',
+    operation_id TEXT NOT NULL DEFAULT '',
+    event_type TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'manual',
+    external_ref TEXT NOT NULL DEFAULT '',
+    occurred_at TEXT NOT NULL,
+    worker_id TEXT NOT NULL DEFAULT '',
+    team_id TEXT NOT NULL DEFAULT '',
+    station TEXT NOT NULL DEFAULT '',
+    reported_quantity TEXT NOT NULL DEFAULT '',
+    scrap_quantity TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    source_kind TEXT NOT NULL DEFAULT 'accepted_execution_event',
+    event_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    UNIQUE (plan_version, event_type, order_id, operation_id, external_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_m5_execution_plan ON m5_execution_events(plan_version);
+CREATE TABLE IF NOT EXISTS m5_messages (
+    draft_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    task_id TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL,
+    department TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    recipient_targets_json TEXT NOT NULL,
+    message_kind TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    event_summary TEXT NOT NULL DEFAULT '',
+    required_action TEXT NOT NULL DEFAULT '',
+    evidence_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_approval',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (tenant_id, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS m5_outbox (
+    outbox_id TEXT PRIMARY KEY,
+    draft_id TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    status TEXT NOT NULL DEFAULT 'pending',
+    provider_message_id TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS m5_knowledge (
+    knowledge_id TEXT PRIMARY KEY,
+    scenario_id TEXT NOT NULL,
+    plan_version TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    task_id TEXT NOT NULL DEFAULT '',
+    input_sha256 TEXT NOT NULL DEFAULT '',
+    outcome TEXT NOT NULL DEFAULT '',
+    solver_status TEXT NOT NULL DEFAULT '',
+    on_time_rate TEXT NOT NULL DEFAULT '',
+    total_tardiness_minutes TEXT NOT NULL DEFAULT '',
+    validation_passed INTEGER NOT NULL DEFAULT 0,
+    tags_json TEXT NOT NULL DEFAULT '[]',
+    features_json TEXT NOT NULL DEFAULT '{}',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS m5_procurement_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    scenario_id TEXT NOT NULL,
+    plan_version TEXT NOT NULL DEFAULT '',
+    tenant_id TEXT NOT NULL DEFAULT 'default',
+    task_id TEXT NOT NULL DEFAULT '',
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'proposal',
+    items_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (scenario_id, idempotency_key)
+);
 """
 
 
@@ -397,8 +497,12 @@ class M5Repository:
             raise M5RepositoryError("STALE_REVISION",
                                     f"计划 {plan_version} 当前状态为 {from_status}，期望 {expected_from}")
         with self._lock, self._connect() as db:
-            db.execute("UPDATE m5_plans SET lifecycle_status=?, updated_at=? WHERE plan_version=?",
-                       (to_status, _now(), plan_version))
+            if to_status == "released":
+                db.execute("UPDATE m5_plans SET lifecycle_status=?, released_at=?, updated_at=? WHERE plan_version=?",
+                           (to_status, _now(), _now(), plan_version))
+            else:
+                db.execute("UPDATE m5_plans SET lifecycle_status=?, updated_at=? WHERE plan_version=?",
+                           (to_status, _now(), plan_version))
             db.execute(
                 """INSERT INTO m5_lifecycle
                    (plan_version, from_status, to_status, gate, actor, task_id, trace_id, revision, transitioned_at)
@@ -415,6 +519,285 @@ class M5Repository:
                 "SELECT * FROM m5_lifecycle WHERE plan_version=? ORDER BY seq", (plan_version,)
             ).fetchall()
         return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # dispatch (Task 3/5): durable pending dispatch
+    # ------------------------------------------------------------------
+
+    def create_dispatch(self, *, dispatch_id: str, plan_version: str, tenant_id: str,
+                        task_id: str, idempotency_key: str, operation_keys: list[str],
+                        target_system: str = "mes", payload: dict[str, Any] | None = None,
+                        requested_by: str = "") -> dict[str, Any]:
+        now = _now()
+        plan = self.get_plan(plan_version)
+        if plan is None:
+            raise M5RepositoryError("PLAN_NOT_FOUND", f"计划 {plan_version} 不存在")
+        if plan["lifecycle_status"] != "released":
+            raise M5RepositoryError("NOT_RELEASED",
+                                    f"计划 {plan_version} 未发布（当前 {plan['lifecycle_status']}），不能派工")
+        with self._lock, self._connect() as db:
+            row = db.execute(
+                "SELECT dispatch_id, status, operation_keys_json FROM m5_dispatch WHERE plan_version=? AND idempotency_key=?",
+                (plan_version, idempotency_key),
+            ).fetchone()
+            if row is not None:
+                return {
+                    "dispatch_id": row["dispatch_id"], "plan_version": plan_version,
+                    "idempotency_key": idempotency_key, "status": row["status"],
+                    "operation_keys": _loads(row["operation_keys_json"]) or [],
+                    "replayed": True,
+                }
+            db.execute(
+                """INSERT INTO m5_dispatch
+                   (dispatch_id, plan_version, tenant_id, task_id, idempotency_key,
+                    operation_keys_json, target_system, status, payload_json, requested_by,
+                    attempts, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (dispatch_id, plan_version, tenant_id, task_id, idempotency_key,
+                 _json(list(operation_keys)), target_system, "pending",
+                 _json(payload or {}), requested_by, 0, now, now),
+            )
+        return {
+            "dispatch_id": dispatch_id, "plan_version": plan_version,
+            "idempotency_key": idempotency_key, "status": "pending",
+            "operation_keys": list(operation_keys), "target_system": target_system,
+            "replayed": False,
+        }
+
+    def get_dispatch(self, dispatch_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM m5_dispatch WHERE dispatch_id=?", (dispatch_id,)).fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        out["operation_keys"] = _loads(row["operation_keys_json"]) or []
+        out["payload"] = _loads(row["payload_json"]) or {}
+        return out
+
+    def list_dispatch(self, plan_version: str) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM m5_dispatch WHERE plan_version=? ORDER BY created_at", (plan_version,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # execution events (Task 5)
+    # ------------------------------------------------------------------
+
+    def add_execution_event(self, *, event: dict[str, Any], plan_version: str,
+                            tenant_id: str = "default", task_id: str = "") -> dict[str, Any]:
+        event_id = str(event.get("event_id") or event.get("external_ref") or "")
+        if not event_id:
+            raise M5RepositoryError("MISSING_EVENT_ID", "execution event 需要 event_id")
+        now = _now()
+        existing = self.get_execution_event(event_id)
+        if existing is not None:
+            return {**existing, "replayed": True}
+        keys = ("event_type", "order_id", "operation_id", "external_ref")
+        with self._lock, self._connect() as db:
+            db.execute(
+                """INSERT INTO m5_execution_events
+                   (event_id, plan_version, tenant_id, task_id, order_id, operation_id,
+                    event_type, source, external_ref, occurred_at, worker_id, team_id,
+                    station, reported_quantity, scrap_quantity, status, reason,
+                    source_kind, event_json, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (event_id, plan_version, tenant_id, task_id,
+                 str(event.get("order_id") or ""), str(event.get("operation_id") or ""),
+                 str(event.get("event_type") or ""), str(event.get("source") or "manual"),
+                 str(event.get("external_ref") or event_id),
+                 str(event.get("occurred_at") or now), str(event.get("worker_id") or ""),
+                 str(event.get("team_id") or ""), str(event.get("station") or ""),
+                 str(event.get("reported_quantity") or ""), str(event.get("scrap_quantity") or ""),
+                 str(event.get("status") or "accepted"), str(event.get("reason") or ""),
+                 str(event.get("source_kind") or "accepted_execution_event"),
+                 _json({k: v for k, v in event.items() if k not in keys}), now),
+            )
+        return {**event, "event_id": event_id, "plan_version": plan_version,
+                "tenant_id": tenant_id, "task_id": task_id, "replayed": False}
+
+    def get_execution_event(self, event_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM m5_execution_events WHERE event_id=?", (event_id,)).fetchone()
+        return self._decode_event(row) if row else None
+
+    @staticmethod
+    def _decode_event(row: sqlite3.Row) -> dict[str, Any]:
+        out = dict(row)
+        extra = _loads(row["event_json"]) or {}
+        out.pop("event_json", None)
+        return {**extra, **out}
+
+    def list_execution_events(self, plan_version: str) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM m5_execution_events WHERE plan_version=? ORDER BY occurred_at, event_id",
+                (plan_version,),
+            ).fetchall()
+        return [self._decode_event(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # department messages / outbox (Task 5)
+    # ------------------------------------------------------------------
+
+    def create_message(self, *, draft_id: str, tenant_id: str, task_id: str,
+                       idempotency_key: str, department: str, channel: str,
+                       recipient_targets: list[str], message_kind: str,
+                       subject: str, body: str, event_summary: str,
+                       required_action: str, evidence: list[dict[str, Any]]) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connect() as db:
+            row = db.execute(
+                "SELECT draft_id, status FROM m5_messages WHERE tenant_id=? AND idempotency_key=?",
+                (tenant_id, idempotency_key),
+            ).fetchone()
+            if row is not None:
+                return {"draft_id": row["draft_id"], "status": row["status"], "replayed": True}
+            db.execute(
+                """INSERT INTO m5_messages
+                   (draft_id, tenant_id, task_id, idempotency_key, department, channel,
+                    recipient_targets_json, message_kind, subject, body, event_summary,
+                    required_action, evidence_json, status, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (draft_id, tenant_id, task_id, idempotency_key, department, channel,
+                 _json(list(recipient_targets)), message_kind, subject, body,
+                 event_summary, required_action, _json(list(evidence)),
+                 "pending_approval", now, now),
+            )
+        return {"draft_id": draft_id, "status": "pending_approval", "replayed": False}
+
+    def get_message(self, draft_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM m5_messages WHERE draft_id=?", (draft_id,)).fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        out["recipient_targets"] = _loads(row["recipient_targets_json"]) or []
+        out["evidence"] = _loads(row["evidence_json"]) or []
+        return out
+
+    def approve_message(self, draft_id: str, *, actor: str = "") -> dict[str, Any]:
+        """pending_approval -> approved and enqueue into the durable outbox."""
+        now = _now()
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM m5_messages WHERE draft_id=?", (draft_id,)).fetchone()
+            if row is None:
+                raise M5RepositoryError("MESSAGE_NOT_FOUND", f"消息 {draft_id} 不存在")
+            if row["status"] != "pending_approval":
+                raise M5RepositoryError("ILLEGAL_MESSAGE_STATE",
+                                        f"消息 {draft_id} 当前状态 {row['status']}，不能审批")
+            db.execute(
+                "UPDATE m5_messages SET status='approved', updated_at=? WHERE draft_id=?",
+                (now, draft_id),
+            )
+            outbox_id = f"OUTBOX-{draft_id}"
+            db.execute(
+                """INSERT OR IGNORE INTO m5_outbox (outbox_id, draft_id, tenant_id, status, created_at, updated_at)
+                   VALUES (?,?,?,?,?,?)""",
+                (outbox_id, draft_id, row["tenant_id"], "pending", now, now),
+            )
+        return {"draft_id": draft_id, "status": "approved", "outbox_id": outbox_id}
+
+    def get_outbox(self, outbox_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM m5_outbox WHERE outbox_id=?", (outbox_id,)).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # knowledge (Task 5)
+    # ------------------------------------------------------------------
+
+    def record_knowledge(self, *, knowledge_id: str, scenario_id: str, plan_version: str,
+                         tenant_id: str = "default", task_id: str = "",
+                         plan_facts: dict[str, Any] | None = None,
+                         tags: list[str] | None = None, note: str = "",
+                         features: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Persist a knowledge case derived from an authoritative plan version."""
+        now = _now()
+        existing = self.get_knowledge(knowledge_id)
+        if existing is not None:
+            return {**existing, "replayed": True}
+        facts = plan_facts or {}
+        with self._lock, self._connect() as db:
+            db.execute(
+                """INSERT INTO m5_knowledge
+                   (knowledge_id, scenario_id, plan_version, tenant_id, task_id, input_sha256,
+                    outcome, solver_status, on_time_rate, total_tardiness_minutes,
+                    validation_passed, tags_json, features_json, note, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (knowledge_id, scenario_id, plan_version, tenant_id, task_id,
+                 str(facts.get("input_hash") or ""), str(facts.get("outcome") or "recorded"),
+                 str(facts.get("solver_status") or ""), str(facts.get("on_time_rate") or ""),
+                 str(facts.get("total_tardiness_minutes") or ""),
+                 1 if facts.get("validation_passed") else 0,
+                 _json(list(tags or [])), _json(features or {}), note, now),
+            )
+        return {
+            "knowledge_id": knowledge_id, "scenario_id": scenario_id,
+            "plan_version": plan_version, "tenant_id": tenant_id, "task_id": task_id,
+            "tags": list(tags or []), "note": note, "replayed": False,
+        }
+
+    def get_knowledge(self, knowledge_id: str) -> dict[str, Any] | None:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM m5_knowledge WHERE knowledge_id=?", (knowledge_id,)).fetchone()
+        if row is None:
+            return None
+        out = dict(row)
+        out["tags"] = _loads(row["tags_json"]) or []
+        out["features"] = _loads(row["features_json"]) or {}
+        return out
+
+    def list_knowledge(self, *, tag_filter: str | None = None,
+                       outcome_filter: str | None = None) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if outcome_filter:
+            clauses.append("outcome=?")
+            params.append(outcome_filter)
+        sql = "SELECT * FROM m5_knowledge"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC LIMIT 200"
+        with self._lock, self._connect() as db:
+            rows = db.execute(sql, params).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["tags"] = _loads(row["tags_json"]) or []
+            item["features"] = _loads(row["features_json"]) or {}
+            out.append(item)
+        return out
+
+    # ------------------------------------------------------------------
+    # procurement proposals (Task 5)
+    # ------------------------------------------------------------------
+
+    def save_procurement_proposal(self, *, proposal_id: str, scenario_id: str,
+                                  tenant_id: str = "default", task_id: str = "",
+                                  idempotency_key: str = "", plan_version: str = "",
+                                  items: list[dict[str, Any]]) -> dict[str, Any]:
+        now = _now()
+        with self._lock, self._connect() as db:
+            if idempotency_key:
+                row = db.execute(
+                    "SELECT proposal_id, status, items_json FROM m5_procurement_proposals WHERE scenario_id=? AND idempotency_key=?",
+                    (scenario_id, idempotency_key),
+                ).fetchone()
+                if row is not None:
+                    return {"proposal_id": row["proposal_id"], "status": row["status"],
+                            "items": _loads(row["items_json"]) or [], "replayed": True}
+            db.execute(
+                """INSERT INTO m5_procurement_proposals
+                   (proposal_id, scenario_id, plan_version, tenant_id, task_id, idempotency_key,
+                    status, items_json, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (proposal_id, scenario_id, plan_version, tenant_id, task_id, idempotency_key,
+                 "proposal", _json(list(items)), now),
+            )
+        return {"proposal_id": proposal_id, "status": "proposal", "items": items,
+                "replayed": False}
 
     def close(self) -> None:
         pass

@@ -209,8 +209,11 @@ class ReviewerAgent:
         "yunpai-m1-document-parser": {"report"},
         "yunpai-m3-material-planning": {"readiness", "readiness_summary", "plan", "handoff"},
         "yunpai-m4-procurement": {"orders", "tracking", "alerts", "supply", "supplier_reply"},
-        "yunpai-m5-pmc": {"schedule", "progress", "versions", "readiness", "advise", "intelligent", "execution"},
-        "yunpai-m5-pmc-lifecycle": {"default", "schedule", "progress", "versions", "execution"},
+        # M5 PMC read-only queries (never mutate plan/snapshot state)
+        "yunpai-m5-pmc": {"schedule", "progress", "contracts", "readiness",
+                          "knowledge_search", "message_get", "message_delivery",
+                          "advise", "intelligent"},
+        "yunpai-m5-pmc-lifecycle": {"default", "schedule", "versions", "progress", "execution"},
     }
 
     def preflight(self, step: dict[str, Any], state: RunState) -> dict[str, Any] | None:

@@ -15,7 +15,8 @@ def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
     assert len(registry.specs) == 114
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
-    assert len(registry.handlers) == 7
+    # 7 pre-existing local handlers + 17 newly bound M5 PMC v2 tools.
+    assert len(registry.handlers) == 24
 
 
 def test_packaged_and_documented_manifests_are_identical():

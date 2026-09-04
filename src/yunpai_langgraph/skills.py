@@ -174,14 +174,39 @@ async def m4_procurement_control(payload: dict[str, Any], context: dict[str, Any
 async def m5_pmc_control(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     return await _dispatch_registered_tool(
         "yunpai-m5-pmc", payload, context,
-        {"default": "solve_scheduling", "solve": "solve_scheduling", "schedule": "get_m5_schedule", "progress": "get_m5_pmc_progress", "versions": "list_m5_schedules", "readiness": "get_m5_material_readiness", "replan": "replan_m5_schedule", "advise": "advise_m5_schedule", "intelligent": "run_m5_intelligent_schedule", "dispatch": "dispatch_m5_schedule", "execution": "get_m5_execution_summary", "snapshot": "ingest_m5_planning_snapshot", "procurement": "generate_m5_material_procurement_plan", "report_workload": "report_workload", "bind_worker": "bind_worker_to_order"},
+        {
+            "default": "solve_scheduling",
+            "solve": "solve_scheduling",
+            "schedule": "get_m5_schedule",
+            "progress": "get_m5_pmc_progress",
+            "contracts": "get_m5_integration_contracts",
+            "readiness": "get_m5_material_readiness",
+            "knowledge_search": "search_m5_knowledge",
+            "knowledge_record": "record_m5_knowledge",
+            "message_prepare": "prepare_m5_department_message",
+            "message_get": "get_m5_department_message",
+            "message_delivery": "get_m5_department_message_delivery",
+            "advise": "advise_m5_schedule",
+            "intelligent": "run_m5_intelligent_schedule",
+            "procurement": "generate_m5_material_procurement_plan",
+        },
     )
 
 
 async def m5_lifecycle_control(payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     return await _dispatch_registered_tool(
         "yunpai-m5-pmc-lifecycle", payload, context,
-        {"default": "get_m5_schedule", "schedule": "get_m5_schedule", "versions": "list_m5_schedules", "replan": "replan_m5_schedule", "dispatch": "dispatch_m5_schedule", "execution": "get_m5_execution_summary", "progress": "get_m5_pmc_progress"},
+        {
+            "default": "get_m5_schedule",
+            "snapshot": "ingest_m5_planning_snapshot",
+            "ingest": "ingest_m5_planning_snapshot",
+            "schedule": "get_m5_schedule",
+            "versions": "list_m5_schedules",
+            "progress": "get_m5_pmc_progress",
+            "replan": "replan_m5_schedule",
+            "dispatch": "dispatch_m5_schedule",
+            "execution": "get_m5_execution_summary",
+        },
     )
 
 
@@ -233,13 +258,21 @@ def build_default_skill_registry() -> SkillRegistry:
         description="统一 M5 PMC 求解、WIP/资源检查、计划版本、重排、派工、报工和执行摘要；生产发布必须通过 Gate。",
         handler=m5_pmc_control,
         tags=("m5", "pmc", "wip", "schedule", "execution"),
-        tools=("solve_scheduling", "get_m5_schedule", "get_m5_pmc_progress", "replan_m5_schedule", "list_m5_schedules", "dispatch_m5_schedule", "get_m5_execution_summary", "report_workload", "bind_worker_to_order"),
+        tools=("solve_scheduling", "get_m5_schedule", "get_m5_pmc_progress",
+               "get_m5_integration_contracts", "get_m5_material_readiness",
+               "search_m5_knowledge", "record_m5_knowledge",
+               "prepare_m5_department_message", "get_m5_department_message",
+               "get_m5_department_message_delivery",
+               "advise_m5_schedule", "run_m5_intelligent_schedule",
+               "generate_m5_material_procurement_plan"),
     ))
     registry.register(SkillSpec(
         name="yunpai-m5-pmc-lifecycle",
         description="面向 39085 M5 Flow Board 的版本历史、重排、派工和执行回传操作；只调用已注册 M5 Tool，不伪造生产状态。",
         handler=m5_lifecycle_control,
         tags=("m5", "lifecycle", "flow-board", "dispatch", "execution"),
-        tools=("get_m5_schedule", "list_m5_schedules", "replan_m5_schedule", "dispatch_m5_schedule", "get_m5_execution_summary", "get_m5_pmc_progress"),
+        tools=("ingest_m5_planning_snapshot", "get_m5_schedule", "list_m5_schedules",
+               "replan_m5_schedule", "get_m5_pmc_progress", "dispatch_m5_schedule",
+               "get_m5_execution_summary"),
     ))
     return registry

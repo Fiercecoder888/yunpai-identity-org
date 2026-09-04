@@ -329,6 +329,12 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
     return {"success": True, "data": data, "errors": [], "trace_id": _trace(ctx, "m5"), "evidence": [_evidence("m5", "planning_snapshot", "订单/路线/资源快照")]}
 
 
+def _m5(name: str):
+    """Lazily import the local M5 PMC handler for a manifest tool name."""
+    from .m5_tools import M5_HANDLERS
+    return M5_HANDLERS[name]
+
+
 HANDLERS = {
     "data_import_run": m0_import,
     "data_import_commit": m0_commit,
@@ -337,4 +343,23 @@ HANDLERS = {
     "run_m3_procurement_requirements": m3_mrp,
     "import_m4_purchase_suggestions_json": m4_purchase,
     "solve_scheduling": m5_schedule,
+    # M5 PMC v2 tool handlers (Taskbook Tasks 3-5); the two excluded tools
+    # (report_workload, bind_worker_to_order) intentionally stay unbound.
+    "get_m5_schedule": _m5("get_m5_schedule"),
+    "list_m5_schedules": _m5("list_m5_schedules"),
+    "get_m5_pmc_progress": _m5("get_m5_pmc_progress"),
+    "get_m5_material_readiness": _m5("get_m5_material_readiness"),
+    "get_m5_integration_contracts": _m5("get_m5_integration_contracts"),
+    "ingest_m5_planning_snapshot": _m5("ingest_m5_planning_snapshot"),
+    "replan_m5_schedule": _m5("replan_m5_schedule"),
+    "dispatch_m5_schedule": _m5("dispatch_m5_schedule"),
+    "get_m5_execution_summary": _m5("get_m5_execution_summary"),
+    "search_m5_knowledge": _m5("search_m5_knowledge"),
+    "record_m5_knowledge": _m5("record_m5_knowledge"),
+    "prepare_m5_department_message": _m5("prepare_m5_department_message"),
+    "get_m5_department_message": _m5("get_m5_department_message"),
+    "get_m5_department_message_delivery": _m5("get_m5_department_message_delivery"),
+    "advise_m5_schedule": _m5("advise_m5_schedule"),
+    "run_m5_intelligent_schedule": _m5("run_m5_intelligent_schedule"),
+    "generate_m5_material_procurement_plan": _m5("generate_m5_material_procurement_plan"),
 }
