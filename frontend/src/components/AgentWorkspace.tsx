@@ -165,7 +165,11 @@ export function AgentWorkspace() {
     const next = emptyAgentState();
     next.messages = [{ id: `user-${Date.now()}`, role: 'user', content: message, attachments }];
     setState(next); setDraft(''); setError(''); setBusy(true); abortRef.current = new AbortController();
-    const request = { message, ...(attachments.some((item) => item.kind === 'order') ? { workflow: 'm0_m5' } : {}), attachments };
+    const request = {
+      message,
+      ...(attachments.some((item) => item.kind === 'order') ? { workflow: 'm1_m5_document_to_plan' } : {}),
+      attachments,
+    };
     try { await consume(streamRun(request, abortRef.current.signal)); } catch (caught) { if ((caught as Error).name !== 'AbortError') setError((caught as Error).message); } finally { setBusy(false); abortRef.current = null; refreshRuns(); }
   };
 
