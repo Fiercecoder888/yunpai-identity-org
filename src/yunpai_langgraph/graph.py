@@ -420,16 +420,25 @@ class YunpaiGraph:
                 for index, line in enumerate(bom_lines, start=1)
                 if isinstance(line, dict)
             ]
-            routing_steps = [
-                {
+            routing_steps = []
+            for item in (request.get("routing_steps", []) or []):
+                if not isinstance(item, dict):
+                    continue
+                if "standard_time" in item:
+                    standard_time_s = float(item.get("standard_time") or 0)
+                elif "standard_time_s" in item:
+                    standard_time_s = float(item.get("standard_time_s") or 0)
+                else:
+                    standard_time_s = float(item.get("processing_minutes") or 0) * 60
+                routing_steps.append({
                     "name": str(item.get("name") or item.get("operation_name") or item.get("operation_id") or "未命名工序"),
                     "description": str(item.get("description") or ""),
                     "station": str(item.get("station") or item.get("station_code") or ""),
-                    "standard_time_s": float(item.get("standard_time_s", item.get("processing_minutes", 0)) or 0) * 60,
-                }
-                for item in (request.get("routing_steps", []) or [])
-                if isinstance(item, dict)
-            ]
+                    # M2's HTTP contract names this value `standard_time` and
+                    # interprets it as seconds; retain the internal alias too.
+                    "standard_time": standard_time_s,
+                    "standard_time_s": standard_time_s,
+                })
             attachments = [
                 item for item in request.get("attachments", [])
                 if isinstance(item, dict) and item.get("kind") == "master_data"
