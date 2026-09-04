@@ -103,7 +103,26 @@ def _extract_xlsx(path: Path, kind: str) -> dict[str, Any]:
         result["active_sheet"] = workbook.active.title if workbook.active else None
         if kind == "order":
             try:
-                result["order_document"] = parse_order_workbook(path.name, path.read_bytes())
+                from .order_parser_v2 import parse_order_sheets
+
+                v2 = parse_order_sheets(path.name, path.read_bytes())
+                try:
+                    legacy = parse_order_workbook(path.name, path.read_bytes())
+                except Exception:
+                    legacy = {}
+                v2_has_facts = bool(v2.get("lines")) and any(v2.get(key) for key in ("order_id", "order_date", "due_date", "supplier_name", "field_evidence"))
+                legacy_has_facts = bool(legacy.get("order_id") or legacy.get("lines"))
+                if v2_has_facts and not (legacy_has_facts and legacy.get("order_id") and not v2.get("order_id")):
+                    # 表头驱动解析成功且事实不劣于坐标解析：采用 v2（sheet/行/列证据齐备）。
+                    result["order_document"] = v2
+                    result["parser_version"] = v2.get("parser_version")
+                elif legacy_has_facts:
+                    # 真实微信裸值模板：坐标解析可提取 P6/X7 等表头事实。
+                    result["order_document"] = legacy
+                    result["parser_version"] = "order.workbook.coordinates.v1"
+                else:
+                    result["order_document"] = v2 if v2.get("lines") else legacy
+                    result["parser_version"] = (v2 or legacy).get("parser_version")
             except Exception as exc:
                 result["order_parse_error"] = str(exc)
     finally:
@@ -341,6 +360,28 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
         value = order.get(field)
         if value not in (None, ""):
             field_observations.append({"field_path": f"$.header.{field}", "raw_value": value, "normalized_value": value, "physical_type": _text_type(value), "semantic_type": field, "confidence": order.get("confidence", classification_confidence), "status": "candidate"})
+    v2_evidence = order.get("field_evidence") if isinstance(order.get("field_evidence"), list) else []
+    if v2_evidence:
+        # 表头驱动解析（order.parser.v2）：字段观察带 sheet/行/列与 parser_version 证据。
+        for observation in v2_evidence:
+            raw_value = observation.get("raw_value")
+            if raw_value in (None, ""):
+                continue
+            field_observations.append({
+                "field_path": observation.get("field_path", ""),
+                "raw_value": raw_value,
+                "normalized_value": raw_value,
+                "physical_type": _text_type(raw_value),
+                "semantic_type": observation.get("semantic_type"),
+                "confidence": order.get("confidence", classification_confidence),
+                "status": "candidate",
+                "locator": {
+                    "sheet": observation.get("sheet"),
+                    "row": observation.get("row"),
+                    "column": observation.get("column"),
+                    "parser_version": observation.get("parser_version") or extraction.get("parser_version"),
+                },
+            })
     for line_index, line in enumerate(lines, start=1):
         for field, value in line.items():
             if value not in (None, ""):
