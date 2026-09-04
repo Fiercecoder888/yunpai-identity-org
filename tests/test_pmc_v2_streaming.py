@@ -90,3 +90,26 @@ def test_production_request_without_v2_facts_is_blocked_not_legacy():
     result = __import__("asyncio").run(m5_schedule(payload, {"task_id": "TASK-PREVIEW"}))
     assert result["success"] is True
     assert result["data"]["lifecycle_status"] == "draft"
+
+
+def test_production_v2_request_requires_explicit_facts_no_defaults():
+    """production_use_allowed=true 的 v2 请求禁止默认值注入。"""
+    import pytest
+
+    from yunpai_langgraph.pmc_v2_adapter import PmcError, run_pmc_v2
+
+    payload = {
+        "scenario_purpose": "production",
+        "production_use_allowed": True,
+        "route_approval_ref": "APPROVED-ROUTE-20260903",
+        "route_version": "v2-approved-1",
+        "orders": [{"order_id": "PO-1", "product_id": "P-1", "quantity": 5}],
+        "calendar_windows": [{"date": "2026-09-03"}],  # 无显式 start_at/end_at
+        "resources": [{"resource_id": "EQ-1", "resource_type": "EQUIPMENT"}],  # 无 capacity/efficiency
+        "routing_steps": [{"product_id": "P-1", "operation_id": "OP-1", "sequence": 1, "standard_minutes": 2, "required_equipment_codes": ["EQ-1"]}],
+        "idempotency_key": "ik-strict",
+    }
+    with pytest.raises(PmcError) as excinfo:
+        run_pmc_v2(payload)
+    assert excinfo.value.code == "BLOCKED_INPUT"
+    assert any(token in excinfo.value.message for token in ("MISSING_CALENDAR_WINDOW", "MISSING_APPROVAL_REF", "MISSING_ROUTE_VERSION"))

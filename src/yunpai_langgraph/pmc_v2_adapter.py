@@ -162,7 +162,44 @@ def _supply_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return entries
 
 
+def _require_production_facts(payload: dict[str, Any]) -> None:
+    """PMC P0：显式生产发布请求拒绝默认值注入。
+
+    仅当 scenario_purpose=production 且 production_use_allowed=true（真实发布
+    意图，而非 wip_pmc/检查预览）时执行；缺显式事实抛 PmcError（BLOCKED_INPUT），
+    不自动补 APPROVED-ROUTE / approved-v2 / capacity 60 / efficiency 1 / 08:00-17:00。
+    """
+    purpose = str(payload.get("scenario_purpose") or "production")
+    allowed = str(payload.get("production_use_allowed") or "").lower() in {"true", "1", "yes"}
+    if purpose != "production" or not allowed:
+        return
+    if not str(payload.get("route_approval_ref") or payload.get("approval_ref") or "").strip():
+        raise PmcError("BLOCKED_INPUT", "MISSING_APPROVAL_REF production PMC 需要显式 route_approval_ref，禁止默认 APPROVED-ROUTE")
+    if not str(payload.get("route_version") or "").strip():
+        raise PmcError("BLOCKED_INPUT", "MISSING_ROUTE_VERSION production PMC 需要显式 route_version，禁止默认 approved-v2")
+    calendar_windows = payload.get("calendar_windows") or payload.get("calendar") or []
+    if isinstance(calendar_windows, dict):
+        calendar_windows = calendar_windows.get("working_intervals") or calendar_windows.get("windows") or []
+    for item in calendar_windows:
+        if not isinstance(item, dict):
+            continue
+        if not (item.get("start_at") and item.get("end_at")):
+            raise PmcError("BLOCKED_INPUT", "MISSING_CALENDAR_WINDOW production PMC 需要逐窗口显式 start_at/end_at，禁止按日期补 08:00-17:00")
+    for item in payload.get("resources") or []:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("resource_id") or item.get("code") or "")
+        kind = str(item.get("resource_type") or item.get("type") or "equipment").upper()
+        if not code or kind in {"PERSON", "OPERATOR", "LABOR", "STATION"}:
+            continue
+        if not (item.get("capacity_per_hour") is not None or item.get("capacity") is not None):
+            raise PmcError("BLOCKED_INPUT", f"MISSING_CAPACITY equipment_code={code} production PMC 需要显式 capacity，禁止默认 60/h")
+        if not (item.get("efficiency_factor") is not None or item.get("efficiency") is not None):
+            raise PmcError("BLOCKED_INPUT", f"MISSING_EFFICIENCY equipment_code={code} production PMC 需要显式 efficiency，禁止默认 1")
+
+
 def run_pmc_v2(payload: dict[str, Any]) -> dict[str, Any]:
+    _require_production_facts(payload)
     bundle = build_bundle(payload)
     validate_bundle(bundle)
     operations, intervals, blocks = schedule_operations(bundle)
