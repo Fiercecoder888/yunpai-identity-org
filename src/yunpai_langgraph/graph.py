@@ -357,10 +357,12 @@ class YunpaiGraph:
                     files.append(_file_object(filename, document))
             return {"files": files}
         if tool == "business-data-identification":
+            upload_mode = str(request.get("upload_mode") or request.get("mode") or "master_data")
             return {
                 "root_path": request.get("business_data_root") or request.get("root_path"),
                 "files": request.get("documents") or request.get("attachments") or [],
                 "db_path": request.get("business_catalog_db") or "runtime/yunpai-business-catalog.sqlite",
+                "mode": upload_mode,
             }
         if tool in self.skills.specs:
             skill_payload = request.get("skill_payload")

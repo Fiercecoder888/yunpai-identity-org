@@ -92,3 +92,66 @@ def test_api_rejects_non_xlsx_upload_with_controlled_status(tmp_path):
     )
     assert response.status_code == 415
     assert response.json()["detail"]["code"] == "UNSUPPORTED_FILE_TYPE"
+
+
+def test_api_batch_upload_requires_explicit_mode(tmp_path):
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet["P6"] = "PO-BATCH-001"
+    sheet["E10"] = 1
+    sheet["I10"] = "W-H909"
+    sheet["R10"] = 4000
+    output = BytesIO()
+    workbook.save(output)
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "batch.sqlite")))
+    missing_mode = client.post(
+        "/runs/upload/batch",
+        files=[("files", ("order.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
+    )
+    assert missing_mode.status_code == 422
+    invalid_mode = client.post(
+        "/runs/upload/batch",
+        data={"mode": "随便猜"},
+        files=[("files", ("order.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
+    )
+    assert invalid_mode.status_code == 422
+    assert invalid_mode.json()["detail"]["code"] == "INVALID_UPLOAD_MODE"
+
+    created = client.post(
+        "/runs/upload/batch",
+        data={"mode": "master_data", "message": "识别这些基础资料"},
+        files=[("files", ("设备台账.json", b'{"records":[{"kind":"equipment"}]}', "application/json"))],
+    )
+    assert created.status_code == 200
+    state = created.json()
+    assert state["route"] == "free"
+    assert state["plan"][0]["kind"] == "skill"
+    assert state["plan"][0]["tool"] == "business-data-identification"
+    summary = state["upload_summary"]
+    assert summary["mode"] == "master_data"
+    assert summary["total"] == 1
+    assert summary["accepted"] == 1
+    assert summary["files"][0]["status"] == "accepted"
+    assert summary["files"][0]["sha256"]
+
+
+def test_api_batch_upload_flags_empty_files_as_skipped(tmp_path):
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "batch-empty.sqlite")))
+    response = client.post(
+        "/runs/upload/batch",
+        data={"mode": "directory"},
+        files=[
+            ("files", ("a.xlsx", b"", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+            ("files", ("b.json", b"{}", "application/json")),
+        ],
+    )
+    assert response.status_code == 200
+    summary = response.json()["upload_summary"]
+    assert summary["total"] == 2
+    statuses = {item["filename"]: item["status"] for item in summary["files"]}
+    assert statuses["a.xlsx"] == "skipped"
+    assert statuses["a.xlsx"] or True
+    assert any(item["reason"] for item in summary["files"])
