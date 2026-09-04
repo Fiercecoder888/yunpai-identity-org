@@ -204,3 +204,37 @@ def test_twelve_kind_classification_accuracy(tmp_path):
             key_correct += 1
     assert key_correct / key_total >= 0.9, f"关键类别正例命中 {key_correct}/{key_total}"
     assert false_positives <= 1, f"反例误报过多: {false_positives}"
+
+
+# ---- 12 类未知布局变体（任务书 §五.2：每类至少一个未知布局） ----
+UNKNOWN_LAYOUT_KINDS = {
+    # 列顺序打乱 + 混入无关列；表头与正例不同排列。
+    "order": [["序号", "交期", "包装备注", "型号", "数量"], ["1", "2026-09-20", "中性彩盒", "W-77", 30]],
+    "product": [["版本", "备注", "产品编码", "产品名称", "规格"], ["v2", "沿用", "P-9", "高清线", "3m"]],
+    "bom": [["单位", "用量", "物料编码", "材料名称"], ["m", 2, "M-77", "铜箔"]],
+    "route": [["标准工时", "工序名称", "工序编码", "顺序"], [5, "裁切", "OP-9", 1]],
+    "sop": [["投入人数", "工站", "作业步骤", "材料"], [1, "S-2", "锁付", "螺丝"]],
+    "equipment": [["能力", "设备名称", "设备编码", "产线"], ["250", "注塑机", "EQ-7", "线2"]],
+    "tooling": [["模穴数", "模具名称", "模具编码"], [2, "外壳模", "TL-3"]],
+    "station": [["绑定工序", "工位名称", "工位编码"], ["OP-4", "组装", "ST-5"]],
+    "worker": [["资格", "技能", "姓名", "工号"], ["焊工证", "焊接", "孙八", "E-8"]],
+    "calendar": [["结束时间", "开始时间", "班次", "日期"], ["17:00", "08:00", "白班", "2026-09-02"]],
+    "inventory": [["现存数量", "批次", "仓库", "物料编码"], [50, "L-9", "B仓", "M-3"]],
+    "supplier": [["PO编号", "供应商名称", "供应商编码"], ["PO-9", "宁波厂", "S-9"]],
+    "finance_cost": [["单位成本", "币种", "期间", "成本项目"], [15, "CNY", "2026-10", "制造费用"]],
+}
+
+
+def test_twelve_kind_unknown_layouts_classify_correctly(tmp_path):
+    """每类未知布局（打乱列序+无关列）仍被正确分类，验证对未见布局的泛化。"""
+    correct = 0
+    total = len(UNKNOWN_LAYOUT_KINDS)
+    for kind, rows in UNKNOWN_LAYOUT_KINDS.items():
+        path = tmp_path / f"unknown/{kind}-layout.xlsx"
+        _write(tmp_path, f"unknown/{kind}-layout.xlsx", _xlsx_bytes(rows))
+        verdict = classify_with_content(path, current_kind="tabular", current_confidence=0.45)
+        if verdict["kind"] == kind:
+            correct += 1
+        else:
+            print(f"  [mismatch] {kind}: 期望 {kind}, 实际 {verdict['kind']} 规则={verdict.get('rules')}")
+    assert correct / total >= 0.9, f"未知布局分类命中 {correct}/{total} < 90%"
