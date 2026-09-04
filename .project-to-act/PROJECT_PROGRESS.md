@@ -14,6 +14,7 @@
 | P-006 | 已完成 | Codex / M1 接包开发者 | 独立 M1 Tool/Skill 任务包包含基线、17 个工具/Skill 差距、逐项源码映射、净化源码、实施合同及分层验收要求；包完整性和项目回归通过 | E-HANDOFF-M1-001 | 2026-09-04 |
 | P-007 | 已规划 | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate，在 GB10 用真实订单完成 M1-M5 发布回读 | E-PLAN-M1M5-ORCH-001 | 2026-09-04 |
 | P-008 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过（从 origin/main 并入 dev 时登记，原并行分支编号 P-006 与 M1 handoff 撞号） | E-M3M4-TOOLS-001 | 2026-09-04 |
+| P-009 | 已完成（代码验收） | DeepSeek Harness / s-m1-tools-20260904 | M1 17 个 Tool 全部绑定（专用 HTTP Adapter）与 Skill 全操作映射落地，117 项测试通过（从 M1 分支并入 dev 时登记，原并行分支编号 P-007 与 orchestration 规划撞号） | E-M1-TOOLS-001 | 2026-09-04 |
 
 ## 阻塞项
 
@@ -43,3 +44,5 @@
 - 2026-09-04：完成 M0 -> GB10 39092 逐类只读对账；证据 `E-0904-M0-GB10-RECON-001`；确认设备/库存来源已进候选目录但未批准，供应商/成本财务/人员主数据没有对应来源 SHA，39092 local transport 无可达 M0 canonical API；下一步等待受控 M0 写入条件后按顺序补传；确认来源：本次运行态核验。
 - 2026-09-04：生成 DeepSeek Harness 实施任务书，证据 `E-PLAN-DEEPSEEK-HARNESS-001`；范围覆盖 main/dev 基线同步、上传识别、M0 canonical、M1-M5/PMC、GB10 新 release、测试、推送和 MR 合并；当前仅完成规划，未执行代码、数据或线上变更；确认来源：用户请求。
 - 2026-09-04：生成可直接交给其他 Agent 的 M1 Tool/Skill 完善任务包，证据 `E-HANDOFF-M1-001`；随包封装当前 main 合同、T8 M1 与 yunpai0902 M1 净化源码，列明 17 个工具逐项迁移、Skill 补全、HTTP/异步任务/租户头适配及真实文件和持久化验收要求；本次未实施 M1 业务代码或生产联调；确认来源：用户请求。
+- 2026-09-04 22:25：真实 T8 M1 服务本地运行联调完成（无模型层，SQLite+memory）；证据 E-M1-LOCAL-001；下一步等待 GPU MinerU/Instructor、PostgreSQL/Neo4j 与真实样本条件后执行完整生产验收。
+- 2026-09-04：完成 M1 代码实现与本地验收；M1 17 个 Tool 全部绑定（default 61 bound，HTTP runtime 112 bound），专用 M1 HTTP Adapter（租户双头/角色/202 轮询/错误映射/属性过滤前向兼容），Skill 扩展到 17 Tool 与 19 ops；完整 pytest 117 passed、2 skipped（真实服务 opt-in）；真实 M1 独立服务联调待外部条件；证据 E-M1-TOOLS-001；确认来源：本次实施与验证。
