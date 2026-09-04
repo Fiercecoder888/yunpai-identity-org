@@ -5,10 +5,10 @@
 
 ## 当前验收结论
 
-- 结论：代码与本地回归通过；GB10 隔离 release 已完成真实 M1/M0 HTTP 联调，真实订单在 M1 订单行语义缺失后于 M2 权威输入 Gate 停止，M5 发布回读未通过
-- 验收范围：`dev@05d4cba` 隔离 release `20260905013000`、39094 health/tools、Qwen、真实订单上传、M1 review、M0 candidate/commit/rollback 及 M2 阻塞
-- 最后检查：2026-09-05 01:37 +08:00
-- 遗留问题：M1 真实 XLSX 返回 0 订单行；M2 内部 Qwen 端点不可用且缺审核 BOM/SOP；39092/current 保持旧 release，未执行生产切换
+- 结论：代码与本地回归通过；GB10 `39092` 已切换到 `20260905071500`，真实订单入口已验证走 `m1_m5_document_to_plan`，M1 在缺产品编码/交期时停在 review Gate，旧运行在 M2 权威 BOM/SOP Gate 停止，M5 发布回读未通过
+- 验收范围：`origin/main`/`origin/dev` `a608234`、39092 health/tools、Qwen、真实订单上传、M1 review、M0 HTTP 批次、M2 阻塞和前端截图报告
+- 最后检查：2026-09-05 06:00 +08:00
+- 遗留问题：M0 canonical 主数据仍为 0；订单随附 SOP 为 USB-C demo，与 HDMI 订单不匹配；产品编码、库存/供应/资源事实和 M5 发布回读仍缺失
 
 ## 验收标准
 
@@ -21,10 +21,10 @@
 | A-005 | 多 session 有唯一分支/worktree、路径认领和发布锁规则 | 通过 | 检查 `docs/SESSION_COLLABORATION_RULES.md`、claims 模板并运行 `--validate` | E-SESSION-001 |
 | A-006 | 每个 session 持续维护独立实时修改报告 | 通过 | 检查实时报告规则和 `reports/sessions/README.md` 模板 | E-SESSION-001 |
 | A-007 | 微信下载目录全量复核结论可追溯，且不把原始资料误报为不存在 | 通过 | 只读扫描个人/企业微信目录、`~/Downloads` 和导出目录；归档清单、表头核验；账本校验；后端/前端回归与构建 | E-0904-WECHAT-AUDIT-001 |
-| A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 未通过（外部阻塞） | 39092 health/openapi、GB10 SQLite 完整性与 schema、source SHA/候选审核状态、运行状态批次交叉核对 | E-0904-M0-GB10-RECON-001 |
+| A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 未通过（主数据未发布） | 39092 health、M0 批次回读、source SHA/候选状态和 canonical counts | E-GB10-39092-ORDER-20260905-002 |
 | A-009 | M3/M4 Tool 与 Skill 完整绑定并保持副作用 Gate | 通过（代码与本地运行态） | 完整 pytest、compileall、diff check、账本校验、9001 health/tools、HTTP mock 集成 | E-M3M4-TOOLS-001 |
 | A-010 | M1 Tool 与 Skill 完整绑定：17 个 M1 Tool 经专用 HTTP Adapter 可执行（租户头/202 轮询/权限/错误映射），Skill 声明 17 Tool 且查询 op 不打开写入 Gate，本地 fixture 不冒充完整 M1 解析 | 通过（代码与本地运行态） | 完整 pytest、M1 定向测试、compileall、git diff --check、Registry 绑定统计、HTTP mock 集成 | E-M1-TOOLS-001 |
-| A-011 | GB10 隔离 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（M1/M0 接通，M2 阻塞） | 39094 health 114/112、真实 XLSX 上传、M1 review、M0 批次回读与回滚、M2 Gate | E-GB10-M1M5-REAL-001 |
+| A-011 | GB10 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（39092 M1/M0 接通，M2 阻塞） | 39092 health 114/112、真实 XLSX 上传、M1 review、M0 批次回读、M2 Gate 和浏览器截图 | E-GB10-39092-ORDER-20260905-002 |
 
 ## 证据索引
 
@@ -43,6 +43,8 @@
 | E-M1-TOOLS-001 | 2026-09-04 22:10 | 完整 pytest；compileall；git diff --check；M1 定向测试；Registry 绑定统计；本地 API/HTTP mock 集成 | 全部退出 0；117 passed, 2 skipped（真实服务 opt-in） | 实现 commit 8a9794d5e7f2e92acbb122692cc66262af59ddd3；分支 dsh/m1-tool-skill-completion-20260904；基线 79973082535f459f7c0be03096c654d233fe99ab | 114 Tool：default 61 bound（M1 17/17：ingest_document 本地 fixture + 16 专用 Adapter），HTTP runtime 112 bound（M1 17/17 专用 Adapter）；Skill yunpai-m1-document-parser 17 Tool / 19 ops；13 个查询 op 免授权 Gate；真实 M1 服务（MinerU/Instructor/PostgreSQL/Neo4j）未联调，生产未验收 | reports/sessions/s-m1-tools-20260904.md、tests/test_m1_*.py、ops/m1/README.md | 2026-09-11 |
 | E-SESSION-001 | 2026-09-03 | 初始化脚本 `--validate`；人工审阅规则文件 | 0 | `dev` / `4b9c1aa1` | 治理账本有效，规则与 claim 模板已落盘 | `.project-to-act/`、`docs/SESSION_COLLABORATION_RULES.md`、`.coordination/claims/README.md` | 2026-12-31 |
 | E-GB10-M1M5-REAL-001 | 2026-09-05 01:20-01:37 +08:00 | 在 GB10 Tailscale `100.121.179.111` 创建隔离 release `20260905013000`；构建/传输 `dev@05d4cba`；绑定 M0=`49503`、M1=`49506`、M2=`49507`、M3=`49508`、M4=`49514`、M5=`49515`；探测 39094 health、各服务 health、Qwen models/chat；上传真实订单；受信 principal 批准 M1 review 与 M0 candidate；回读 M0 批次并回滚 | 部署、HTTP 探测、上传和 Gate 调用均完成；隔离后端/前端停止；39092/current 未改动 | `dev` / `05d4cba72a1e171e80f3d3214fa8be17430770a6`；归档 SHA-256 `237c0dfcf181615fc6b4b704077fa2700345222d9d3f07b5e266d3be1841932b`；真实文件 SHA-256 `9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341` | 39094 health `tools=114,bound_tools=112,local_fixture=false`；Qwen 在模型加载完成后 models/chat 200；run `run-5b4eeb4812184ceb88b975b2c2c65e44` 在 M2 `BLOCKED_INPUT` 停止；M0 batch `613a3b4744de` rows.incomplete=5/entities={}，已回滚；M2 `/api/health` 报内部模型端点不可用；无 M5 release/head 或 MES 派发验收 | 远端 release/logs、run API、M0 `/api/m0/import/batch/613a3b4744de` | 2026-09-12 |
+| E-GB10-39092-ORDER-20260905-002 | 2026-09-05 05:47-06:00 +08:00 | 39092 切换 release `20260905071500`；真实 `order.xlsx` 上传；回读运行 `run-930147ced578498ea5c1428d7e7c64ff`；浏览器刷新、任务列表和 M1 Gate 截图 | 部署/健康检查/上传全部成功；`origin/main`=`origin/dev`=`a6082341dd8773b5159c930069f085e87394b7a8`；release 代码 `a9a85eb`；归档 SHA-256 `a621b8d778dc1026be296a83bb6ae87a5c0e667f15e5ee560018443190fb1091`；真实订单 SHA-256 `9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341` | 39092 `/health` `tools=114,bound_tools=112,local_fixture=false`；运行 `workflow_id=m1_m5_document_to_plan`，M1 `ingest_document` 因产品编码/交期缺失进入 review Gate；同一数据中 BOM 工作表提供 `FC-15`/`FC-20` 候选，随附 SOP 标识 `DEMO-USBC-001`，与 HDMI 订单不匹配；M0 canonical counts 仍为 0；M2-M5 未进入正式执行 | `/private/tmp/yunpai-order-report-20260905/docs/GB10_39092_ORDER_ACCEPTANCE_20260905.md`、GB10 `/home/wjc/yunpai-langgraph/releases/20260905071500`、浏览器截图 | 2026-09-12 |
+| E-GB10-PUBLIC-REDACTION-20260905 | 2026-09-05 05:39-05:53 +08:00 | 递归脱敏 `_public_state` 回归；39092 `/api/runs?limit=10` 对比；前端刷新任务列表 | 后端全量 `326 passed, 2 skipped`；前端 6 passed；构建成功 | 公开状态中的 `content_b64` 已递归替换为 `[omitted]`；历史任务列表可在浏览器加载并显示 10 个运行任务 | `src/yunpai_langgraph/graph.py`、`tests/test_stream_api.py`、39092 浏览器截图 | 2026-09-12 |
 | E-REGRESSION-002 | 2026-09-03 18:09 | `npm run typecheck`; `npm run build`; `npm test -- --run --maxWorkers=1 --no-file-parallelism`; root `pytest -q` | 前三项 0；root pytest 1（47 passed, 1 EOL hash mismatch） | `dev` / `24da1d70`；Git blob manifest hash 与 provenance 一致 | 前端回归通过；根测试唯一失败为 Windows `core.autocrlf` 工作树换行误报，非代码/运行时错误 | `reports/sessions/s-integration-final-20260903.md`、`reports/s-progress-restore-20260903/REPORT.md` | 2026-12-31 |
 | E-INTEGRATION-002 | 2026-09-03 18:10 | Git merge/cherry-pick；线上浏览器控制 API 点击、布局、独立滚动；`/api/health`；静态资源请求 | Git/浏览器/HTTP 均成功；控制台 error/warning 0 | `dev` / `24da1d70`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；release `20260903173855` | 后端与右栏提交完整集成；上传菜单、右栏满高/滚动、移动抽屉和问答关键路径符合预期 | `reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张截图、线上 URL | 2026-12-31 |
 | E-INTEGRATION-003 | 2026-09-03 18:20 | 两次 `git push neworigin dev`；`git ls-remote --heads neworigin dev`；项目管理 `--validate`；最终线上状态复核 | 全部退出 0；远端 `dev=ee8541cc`；账本 `valid=true` | `dev` / `ee8541cc`（交付基线 `d48ce911`）；release `20260903173855`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c` | 集成提交和独立 session 报告已推送；旧 claim/DEPLOY_LOCK 已释放；线上关键路径保持通过 | `reports/sessions/s-integration-final-20260903.md`、`.project-to-act/`、`reports/s-progress-restore-20260903/`、远端分支 | 2026-12-31 |
@@ -65,6 +67,8 @@
 
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
 
+- 2026-09-05 05:47-06:00：将 `origin/main`/`origin/dev` `a608234` 部署到 GB10 `39092` release `20260905071500`，上传真实 `order.xlsx` 并从浏览器任务列表打开运行；证据 `E-GB10-39092-ORDER-20260905-002`；结论：订单入口已按新前端路由选择 `m1_m5_document_to_plan`，M1 在缺产品编码/交期时进入人工 Gate；BOM 候选存在 `FC-15`/`FC-20`，但随附 SOP 为 USB-C demo，不能作为 HDMI 工艺路线，M0 canonical 与 PMC 仍未验收。
+- 2026-09-05：修复公开运行状态递归文件正文脱敏并完成全量后端/前端回归；证据 `E-GB10-PUBLIC-REDACTION-20260905`；结论：`content_b64` 不再通过嵌套输出泄露，39092 历史任务列表可加载；不改变 canonical/PMC 数据阻塞。
 - 2026-09-05：检查 M1-M5 Orchestrator 集成代码与本地回归（workflow、多格式上传、capability Gate、bridge/snapshot、真实 M5 release、受信 principal、MES 边界）；证据 `E-M1M5-ORCH-CODE-001`；结论：代码集成与本地回归通过（292 passed/2 skipped），完整 pytest/账本/diff 全退出 0；真实 M0/M1-M5 服务与 GB10 真实订单发布回读因受信审批人角色与可达服务未配置而仍未验收，不得据此声明生产闭环完成。
 - 2026-09-04：核对 M1-M5 Agent/Worker/Skill/Tool 主链和当前分支成果，生成自包含 DSH Orchestrator 执行任务书；27 个资料/代码位置均存在，完整后端 151 项、账本和 diff 检查通过；证据 `E-PLAN-M1M5-ORCH-001`；结论：任务书完整覆盖基础资料、GB10/Qwen、流程断点、实施和验收，但本记录只证明任务交接完成，不证明代码集成或生产链路完成。
 - 2026-09-04 22:31 +08:00：实测 GB10 Qwen 35B 的 OpenAI-compatible models/chat 调用，并核对 18085 鉴权入口、18095 vLLM 后端、模型名和 65536 上下文；证据 `E-GB10-QWEN-001`；结论：三种地址均可用，chat 返回预期正文，调用方法已脱敏写入 `工作记忆.md`。
