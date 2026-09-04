@@ -126,7 +126,13 @@ class ToolRegistry:
                 async with httpx.AsyncClient(timeout=_spec.timeout_s or timeout_s) as client:
                     response = await client.request(_spec.method, _base.rstrip("/") + path, **request_kwargs)
                     response.raise_for_status()
-                    return response.json()
+                    value = response.json()
+                    # The standalone M2 web adapter wraps its workflow result
+                    # in {"result": ...}; normalize that transport envelope
+                    # so ReviewerAgent sees the declared tool output directly.
+                    if isinstance(value, dict) and set(value) == {"result"}:
+                        return value["result"]
+                    return value
 
             self.handlers[name] = http_handler
 
