@@ -176,9 +176,14 @@ def _extract_uploads(body: dict[str, Any]) -> list[tuple[str, tuple[str, bytes, 
 def build_runtime_registry() -> ToolRegistry:
     registry = build_default_registry()
     if os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower() == "http":
+        selected = {
+            item.strip().lower()
+            for item in os.getenv("YUNPAI_HTTP_MODULES", "m0,m1,m2,m3,m4,m5").split(",")
+            if item.strip()
+        }
         urls = {
             module: os.getenv(f"{module.upper()}_URL", registry.tools_for(module)[0].base_url if registry.tools_for(module) else "")
-            for module in ("m0", "m1", "m2", "m3", "m4", "m5")
+            for module in selected
         }
         registry.bind_http({module: url for module, url in urls.items() if url})
     return registry
