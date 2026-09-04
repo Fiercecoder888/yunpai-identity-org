@@ -155,22 +155,57 @@ def test_replan_from_server_bundle_preserves_parent(ctx):
         "base_plan_version": version,
         "idempotency_key": "REPLAN-1",
         "expected_head_plan_version": version,
-        "event": {"type": "quantity_update", "order_id": "SO-LIFE-1", "quantity": 4},
+        "event": {
+            "event_id": "EV-REPLAN-1", "sequence": 1,
+            "event_type": "order_cancel",
+            "occurred_at": "2026-09-04T10:00:00+08:00", "reason": "客户取消",
+            "payload": {"order_ids": ["SO-LIFE-2"]},
+        },
     }, ctx))
     assert result["success"] is True
     Draft202012Validator(_schema("replan_m5_schedule")).validate(result)
     assert result["data"]["parent_plan_version"] == version
     plan = repo.get_plan(result["data"]["plan_version"])
     assert plan["lifecycle_status"] == "draft"
+    assert (plan["bundle"] or {}).get("order_snapshots")  # bundle restored from server
     # replan on an unknown parent is a recognizable blocked result
     missing = asyncio.run(mt.m5_replan_schedule({
         "base_plan_version": "plan-unknown",
         "idempotency_key": "REPLAN-2",
-        "event": {"type": "quantity_update"},
+        "event": {"event_id": "E", "sequence": 1, "event_type": "order_cancel",
+                  "occurred_at": "2026-09-04T10:00:00+08:00", "reason": "x",
+                  "payload": {"order_ids": []}},
     }, ctx))
     assert missing["success"] is False
     assert missing["errors"][0]["code"] == "PLAN_NOT_FOUND"
     Draft202012Validator(_schema("replan_m5_schedule")).validate(missing)
+
+
+def test_replan_insert_order_applies_onto_parent_bundle(ctx):
+    """insert_order must actually add the order to the restored bundle."""
+    repo = M5Repository(ctx["m5_db_path"])
+    version = _release_plan(repo, ctx)
+    base_bundle = repo.get_plan(version)["bundle"]
+    before = len((base_bundle or {}).get("order_snapshots") or [])
+    result = asyncio.run(mt.m5_replan_schedule({
+        "base_plan_version": version,
+        "idempotency_key": "REPLAN-INS-1",
+        "expected_head_plan_version": version,
+        "event": {
+            "event_id": "EV-INS-1", "sequence": 1, "event_type": "insert_order",
+            "occurred_at": "2026-09-04T10:00:00+08:00", "reason": "加单",
+            "payload": {"orders": [
+                {"order_id": "SO-LIFE-9", "product_id": "P1", "quantity": 1,
+                 "uom": "PCS", "due_time": "2026-09-11T17:00:00+08:00"}
+            ]},
+        },
+    }, ctx))
+    assert result["success"] is True
+    new_plan = repo.get_plan(result["data"]["plan_version"])
+    after = len((new_plan["bundle"] or {}).get("order_snapshots") or [])
+    assert after == before + 1
+    ids = [o.get("order_id") for o in new_plan["bundle"]["order_snapshots"]]
+    assert "SO-LIFE-9" in ids
 
 
 def test_messages_pending_approval_to_outbox(ctx):
@@ -277,7 +312,9 @@ def test_replan_preserves_event_and_freeze_meta(ctx):
         "idempotency_key": "REPLAN-META-1",
         "expected_head_plan_version": version,
         "freeze_policy": {"frozen_until": "2026-09-04T12:00:00+08:00"},
-        "event": {"type": "quantity_update", "order_id": "SO-LIFE-1", "quantity": 6},
+        "event": {"event_id": "EV-META-1", "sequence": 1,
+                  "event_type": "order_cancel", "occurred_at": "2026-09-04T10:00:00+08:00",
+                  "reason": "客户取消", "payload": {"order_ids": ["SO-NOT-EXIST"]}},
     }, ctx))
     assert result["success"] is True
     new_plan = repo.get_plan(result["data"]["plan_version"])
@@ -285,7 +322,7 @@ def test_replan_preserves_event_and_freeze_meta(ctx):
     assert meta is not None
     assert meta["base_plan_version"] == version
     assert meta["freeze_policy"]["frozen_until"].startswith("2026-09-04")
-    assert meta["event"]["quantity"] == 6
+    assert meta["event"]["event_type"] == "order_cancel"
     # parent version preserved and the new version is an independent draft
     assert new_plan["parent_plan_version"] == version
     assert new_plan["lifecycle_status"] == "draft"

@@ -561,6 +561,148 @@ async def m5_pmc_progress(payload, ctx):
 # replan_m5_schedule
 # ---------------------------------------------------------------------------
 
+def _rechecksum(snapshot: dict) -> dict:
+    """Recompute the canonical checksum after mutating a stored snapshot."""
+    from .pmc_v2_snapshots import checksum_of
+    snapshot["checksum"] = checksum_of(snapshot)
+    return snapshot
+
+
+def _replan_apply_event(base_bundle: dict, event: dict, plan_start: str | None) -> dict:
+    """Apply one schema-defined replan event onto a copy of the parent bundle.
+
+    Events are the only allowed mutations (Task 3).  Mutated snapshots get
+    their canonical checksum recomputed so the new draft validates as an
+    independent bundle.
+    """
+    from copy import deepcopy
+    from .pmc_v2_snapshots import build_order_snapshot
+
+    bundle = deepcopy(base_bundle)
+    event_type = str(event.get("event_type") or "")
+    event_payload = event.get("payload") or {}
+    orders = bundle.setdefault("order_snapshots", [])
+    routes = bundle.setdefault("routes", {})
+    resource = bundle.setdefault("resource_snapshot", {})
+    calendar = bundle.setdefault("calendar_snapshot", {})
+    supply = bundle.setdefault("supply_snapshot", {})
+    entries = supply.setdefault("entries", [])
+
+    def _status_value(value: Any) -> str:
+        text = str(value or "").upper()
+        return {"ACTIVE": "ACTIVE", "AVAILABLE": "ACTIVE", "MAINTENANCE": "MAINTENANCE",
+                "DOWN": "INACTIVE", "INACTIVE": "INACTIVE", "DISABLED": "INACTIVE"}.get(text, "ACTIVE")
+
+    if event_type == "insert_order":
+        for raw in event_payload.get("orders", []):
+            product = str(raw.get("product_id") or raw.get("product_code") or "")
+            if product not in routes:
+                raise PmcError("BLOCKED_INPUT", f"MISSING_ROUTE product_code={product} (insert_order)")
+            oid = str(raw.get("order_id") or "")
+            orders.append(build_order_snapshot({
+                "order_id": oid,
+                "order_no": str(raw.get("order_no") or oid),
+                "lines": [{
+                    "order_line_id": raw.get("order_line_id") or f"{oid}::L1",
+                    "product_code": product,
+                    "qty": raw.get("quantity"),
+                    "uom": raw.get("uom") or "PCS",
+                    "due_date": raw.get("due_time"),
+                    "priority": raw.get("priority"),
+                }],
+            }, snapshot_id=f"SNAP-ORD-{oid}"))
+    elif event_type == "order_cancel":
+        cancelled = {str(x) for x in event_payload.get("order_ids", [])}
+        orders[:] = [o for o in orders if str(o.get("order_id")) not in cancelled]
+    elif event_type in {"material_shortage", "material_delay", "material_supply_update"}:
+        affected = {str(x) for x in event_payload.get("order_ids", [])}
+        availability = {str(a.get("material_id")): a for a in event_payload.get("material_availability", [])
+                        if isinstance(a, dict)}
+        kitting = {str(k.get("material_code")): k for k in event_payload.get("order_kitting", [])
+                   if isinstance(k, dict)}
+        # update supply snapshot entries whose order line belongs to event
+        updated = False
+        for entry in entries:
+            line = str(entry.get("order_line_id") or "")
+            order_id = str(line).split("::")[0]
+            if affected and order_id not in affected:
+                continue
+            material = str(entry.get("requirement_ref") or entry.get("inventory_snapshot_ref") or "")
+            if event_type == "material_supply_update":
+                avail = availability.get(material)
+                if avail is not None and _num(avail.get("available_inventory", avail.get("available_qty"))) is not None:
+                    entry["readiness"] = "READY" if _num(avail.get("available_inventory", avail.get("available_qty"))) > 0 else "NOT_READY"
+                    if entry["readiness"] == "READY":
+                        entry.pop("earliest_ready_at", None)
+                    updated = True
+            else:
+                entry["readiness"] = "NOT_READY"
+                if event_type == "material_delay":
+                    entry["earliest_ready_at"] = event.get("occurred_at")
+                updated = True
+        if not updated and not entries:
+            for order_line, kit in kitting.items():
+                entries.append({
+                    "order_line_id": str(kit.get("order_line_id") or order_line),
+                    "op_code": kit.get("op_code"),
+                    "readiness": "NOT_READY" if event_type != "material_supply_update" else "READY",
+                    "requirement_ref": str(order_line),
+                    "inventory_snapshot_ref": "EVENT-INV",
+                })
+        supply["entries"] = entries
+        _rechecksum(supply)
+    elif event_type == "equipment_down":
+        rid = str(event_payload.get("resource_id") or "")
+        duration = int(event_payload.get("duration_minutes") or 0)
+        for eq in resource.setdefault("equipment", []):
+            if str(eq.get("equipment_code")) == rid:
+                eq["status"] = "INACTIVE"
+                _rechecksum(resource)
+                break
+        else:
+            raise PmcError("BLOCKED_INPUT", f"MISSING_EQUIPMENT equipment_code={rid} (equipment_down)")
+        if duration > 0 and plan_start:
+            ua = calendar.setdefault("unavailability", [])
+            try:
+                from datetime import timedelta
+                start_dt = datetime.fromisoformat(str(plan_start).replace("Z", "+00:00"))
+            except ValueError:
+                start_dt = datetime.now(timezone.utc)
+            ua.append({
+                "resource_code": rid, "resource_type": "EQUIPMENT",
+                "start_at": start_dt.isoformat(),
+                "end_at": (start_dt + timedelta(minutes=duration)).isoformat(),
+                "reason": "equipment_down",
+            })
+            _rechecksum(calendar)
+    elif event_type == "capacity_change":
+        rid = str(event_payload.get("resource_id") or "")
+        status = _status_value(event_payload.get("status"))
+        for eq in resource.setdefault("equipment", []):
+            if str(eq.get("equipment_code")) == rid:
+                eq["status"] = status
+                _rechecksum(resource)
+                break
+        else:
+            raise PmcError("BLOCKED_INPUT", f"MISSING_EQUIPMENT equipment_code={rid} (capacity_change)")
+    elif event_type == "labor_shortage":
+        skill = str(event_payload.get("skill_id") or "")
+        for person in resource.setdefault("persons", []):
+            if skill and skill in (person.get("skill_codes") or []):
+                person["status"] = "INACTIVE"
+        _rechecksum(resource)
+    elif event_type == "manual_lock":
+        # the v2 kernel has no lock model; the declared lock is preserved as
+        # plan metadata and never silently converted into a schedule change.
+        bundle["manual_locks"] = bundle.get("manual_locks") or []
+        lock = event_payload.get("lock") or {}
+        if isinstance(lock, dict):
+            bundle["manual_locks"].append(lock)
+    else:
+        raise PmcError("BLOCKED_INPUT", f"UNKNOWN_REPLAN_EVENT event_type={event_type}")
+    return bundle
+
+
 async def m5_replan_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     base = str(payload.get("base_plan_version") or "")
     idem = str(payload.get("idempotency_key") or "")
@@ -586,28 +728,22 @@ async def m5_replan_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> di
     if head is None or head["head_plan_version"] != base:
         return _replan_fail("STALE_HEAD", "replan 只能基于当前 scenario head")
     # restore the original authoritative bundle from the server-stored parent
-    bundle = base_plan.get("bundle")
-    if not bundle:
+    base_bundle = base_plan.get("bundle")
+    if not base_bundle:
         return _replan_fail("MISSING_BUNDLE", "父版本缺少服务端 bundle，不能重排")
-    request = {"scenario_id": base_plan["scenario_id"],
-               "scenario_purpose": base_plan.get("scenario_purpose", "production"),
-               "pmc_v2_bundle": bundle,
-               "idempotency_key": idem,
-               "expected_head_plan_version": base}
-    # explicit events can change qty / readiness / locks / frozen windows;
-    # rebuild a payload view for the solver through the v2 adapter.
-    event_type = str(event.get("type") or event.get("event_type") or "")
-    if event_type in {"quantity_update", "order_change"}:
-        request["orders"] = [dict(o) for o in (bundle.get("order_snapshots") or [])]
-        # map stored order snapshot lines into adapter payload shape
-        request["orders"] = [
-            {"order_id": o.get("order_id"), "product_id": o.get("lines", [{}])[0].get("product_code"),
-             "quantity": o.get("lines", [{}])[0].get("qty"), "uom": o.get("lines", [{}])[0].get("uom"),
-             "due_time": o.get("lines", [{}])[0].get("due_date")}
-            for o in (bundle.get("order_snapshots") or [])
-        ]
-    elif event_type in {"material_readiness_update", "supply_update"}:
-        request["wip_status"] = [dict(e) for e in event.get("readiness", [])]
+    # apply ONLY the explicit event to a fresh copy of the parent bundle
+    try:
+        new_bundle = _replan_apply_event(base_bundle, event, base_plan.get("schedule") or base_plan.get("planning_start"))
+    except PmcError as exc:
+        return _replan_fail("BLOCKED_INPUT", exc.message)
+    request = {
+        "scenario_id": base_plan["scenario_id"],
+        "scenario_purpose": base_plan.get("scenario_purpose", "production"),
+        "pmc_v2_bundle": new_bundle,
+        "idempotency_key": idem,
+        "expected_head_plan_version": base,
+        "planning_start": (base_plan.get("schedule") or {}).get("plan_start") or payload.get("planning_start"),
+    }
     try:
         result = run_pmc_v2(request)
     except (PmcError, M5RepositoryError) as exc:
@@ -622,7 +758,7 @@ async def m5_replan_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> di
         "base_plan_version": base,
         "event": event,
         "freeze_policy": payload.get("freeze_policy"),
-        "manual_locks": base_plan.get("manual_locks"),
+        "manual_locks": new_bundle.get("manual_locks") or base_plan.get("manual_locks"),
         "frozen_windows": base_plan.get("frozen_windows"),
     }
     new_schedule["replan_meta"] = {
