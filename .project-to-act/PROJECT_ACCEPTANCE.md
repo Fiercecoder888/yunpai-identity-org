@@ -5,10 +5,10 @@
 
 ## 当前验收结论
 
-- 结论：既有关键业务路径和线上发布验收保持通过；M3/M4 Tool 与 Skill 补全已通过代码、本地运行态和 mock HTTP 集成验收，真实独立服务/数据库联调尚未执行
-- 验收范围：既有前后端集成与线上证据；本次 M3/M4 Tool registry、HTTP Adapter、Skill operation、授权 Gate、错误语义和 M3→M4 流程
-- 最后检查：2026-09-04 19:14 +08:00
-- 遗留问题：本机未监听 8000、8010、8080、8765、39092，未取得真实 M3/M4 服务 URL、认证和数据库回读条件；不得将 mock HTTP 证据描述为生产验收
+- 结论：代码与本地回归通过；GB10 隔离 release 已完成真实 M1/M0 HTTP 联调，真实订单在 M1 订单行语义缺失后于 M2 权威输入 Gate 停止，M5 发布回读未通过
+- 验收范围：`dev@05d4cba` 隔离 release `20260905013000`、39094 health/tools、Qwen、真实订单上传、M1 review、M0 candidate/commit/rollback 及 M2 阻塞
+- 最后检查：2026-09-05 01:37 +08:00
+- 遗留问题：M1 真实 XLSX 返回 0 订单行；M2 内部 Qwen 端点不可用且缺审核 BOM/SOP；39092/current 保持旧 release，未执行生产切换
 
 ## 验收标准
 
@@ -24,6 +24,7 @@
 | A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 未通过（外部阻塞） | 39092 health/openapi、GB10 SQLite 完整性与 schema、source SHA/候选审核状态、运行状态批次交叉核对 | E-0904-M0-GB10-RECON-001 |
 | A-009 | M3/M4 Tool 与 Skill 完整绑定并保持副作用 Gate | 通过（代码与本地运行态） | 完整 pytest、compileall、diff check、账本校验、9001 health/tools、HTTP mock 集成 | E-M3M4-TOOLS-001 |
 | A-010 | M1 Tool 与 Skill 完整绑定：17 个 M1 Tool 经专用 HTTP Adapter 可执行（租户头/202 轮询/权限/错误映射），Skill 声明 17 Tool 且查询 op 不打开写入 Gate，本地 fixture 不冒充完整 M1 解析 | 通过（代码与本地运行态） | 完整 pytest、M1 定向测试、compileall、git diff --check、Registry 绑定统计、HTTP mock 集成 | E-M1-TOOLS-001 |
+| A-011 | GB10 隔离 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（M1/M0 接通，M2 阻塞） | 39094 health 114/112、真实 XLSX 上传、M1 review、M0 批次回读与回滚、M2 Gate | E-GB10-M1M5-REAL-001 |
 
 ## 证据索引
 
@@ -36,6 +37,7 @@
 | E-M1-LOCAL-001 | 2026-09-04 22:25 | python3.12 独立 venv 安装 T8 M1 基础依赖并在 127.0.0.1:18081 启动真实服务（SQLite+memory graph）；编排器专用 M1 Adapter 直连真实 HTTP：只读端点、真实 XLSX 上传、TaskStore/文档回读、审核队列、跨租户 404 | 真实 HTTP 探针全部成功；/health degraded、/ready not_ready（无模型层，如实报告） | 实现 commit 8a9794d / 账本 52c5ef3；分支 dsh/m1-tool-skill-completion-20260904 | 真实上传 task b1e064a04ce9 → needs_review 候选并可回读 m1.document.v2；review 队列含该任务；othertenant 读同任务 404；生产验收未通过（缺 GPU/MinerU/Instructor/PostgreSQL/Neo4j） | /tmp/m1run/uvicorn.log、ops/m1/README.md §4.1、reports/sessions/s-m1-tools-20260904.md | 2026-09-11 |
 | E-M1-TOOLS-001 | 2026-09-04 22:10 | 完整 pytest；compileall；git diff --check；M1 定向测试；Registry 绑定统计；本地 API/HTTP mock 集成 | 全部退出 0；117 passed, 2 skipped（真实服务 opt-in） | 实现 commit 8a9794d5e7f2e92acbb122692cc66262af59ddd3；分支 dsh/m1-tool-skill-completion-20260904；基线 79973082535f459f7c0be03096c654d233fe99ab | 114 Tool：default 61 bound（M1 17/17：ingest_document 本地 fixture + 16 专用 Adapter），HTTP runtime 112 bound（M1 17/17 专用 Adapter）；Skill yunpai-m1-document-parser 17 Tool / 19 ops；13 个查询 op 免授权 Gate；真实 M1 服务（MinerU/Instructor/PostgreSQL/Neo4j）未联调，生产未验收 | reports/sessions/s-m1-tools-20260904.md、tests/test_m1_*.py、ops/m1/README.md | 2026-09-11 |
 | E-SESSION-001 | 2026-09-03 | 初始化脚本 `--validate`；人工审阅规则文件 | 0 | `dev` / `4b9c1aa1` | 治理账本有效，规则与 claim 模板已落盘 | `.project-to-act/`、`docs/SESSION_COLLABORATION_RULES.md`、`.coordination/claims/README.md` | 2026-12-31 |
+| E-GB10-M1M5-REAL-001 | 2026-09-05 01:20-01:37 +08:00 | 在 GB10 Tailscale `100.121.179.111` 创建隔离 release `20260905013000`；构建/传输 `dev@05d4cba`；绑定 M0=`49503`、M1=`49506`、M2=`49507`、M3=`49508`、M4=`49514`、M5=`49515`；探测 39094 health、各服务 health、Qwen models/chat；上传真实订单；受信 principal 批准 M1 review 与 M0 candidate；回读 M0 批次并回滚 | 部署、HTTP 探测、上传和 Gate 调用均完成；隔离后端/前端停止；39092/current 未改动 | `dev` / `05d4cba72a1e171e80f3d3214fa8be17430770a6`；归档 SHA-256 `237c0dfcf181615fc6b4b704077fa2700345222d9d3f07b5e266d3be1841932b`；真实文件 SHA-256 `9ca5414b9db08f19d90756b7dd32c6362b229a717799a061f1d29823aa428341` | 39094 health `tools=114,bound_tools=112,local_fixture=false`；Qwen 在模型加载完成后 models/chat 200；run `run-5b4eeb4812184ceb88b975b2c2c65e44` 在 M2 `BLOCKED_INPUT` 停止；M0 batch `613a3b4744de` rows.incomplete=5/entities={}，已回滚；M2 `/api/health` 报内部模型端点不可用；无 M5 release/head 或 MES 派发验收 | 远端 release/logs、run API、M0 `/api/m0/import/batch/613a3b4744de` | 2026-09-12 |
 | E-REGRESSION-002 | 2026-09-03 18:09 | `npm run typecheck`; `npm run build`; `npm test -- --run --maxWorkers=1 --no-file-parallelism`; root `pytest -q` | 前三项 0；root pytest 1（47 passed, 1 EOL hash mismatch） | `dev` / `24da1d70`；Git blob manifest hash 与 provenance 一致 | 前端回归通过；根测试唯一失败为 Windows `core.autocrlf` 工作树换行误报，非代码/运行时错误 | `reports/sessions/s-integration-final-20260903.md`、`reports/s-progress-restore-20260903/REPORT.md` | 2026-12-31 |
 | E-INTEGRATION-002 | 2026-09-03 18:10 | Git merge/cherry-pick；线上浏览器控制 API 点击、布局、独立滚动；`/api/health`；静态资源请求 | Git/浏览器/HTTP 均成功；控制台 error/warning 0 | `dev` / `24da1d70`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；release `20260903173855` | 后端与右栏提交完整集成；上传菜单、右栏满高/滚动、移动抽屉和问答关键路径符合预期 | `reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张截图、线上 URL | 2026-12-31 |
 | E-INTEGRATION-003 | 2026-09-03 18:20 | 两次 `git push neworigin dev`；`git ls-remote --heads neworigin dev`；项目管理 `--validate`；最终线上状态复核 | 全部退出 0；远端 `dev=ee8541cc`；账本 `valid=true` | `dev` / `ee8541cc`（交付基线 `d48ce911`）；release `20260903173855`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c` | 集成提交和独立 session 报告已推送；旧 claim/DEPLOY_LOCK 已释放；线上关键路径保持通过 | `reports/sessions/s-integration-final-20260903.md`、`.project-to-act/`、`reports/s-progress-restore-20260903/`、远端分支 | 2026-12-31 |

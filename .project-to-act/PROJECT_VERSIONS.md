@@ -22,3 +22,4 @@
 - 2026-09-03：`2026.09.03-dev`，开发中；新增多 session 协作约定并保留 GB10 回滚 release；证据 `E-SESSION-001`。
 - 2026-09-03：`2026.09.03-dev`，集成验收；合并 `neworigin/dev` 后端修复与右栏 session 提交，GB10 切换到 `20260903173855`；证据 `E-INTEGRATION-002`，Gate `G-002`。
 - 2026-09-03：`2026.09.03-dev`，交付完成；`dev` 推送到 `neworigin/dev` `ee8541cc`，session 报告和验收账本封账；证据 `E-INTEGRATION-003`。
+- 2026-09-05：`2026.09.05-dev`，隔离联调；将 `dev@05d4cba` 部署到 GB10 release `20260905013000` 的 9002/39094，未切换 `current`，完成真实 M1/M0 HTTP 探测和订单 Gate，M2 数据 Gate 阻塞后停止隔离进程并保留 release；证据 `E-GB10-M1M5-REAL-001`。
