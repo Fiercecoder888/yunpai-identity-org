@@ -205,6 +205,17 @@ async def m4_purchase(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
 
 
 async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    # PMC P1：显式 priority_sort 时按交期/优先级重排订单（不改变默认输入顺序语义）。
+    if str(payload.get("priority_sort") or "").lower() in {"true", "1", "yes"}:
+        orders = payload.get("orders") or []
+        priority_weight = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
+
+        def _sort_key(order: dict[str, Any]) -> tuple:
+            due = str(order.get("due_time") or "")
+            return (priority_weight.get(str(order.get("priority") or "normal").lower(), 2), due, str(order.get("order_id") or ""))
+
+        if orders:
+            payload["orders"] = sorted(orders, key=_sort_key)
     # PMC P0（补充确认）：显式生产请求（production_use_allowed=true）强制 v2；
     # legacy 贪心仅允许显式 preview 或本地 fixture 编排（无生产授权标记）。
     purpose = str(payload.get("scenario_purpose") or "production")

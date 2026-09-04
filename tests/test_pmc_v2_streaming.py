@@ -92,6 +92,32 @@ def test_production_request_without_v2_facts_is_blocked_not_legacy():
     assert result["data"]["lifecycle_status"] == "draft"
 
 
+def test_priority_sort_reorders_orders_by_due_and_priority():
+    from yunpai_langgraph.workers import m5_schedule
+
+    payload = {
+        "scenario_purpose": "preview",
+        "legacy_preview": True,
+        "priority_sort": True,
+        "orders": [
+            {"order_id": "PO-LOW", "product_id": "P-1", "quantity": 1, "due_time": "2026-09-30T17:00:00+08:00", "priority": "normal"},
+            {"order_id": "PO-URGENT", "product_id": "P-2", "quantity": 1, "due_time": "2026-09-05T17:00:00+08:00", "priority": "urgent"},
+        ],
+        "routing_steps": [
+            {"product_id": "P-1", "operation_id": "OP-1", "sequence": 1, "processing_minutes": 2, "eligible_resources": [{"resource_id": "R-1", "processing_minutes": 2}]},
+            {"product_id": "P-2", "operation_id": "OP-1", "sequence": 1, "processing_minutes": 2, "eligible_resources": [{"resource_id": "R-1", "processing_minutes": 2}]},
+        ],
+        "resources": [{"resource_id": "R-1", "status": "available"}],
+        "idempotency_key": "ik-priority",
+    }
+    result = __import__("asyncio").run(m5_schedule(payload, {"task_id": "TASK-PRIORITY"}))
+    assert result["success"] is True
+    # urgent 交期靠前 -> 其工序先于 normal 排程。
+    operations = result["data"]["schedule"]["operations"]
+    assert operations[0]["order_id"] == "PO-URGENT"
+    assert operations[1]["order_id"] == "PO-LOW"
+
+
 def test_production_v2_request_requires_explicit_facts_no_defaults():
     """production_use_allowed=true 的 v2 请求禁止默认值注入。"""
     import pytest
