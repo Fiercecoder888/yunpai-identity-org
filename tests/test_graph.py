@@ -220,6 +220,36 @@ async def test_data_gate_requires_business_supplement_and_blocks_empty_bom():
 
 
 @pytest.mark.asyncio
+async def test_m2_gate_accepts_uploaded_bom_workbook_and_preserves_coordinates():
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "GB10 BOM"
+    sheet.append(["物料编码", "材料名称", "用量", "单位"])
+    sheet.append(["MAT-GB10", "铜线", 2, "pcs"])
+    output = BytesIO()
+    workbook.save(output)
+
+    graph = YunpaiGraph()
+    state = await graph.run(new_state({
+        "tool": "run_bom_sop_workflow",
+        "product": {"product_name": "GB10"},
+        "bom_lines": [],
+    }))
+    assert state["pending_gate"]["type"] == "data"
+    state = await graph.resume(state, "retry", {
+        "product": {"product_name": "GB10", "product_code": "GB10"},
+        "bom_files": [{"filename": "GB10-BOM.xlsx", "content_b64": b64encode(output.getvalue()).decode()}],
+    })
+    result = state["outputs"]["run_bom_sop_workflow"]
+    assert state["pending_gate"]["type"] == "engineering"
+    assert result["matching"]["status"] == "matched"
+    assert result["bom_generation"]["bom_lines"][0]["source_sheet"] == "GB10 BOM"
+    assert result["bom_generation"]["bom_lines"][0]["source_row"] == 2
+
+
+@pytest.mark.asyncio
 async def test_m3_and_m5_missing_business_inputs_are_contract_valid_blockers():
     graph = YunpaiGraph()
     m3 = await graph.registry.call("run_m3_procurement_requirements", {

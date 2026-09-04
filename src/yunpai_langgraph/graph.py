@@ -407,7 +407,18 @@ class YunpaiGraph:
         if tool == "run_bom_sop_workflow":
             product = dict(request.get("product") or {})
             product.setdefault("product_name", product.get("product_code") or "")
-            return {"product_profile": product, "bom_lines": request.get("bom_lines", []), "routing_steps": request.get("routing_steps", []), "use_demo_sources": False}
+            attachments = [
+                item for item in request.get("attachments", [])
+                if isinstance(item, dict) and item.get("kind") == "master_data"
+            ]
+            return {
+                "product_profile": product,
+                "bom_lines": request.get("bom_lines", []),
+                "routing_steps": request.get("routing_steps", []),
+                "bom_files": request.get("bom_files") or attachments,
+                "sop_files": request.get("sop_files") or attachments,
+                "use_demo_sources": False,
+            }
         if tool == "run_m3_procurement_requirements":
             m1 = outputs.get("ingest_document", {})
             order = dict(m1.get("order") or m1.get("extraction", {}).get("order") or request.get("order") or {})
