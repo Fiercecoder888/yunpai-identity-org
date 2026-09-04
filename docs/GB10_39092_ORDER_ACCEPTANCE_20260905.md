@@ -6,13 +6,13 @@
 
 ## 版本与部署
 
-- Git：`origin/main` = `origin/dev` = `419243818de7fc3a711e06b1a2dbb9d7d4b40097`；GB10 运行代码为其前一功能提交 `a9a85ebfd56f3f6fd94eec7e2700e32e6236c801`（后续提交仅更新报告/账本）。
+- Git：`origin/main` = `origin/dev` = `c89df91`；本次 M1 语义回填修复已进入两个远端分支。
 - 集成提交：`30a8df6`（M0 HTTP batch envelope 解包）、`5139527`（从 M1 输出补全 M2 的产品名和订单号）、`15d0442`（M5 apply Gate 持久化 release/head，并增加回归测试）。
 - `2b07276`（订单附件默认走 `m1_m5_document_to_plan`）、`a9a85eb`（递归脱敏公开状态中的文件正文，避免历史列表膨胀）。
-- GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905071500`。
+- GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905114500`（上一 release `20260905071500` 保留回滚）。
 - 发布归档 SHA-256：`a621b8d778dc1026be296a83bb6ae87a5c0e667f15e5ee560018443190fb1091`。
-- `GET /health`：`status=ok`，`tools=114`，`bound_tools=112`，`skills=8`，`local_fixture=false`，planner 为 Qwen `qwen3.6-35b-a3b-fp8-gpu0-200k`。
-- 模块绑定：M0 `27/27`、M1 `17/17`、M2 `7/7`、M3 `16/17`、M4 `25/26`、M5 `20/20`。M3/M4 各有一个按合同保留未绑定的 receiver 工具。
+- `GET /health`：`status=ok`，`tools=114`，`bound_tools=87`，`skills=8`，`transport=http`，planner 为 Qwen `qwen3.6-35b-a3b-fp8-gpu0-200k`；M1/M2 HTTP 已绑定，M0 仍为本地 sandbox handler。
+- 模块绑定：M0 `5/27`、M1 `17/17`、M2 `7/7`、M3 `16/17`、M4 `24/26`、M5 `18/20`。
 
 ## 前端真实运行
 
@@ -36,6 +36,14 @@
 - 该运行没有越过字段缺口自动猜测产品编码，证明新入口和 fail-closed 行为生效；旧运行的 M2 阻塞结论仍有效。
 
 ### W-H909 正确数据包复跑（本次验收）
+
+#### 2026-09-05 最新 release 重放
+
+- release `20260905114500`，运行 `run-e61cceeddb88498283ff2be8ffb25d31`，任务 `task-8c3c4183968b4c9f9189c48baa942195`。
+- 浏览器依次捕获 M1 review Gate、M0 candidate Gate 和 M0 commit data Gate 截图。M1 Gate 文案为“订单行已识别；顶层产品编码由本地确定性候选回填”，外部 8 行 `model` 被保留，并以 `semantic_supplement` 提供 `W-H909` 候选。
+- M1：订单号 `PO-20260812-001`，8 行，W-H909 行数量 `4000 PCS`、规格 `1M`；外部顶层 `header.product_code=null`，本地候选 `product_code=W-H909`，仍需人工确认。
+- M0：batch `batch-c48baa942195` 仅为 `sandbox` 候选；接受候选后进入 `data_import_commit`，因仍有 1 个候选未裁决而返回 `BLOCKED_INPUT/PENDING_REVIEW`，canonical 未发布。
+- M2 尚未开始：必须先完成 M0 候选裁决和真实 M0 canonical HTTP 发布；本次没有伪造 BOM/SOP/PMC 成功。
 
 - 基础资料前端上传任务：运行 `run-c37163744b2a421bac6814ac545d9235`，任务 `task-ed16ca6a9e49454f8d6280d58e4b98e5`。页面先显示“业务资料候选已写入识别库，必须审核后才能进入 M0 canonical 发布”，点击“接收”后任务完成；4 个文件接收，超过 20 MB 的 `HDTV 作业指导书.xls` 被明确跳过，使用同包 5.6 MB PDF 作为 SOP 证据。
 - 订单文件：`桐曦PO-20260812-00008-HD备货订单-0831验收通过.xlsx`，SHA-256 `4abf98e6221064198ebfc8596858650a466e37c32750ed2f2e4fb4a7f090066c`。前端运行 `run-f32f83fda5174d4d8b0a144cf706900a`，任务 `task-d8becc2c9a2f43929b61314ca05082ca`。
@@ -88,7 +96,7 @@
 
 ## 本地验证
 
-- `.venv/bin/python -m pytest -q`：326 passed, 2 skipped，退出码 0。
+- `.venv/bin/python -m pytest -q`：329 passed, 2 skipped，退出码 0。
 - `cd frontend && npm test -- --run`：6 passed，退出码 0。
 - `cd frontend && npm run build`：成功，退出码 0。
 - `git diff --check`：通过。
