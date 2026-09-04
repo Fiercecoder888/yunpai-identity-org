@@ -311,11 +311,11 @@ def _processing_minutes(op, qty, equipment):
     if equipment is not None:
         cap = _dec(equipment["capacity_per_hour"])
         eff = _dec(equipment["efficiency_factor"])
-    else:
-        cap = _dec("60")
-        eff = _dec("1")
-    minutes = (effective_qty / basis) * std * (_dec("60") / (cap * eff))
-    return _ceil_dec(minutes)
+        return _ceil_dec((effective_qty / basis) * std * (_dec("60") / (cap * eff)))
+    # An operation without a bound equipment runs on its explicit standard
+    # minutes; no implicit 60/h reference capacity or efficiency 1 is assumed
+    # (0902 fail-closed contract).
+    return _ceil_dec((effective_qty / basis) * std)
 
 
 def _setup_minutes_for(ctx, op, equipment, prev_op):

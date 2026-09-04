@@ -260,11 +260,27 @@ async def m4_purchase(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
 
 async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     # Explicit WIP/v2 facts are handled by the frozen constrained scheduler.
-    # The legacy branch remains available for older lightweight fixtures.
-    if payload.get("pmc_v2") or payload.get("pmc_v2_bundle") or payload.get("calendar_windows") or any(
-        isinstance(step, dict) and (step.get("standard_minutes") is not None or step.get("std_minutes") is not None)
-        for step in payload.get("routing_steps", [])
-    ):
+    # The legacy branch remains available only for explicitly preview/sandbox
+    # marked requests; production requests without v2 facts fail closed.
+    purpose = str(payload.get("scenario_purpose") or "production")
+    v2_marked = bool(
+        payload.get("pmc_v2") or payload.get("pmc_v2_bundle") or payload.get("calendar_windows")
+        or any(isinstance(step, dict) and (step.get("standard_minutes") is not None or step.get("std_minutes") is not None)
+               for step in payload.get("routing_steps", []))
+    )
+    legacy_preview = bool(payload.get("legacy_preview")) or str(purpose).lower() in {"preview", "sandbox"}
+    if payload.get("orders") and not payload.get("routing_steps"):
+        return {
+            "success": False, "code": "BLOCKED_INPUT", "errors": [{"code": "MISSING_SOP", "message": "缺少可执行的 SOP/工艺路线", "details": []}],
+            "data": {
+                "idempotency_key": str(payload.get("idempotency_key") or ""),
+                "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"makespan_minutes": 0, "operation_count": 0}},
+                "scenario_purpose": purpose, "lifecycle_status": "draft", "input_hash": "",
+                "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id"),
+            },
+            "evidence": [_evidence("m5", "routing_steps", "未提供 SOP/工艺路线，停止排程")], "trace_id": _trace(ctx, "m5"),
+        }
+    if v2_marked:
         from .pmc_v2_adapter import PmcError, run_pmc_v2
         try:
             result = run_pmc_v2(payload)
@@ -277,19 +293,22 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
             result["trace_id"] = result.get("trace_id") or _trace(ctx, "m5-pmc-v2")
             return result
         except PmcError as exc:
-            return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": payload.get("scenario_purpose", "production"), "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902"}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
-    resources = {str(item["resource_id"]): item for item in payload["resources"]}
-    if payload.get("orders") and not payload.get("routing_steps"):
+            return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": purpose, "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": purpose, "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902", "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id")}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
+    if not legacy_preview:
+        # Production requests must go through PMC v2.  Without an explicit
+        # preview/sandbox marker the legacy branch must not run.
         return {
-            "success": False, "code": "BLOCKED_INPUT", "errors": [{"code": "MISSING_SOP", "message": "缺少可执行的 SOP/工艺路线", "details": []}],
+            "success": False, "code": "BLOCKED_INPUT",
+            "errors": [{"code": "LEGACY_PRODUCTION_BLOCKED", "message": "production 请求必须携带 v2 事实并进入 PMC v2；legacy 分支只能显式标记为 preview/sandbox", "details": []}],
             "data": {
                 "idempotency_key": str(payload.get("idempotency_key") or ""),
-                "schedule": {"scenario_purpose": payload.get("scenario_purpose", "production"), "operations": [], "metrics": {"makespan_minutes": 0, "operation_count": 0}},
-                "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": "",
+                "schedule": {"scenario_purpose": "production", "operations": [], "metrics": {"makespan_minutes": 0, "operation_count": 0}},
+                "scenario_purpose": "production", "lifecycle_status": "draft", "input_hash": "",
                 "parent_plan_version": payload.get("expected_head_plan_version"), "tracking_task_id": ctx.get("task_id"),
             },
-            "evidence": [_evidence("m5", "routing_steps", "未提供 SOP/工艺路线，停止排程")], "trace_id": _trace(ctx, "m5"),
+            "evidence": [_evidence("m5", "legacy", "production 请求不得进入 legacy 分支")], "trace_id": _trace(ctx, "m5"),
         }
+    resources = {str(item["resource_id"]): item for item in payload["resources"]}
     operations, cursor = [], 0
     for order in payload["orders"]:
         product_id = str(order["product_id"])
