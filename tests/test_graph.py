@@ -97,6 +97,32 @@ async def test_stream_order_attachment_is_parsed_before_m3_nullable_numbers():
 
 
 @pytest.mark.asyncio
+async def test_m5_payload_preserves_all_m1_order_lines():
+    graph = YunpaiGraph()
+    state = new_state({
+        "tool": "solve_scheduling",
+        "document": {
+            "order_id": "SO-MULTI-001",
+            "product_code": "P-1",
+            "quantity": 3,
+            "due_date": "2026-09-10",
+            "confidence": 1.0,
+            "lines": [
+                {"line_id": "L-1", "product_code": "P-1", "quantity": 2},
+                {"line_id": "L-2", "product_code": "P-2", "quantity": 1},
+            ],
+        },
+        "routing_steps": [
+            {"product_id": "P-1", "operation_id": "OP-1", "sequence": 1, "processing_minutes": 5},
+            {"product_id": "P-2", "operation_id": "OP-2", "sequence": 1, "processing_minutes": 7},
+        ],
+        "resources": [{"resource_id": "R-1", "status": "available"}],
+    })
+    payload = graph._payload_for(state, "solve_scheduling")
+    assert [(item["product_id"], item["quantity"]) for item in payload["orders"]] == [("P-1", 2), ("P-2", 1)]
+
+
+@pytest.mark.asyncio
 async def test_unbound_free_tool_fails_closed():
     state = await invoke({"tool": "list_m4_tracking"})
     assert state["status"] == "failed"

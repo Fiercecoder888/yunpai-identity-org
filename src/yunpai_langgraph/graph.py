@@ -360,6 +360,15 @@ class YunpaiGraph:
                 "files": request.get("documents") or request.get("attachments") or [],
                 "db_path": request.get("business_catalog_db") or "runtime/yunpai-business-catalog.sqlite",
             }
+        if tool in self.skills.specs:
+            skill_payload = request.get("skill_payload")
+            if isinstance(skill_payload, dict):
+                return skill_payload
+            return {
+                key: value
+                for key, value in request.items()
+                if key not in {"message", "task", "skill", "payloads", "workflow"}
+            }
         if tool == "data_import_commit":
             imported = outputs.get("data_import_run", {})
             return {"batch_id": imported.get("batch_id") or imported.get("id")}
@@ -433,7 +442,28 @@ class YunpaiGraph:
             for item in request.get("routing_steps", []):
                 eligible = item.get("eligible_resources") or [{"resource_id": resource_id, "processing_minutes": max(1, int(item.get("processing_minutes", 1)))} for resource_id in resource_ids[:1]]
                 routes.append({**item, "product_id": item.get("product_id") or product_id, "operation_name": item.get("operation_name") or item.get("operation_id"), "eligible_resources": eligible})
-            return {"idempotency_key": f"{state['task_id']}:m5", "scenario_id": str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}"), "scenario_purpose": request.get("scenario_purpose", "production"), "planning_start": str(request.get("planning_start") or _now()), "orders": [{"order_id": str(order.get("order_id") or ""), "product_id": product_id, "quantity": order.get("quantity", 0), "due_time": _due_time(order.get("due_date")), "priority": request.get("priority", "normal"), "status": "firm"}], "routing_steps": routes, "resources": resources, "source_systems": ["manual"]}
+            advanced = {key: request[key] for key in ("pmc_v2", "pmc_v2_bundle", "wip_pmc", "wip_pmc_mode", "production_use_allowed", "calendar_windows", "calendar", "resource_snapshot", "resource_unavailability", "supply_entries", "wip_status", "material_availability", "changeover_rules", "setup_matrix", "route_approval_ref", "route_version", "route_code") if key in request}
+            # M1 order workbooks may contain multiple product lines. Preserve
+            # those lines as separate M5 orders so routing and capacity are not
+            # silently reduced to the first header product.
+            lines = order.get("lines") or m1.get("lines") or []
+            if isinstance(lines, list) and lines:
+                orders = [
+                    {
+                        "order_id": str(order.get("order_id") or ""),
+                        "order_line_id": str(line.get("line_id") or f"{order.get('order_id')}::L{index}"),
+                        "product_id": str(line.get("product_code") or line.get("model") or product_id),
+                        "quantity": line.get("quantity", 0),
+                        "due_time": _due_time(line.get("due_date") or order.get("due_date")),
+                        "priority": request.get("priority", "normal"),
+                        "status": "firm",
+                    }
+                    for index, line in enumerate(lines, start=1)
+                    if isinstance(line, dict) and (line.get("product_code") or line.get("model"))
+                ]
+            else:
+                orders = [{"order_id": str(order.get("order_id") or ""), "product_id": product_id, "quantity": order.get("quantity", 0), "due_time": _due_time(order.get("due_date")), "priority": request.get("priority", "normal"), "status": "firm"}]
+            return {"idempotency_key": f"{state['task_id']}:m5", "scenario_id": str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}"), "scenario_purpose": request.get("scenario_purpose", "production"), "planning_start": str(request.get("planning_start") or _now()), "orders": orders, "routing_steps": routes, "resources": resources, "source_systems": ["manual"], **advanced}
         return request.get(tool, {}) if isinstance(request.get(tool), dict) else {}
 
 

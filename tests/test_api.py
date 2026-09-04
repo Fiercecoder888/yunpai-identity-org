@@ -14,6 +14,7 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     assert health["module"] == "yunpai-langgraph"
     assert health["tools"] == 114
     assert health["bound_tools"] == 7
+    assert health["skills"] == 8
     assert health["planner_model"]["provider"] == "qwen"
     created = client.post("/runs", json=workflow_request()).json()
     assert created["pending_gate"]["type"] == "candidate"
@@ -45,7 +46,9 @@ def test_api_accepts_request_envelope_and_rejects_invalid_resume(tmp_path):
     assert rejected.json()["outputs"] == {}
     conflict = client.post(f"/runs/{created['run_id']}/resume", json={"decision": "approve"})
     assert conflict.status_code == 409
-    assert any(item["name"] == "business-data-identification" for item in client.get("/skills").json()["skills"])
+    skills = {item["name"]: item for item in client.get("/skills").json()["skills"]}
+    assert "business-data-identification" in skills
+    assert "dispatch_m5_schedule" in skills["yunpai-m5-pmc-lifecycle"]["tools"]
 
 
 def test_api_uploads_xlsx_and_records_intent_route(tmp_path):

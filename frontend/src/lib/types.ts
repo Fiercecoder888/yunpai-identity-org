@@ -53,6 +53,29 @@ export type RunState = {
   trace?: Array<Record<string, unknown>>;
 };
 
+export type PmcOperation = {
+  schedule_operation_id: string;
+  order_line_id: string;
+  product_code: string;
+  op_code: string;
+  operation_name?: string;
+  equipment_code?: string;
+  person_code?: string;
+  station_code?: string;
+  tooling_codes?: string[];
+  plan_start: string;
+  plan_end: string;
+  qty: string | number;
+  uom: string;
+  setup_minutes: number;
+  processing_minutes: number;
+  standard_minutes?: number;
+  quantity_basis?: number;
+  yield_rate?: number;
+  loss_rate?: number;
+  wip_state?: string;
+};
+
 export type StreamEvent = {
   type: 'run_start' | 'assistant_delta' | 'step_start' | 'step_result' | 'gate_opened' | 'state_snapshot' | 'run_done' | 'run_error';
   run_id: string;

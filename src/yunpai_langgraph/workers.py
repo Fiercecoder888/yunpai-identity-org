@@ -187,6 +187,25 @@ async def m4_purchase(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
 
 
 async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    # Explicit WIP/v2 facts are handled by the frozen constrained scheduler.
+    # The legacy branch remains available for older lightweight fixtures.
+    if payload.get("pmc_v2") or payload.get("pmc_v2_bundle") or payload.get("calendar_windows") or any(
+        isinstance(step, dict) and (step.get("standard_minutes") is not None or step.get("std_minutes") is not None)
+        for step in payload.get("routing_steps", [])
+    ):
+        from .pmc_v2_adapter import PmcError, run_pmc_v2
+        try:
+            result = run_pmc_v2(payload)
+            # The M5 manifest requires lifecycle identity and the root TaskID
+            # even for v2 candidates; keep these fields at the adapter edge so
+            # output-schema validation cannot silently drop traceability.
+            data = result.setdefault("data", {})
+            data.setdefault("parent_plan_version", payload.get("expected_head_plan_version"))
+            data.setdefault("tracking_task_id", ctx.get("task_id"))
+            result["trace_id"] = result.get("trace_id") or _trace(ctx, "m5-pmc-v2")
+            return result
+        except PmcError as exc:
+            return {"success": False, "code": exc.code, "errors": [{"code": exc.code, "message": exc.message, "details": []}], "data": {"idempotency_key": payload.get("idempotency_key", ""), "schedule": {"scenario_purpose": payload.get("scenario_purpose", "production"), "operations": [], "metrics": {"operation_count": 0, "makespan_minutes": 0}, "algorithm_version": "pmc-v2-frozen-20260902"}, "scenario_purpose": payload.get("scenario_purpose", "production"), "lifecycle_status": "draft", "input_hash": "", "algorithm_version": "pmc-v2-frozen-20260902"}, "trace_id": _trace(ctx, "m5-pmc-v2-blocked"), "evidence": [_evidence("m5", "pmc_v2", exc.message)]}
     resources = {str(item["resource_id"]): item for item in payload["resources"]}
     if payload.get("orders") and not payload.get("routing_steps"):
         return {

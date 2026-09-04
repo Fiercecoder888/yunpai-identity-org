@@ -11,6 +11,8 @@
 - `true`：当前进程已有本地或 HTTP handler，可执行。
 - `false`：合同已注册但 transport 未绑定；调用失败关闭，不返回模拟成功。
 
+`GET /skills` 返回 8 个已注册高阶 Skill。每个 Skill 除名称和描述外还声明其可调用的 Tool 白名单；Skill 调用仍经过同一 `ToolRegistry` 的输入/输出 Schema 校验。当前包括业务资料识别、M0 数据基础、M1 文档解析、M2 BOM/SOP、M3 物料计划、M4 采购、M5 PMC 和 M5 PMC 生命周期。
+
 ## HTTP transport
 
 设置：
@@ -50,7 +52,7 @@ M5_URL=http://m5-api:8000
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/health` | 服务、注册工具数和已绑定工具数 |
+| GET | `/health` | 服务、注册工具数、已绑定工具数和 Skill 数 |
 | GET | `/tools?module=m5` | 能力目录及绑定状态 |
 | POST | `/runs` | 创建并运行到完成、失败或 Gate |
 | POST | `/runs/upload` | 上传 XLSX/订单文件，解析后进入总 Agent；支持 `message/tenant_id/workflow` 查询参数 |
