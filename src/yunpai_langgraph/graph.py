@@ -274,6 +274,8 @@ class YunpaiGraph:
             raise ValueError("run is not waiting_human")
         if decision not in {"allow", "approve", "continue", "retry", "reject", "stop"}:
             raise ValueError("unsupported gate decision")
+        if supplement is not None and (not isinstance(supplement, dict) or isinstance(supplement, list)):
+            raise ValueError("supplement must be a JSON object")
         gate = state["pending_gate"]
         if gate.get("type") == "data":
             if decision == "approve":
