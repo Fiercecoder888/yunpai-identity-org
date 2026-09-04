@@ -2,14 +2,15 @@
 
 ## 结论
 
-代码已合并并推送到 `main`/`dev`，GB10 `39092` 已部署并可用。真实前端订单流程已经验证到 M2：M0、M1 完成，M2 能读取真实 BOM/SOP 并调用 Qwen，但因缺少可确认的产品主数据、BOM 权威版本和 SOP 工艺约束而停在人工门。M3、M4、M5 尚未启动，因此当前不能宣称“订单匹配 BOM/物料/SOP 并生成 PMC”已完成。
+代码已合并并推送到 `main`/`dev`，GB10 `39092` 已部署并可用。旧的真实前端订单运行已验证到 M2；新入口复跑确认订单附件走治理后的 M1→M0→M2→M3→M4→M5 桥接计划，并在 M1 缺字段 Gate 正确暂停。由于缺少可确认的产品主数据、BOM 权威版本和 SOP 工艺约束，当前不能宣称“订单匹配 BOM/物料/SOP 并生成 PMC”已完成。
 
 ## 版本与部署
 
-- Git：`origin/main` = `origin/dev` = `15d0442f48d005c366f793dbe3c4d63fdb482673`。
+- Git：`origin/main` = `origin/dev` = `a9a85ebfd56f3f6fd94eec7e2700e32e6236c801`。
 - 集成提交：`30a8df6`（M0 HTTP batch envelope 解包）、`5139527`（从 M1 输出补全 M2 的产品名和订单号）、`15d0442`（M5 apply Gate 持久化 release/head，并增加回归测试）。
-- GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905063000`。
-- 发布归档 SHA-256：`f723fbfad0c1a3d04b2e1c5ece0e4b35fce7b362e5e9941f5a73ae2e19e9c2bc`。
+- `2b07276`（订单附件默认走 `m1_m5_document_to_plan`）、`a9a85eb`（递归脱敏公开状态中的文件正文，避免历史列表膨胀）。
+- GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905071500`。
+- 发布归档 SHA-256：`a621b8d778dc1026be296a83bb6ae87a5c0e667f15e5ee560018443190fb1091`。
 - `GET /health`：`status=ok`，`tools=114`，`bound_tools=112`，`skills=8`，`local_fixture=false`，planner 为 Qwen `qwen3.6-35b-a3b-fp8-gpu0-200k`。
 - 模块绑定：M0 `27/27`、M1 `17/17`、M2 `7/7`、M3 `16/17`、M4 `25/26`、M5 `20/20`。M3/M4 各有一个按合同保留未绑定的 receiver 工具。
 
@@ -27,6 +28,12 @@
 - 运行：`run-a2ab7d578635487b9b85fd715f969eff`。
 - 任务：`task-cc496d8a7214423ca55a0b397d685073`。
 - 前端操作和截图证据：上传订单、接受 M0 candidate Gate、接受 M1 review Gate、在 M2 Gate 上传 BOM/SOP、再次提交模型生成开关；页面最终显示“ M2 缺少产品/BOM 权威输入”，M3/M4/M5 为“等待前置步骤”。
+
+### 新入口复跑
+
+- 任务 `task-f9e03137f4464351871c64c2431c334a`，运行 `run-930147ced578498ea5c1428d7e7c64ff`。
+- 通过 GB10 `39092` 的订单上传入口提交同一 `order.xlsx` 后，后端回读 `workflow_id=m1_m5_document_to_plan`，在 M1 `ingest_document` Gate 等待人工确认；页面截图显示任务列表、订单任务和“M1 解析置信度不足或存在字段缺口”卡片。
+- 该运行没有越过字段缺口自动猜测产品编码，证明新入口和 fail-closed 行为生效；旧运行的 M2 阻塞结论仍有效。
 
 ### M0 结果
 
@@ -64,7 +71,7 @@
 
 ## 本地验证
 
-- `.venv/bin/python -m pytest -q`：324 passed, 2 skipped，退出码 0。
+- `.venv/bin/python -m pytest -q`：326 passed, 2 skipped，退出码 0。
 - `cd frontend && npm test -- --run`：6 passed，退出码 0。
 - `cd frontend && npm run build`：成功，退出码 0。
 - `git diff --check`：通过。
