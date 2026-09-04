@@ -267,3 +267,43 @@ def test_ingest_snapshot_and_get_schedule_read_back(ctx):
     listed = asyncio.run(mt.m5_list_schedules({"scenario_id": "SC-LIFE"}, ctx))
     assert listed["success"] is True
     assert any(item["plan_version"] == version for item in listed["data"]["items"])
+
+
+def test_replan_preserves_event_and_freeze_meta(ctx):
+    repo = M5Repository(ctx["m5_db_path"])
+    version = _release_plan(repo, ctx)
+    result = asyncio.run(mt.m5_replan_schedule({
+        "base_plan_version": version,
+        "idempotency_key": "REPLAN-META-1",
+        "expected_head_plan_version": version,
+        "freeze_policy": {"frozen_until": "2026-09-04T12:00:00+08:00"},
+        "event": {"type": "quantity_update", "order_id": "SO-LIFE-1", "quantity": 6},
+    }, ctx))
+    assert result["success"] is True
+    new_plan = repo.get_plan(result["data"]["plan_version"])
+    meta = (new_plan.get("schedule") or {}).get("replan_meta")
+    assert meta is not None
+    assert meta["base_plan_version"] == version
+    assert meta["freeze_policy"]["frozen_until"].startswith("2026-09-04")
+    assert meta["event"]["quantity"] == 6
+    # parent version preserved and the new version is an independent draft
+    assert new_plan["parent_plan_version"] == version
+    assert new_plan["lifecycle_status"] == "draft"
+
+
+def test_progress_attaches_only_persisted_execution_evidence(ctx):
+    repo = M5Repository(ctx["m5_db_path"])
+    version = _release_plan(repo, ctx)
+    repo.add_execution_event(
+        event={"event_id": "EV-PROG-1", "event_type": "quantity_report",
+               "order_id": "SO-LIFE-1", "operation_id": "OP-10",
+               "external_ref": "ext-1", "occurred_at": "2026-09-03T10:00:00+08:00",
+               "reported_quantity": 2, "scrap_quantity": 0,
+               "worker_id": "worker-1", "station": "S-1", "source_kind": "accepted_non_simulation_execution_event"},
+        plan_version=version, tenant_id=ctx["tenant_id"], task_id=ctx["task_id"])
+    progress = asyncio.run(mt.m5_pmc_progress({"plan_version": version}, ctx))
+    ops = progress["data"]["orders"][0]["operations"]
+    op10 = next(op for op in ops if op["operation_id"] == "OP-10")
+    assert len(op10["execution_evidence"]) == 1
+    assert op10["execution_evidence"][0]["event_id"] == "EV-PROG-1"
+    Draft202012Validator(_schema("get_m5_pmc_progress")).validate(progress)

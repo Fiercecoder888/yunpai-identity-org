@@ -362,9 +362,20 @@ async def m5_integration_contracts(payload: dict[str, Any], ctx: dict[str, Any])
 
 def _num(value):
     try:
+        if value is None or value == "":
+            return None
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _num0(value):
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _build_progress(plan, is_current_head):
@@ -396,8 +407,8 @@ def _build_progress(plan, is_current_head):
                     "worker_id": str(e.get("worker_id") or ""),
                     "team_id": str(e.get("team_id") or ""),
                     "station": str(e.get("station") or ""),
-                    "reported_quantity": _num(e.get("reported_quantity")),
-                    "scrap_quantity": _num(e.get("scrap_quantity")),
+                    "reported_quantity": _num0(e.get("reported_quantity")),
+                    "scrap_quantity": _num0(e.get("scrap_quantity")),
                     "status": str(e.get("status") or "accepted"),
                     "reason": str(e.get("reason") or ""),
                     "source_kind": "accepted_non_simulation_execution_event",
@@ -558,6 +569,20 @@ async def m5_replan_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> di
         return _replan_fail("BLOCKED_INPUT", str(getattr(exc, "message", exc)))
     digest = result["data"]["input_hash"]
     new_version = f"replan-{base}-{digest[:8]}"
+    # replan only applies the explicit event on top of the server-restored
+    # parent bundle; it never fabricates input.  Locks and frozen windows are
+    # preserved as replan metadata when the client declares them.
+    new_schedule = dict(result["data"]["schedule"])
+    preserved = {
+        "base_plan_version": base,
+        "event": event,
+        "freeze_policy": payload.get("freeze_policy"),
+        "manual_locks": base_plan.get("manual_locks"),
+        "frozen_windows": base_plan.get("frozen_windows"),
+    }
+    new_schedule["replan_meta"] = {
+        key: value for key, value in preserved.items() if value is not None
+    }
     repo.save_plan(
         plan_version=new_version, scenario_id=base_plan["scenario_id"],
         tenant_id=_tenant(ctx), task_id=_task(ctx), lifecycle_status="draft",
@@ -567,13 +592,13 @@ async def m5_replan_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> di
         scenario_purpose=base_plan.get("scenario_purpose", "production"),
         validation_report=result["data"].get("validator") or {},
         bundle=result["data"]["input_package"],
-        schedule=result["data"]["schedule"],
+        schedule=new_schedule,
         idempotency_key=idem,
     )
     return {
         "success": not result["data"].get("blocks"),
         "data": {
-            "result": {"schedule": result["data"]["schedule"], "blocks": result["data"].get("blocks", [])},
+            "result": {"schedule": new_schedule, "blocks": result["data"].get("blocks", [])},
             "scenario_purpose": base_plan.get("scenario_purpose", "production"),
             "input_hash": digest,
             "plan_version": new_version,
