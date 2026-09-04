@@ -3,6 +3,12 @@
 覆盖：xlsx、xlsm(同族)、xls(OLE2 stub)、csv、tsv、json、pdf、docx、png、
 jpg、zip、7z、rar(仅头)、坏文件、伪扩展名。全部为合成内容，不含真实生产
 或个人资料。函数以 tmp 目录或 BytesIO 输出，供各测试复用。
+
+Fixture 分类（任务书修订意见：区分 sniff-only 与真实 parse fixture）：
+- REAL_PARSE_FIXTURES：内容真实可解析（xlsx/csv/tsv/json/pdf/docx/png/jpg/zip/7z）
+- SNIFF_ONLY_FIXTURES：仅能用于 magic-sniff 识别，不能真实 parse 的样本
+  （legacy.xls 为 OLE2 头 stub、sample.rar 为 RAR 头 stub、fake.xlsx 伪扩展、
+  broken.xlsx 损坏 zip）；RAR 本地无解包依赖属显式 unsupported。
 """
 
 from __future__ import annotations
@@ -11,6 +17,12 @@ import io
 import zipfile
 from pathlib import Path
 from typing import Any
+
+# sniff 能识别且内容真实可解析的格式样本。
+REAL_PARSE_FIXTURES = ("sample.xlsx", "sample.csv", "sample.tsv", "sample.json", "sample.pdf", "sample.docx", "sample.png", "sample.jpg", "batch.zip", "sample.7z")
+
+# 仅用于 sniff/格式判定，不能真实 parse 的样本（含 stub/伪扩展/损坏）。
+SNIFF_ONLY_FIXTURES = ("legacy.xls", "sample.rar", "fake.xlsx", "broken.xlsx")
 
 
 def xlsx_bytes(headers: list[str], rows: list[list[Any]], *, title: str = "Sheet1") -> bytes:

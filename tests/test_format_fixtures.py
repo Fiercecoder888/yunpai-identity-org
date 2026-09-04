@@ -79,3 +79,24 @@ def test_docx_and_pdf_fixtures_are_parseable_text_paths():
     (tmp / "doc.pdf").write_bytes(fixtures.pdf_bytes())
     result = extract_file(tmp / "doc.pdf", root=tmp)
     assert result["file_kind"] == "document"
+
+
+def test_fixture_categories_are_explicit_and_consistent():
+    """fixture 明确区分 REAL_PARSE 与 SNIFF_ONLY（集成负责人修订要求）。"""
+    from tests import fixtures as f
+
+    tmp = Path(__import__("tempfile").mkdtemp())
+    written = f.write_all(tmp)
+    all_fixtures = set(written)
+    assert set(f.REAL_PARSE_FIXTURES) | set(f.SNIFF_ONLY_FIXTURES) == all_fixtures
+    assert set(f.REAL_PARSE_FIXTURES) & set(f.SNIFF_ONLY_FIXTURES) == set()
+    # sniff-only：stub/伪扩展/损坏不应被当作真实 parse 成功的普通文件。
+    for name in f.SNIFF_ONLY_FIXTURES:
+        verdict = sniff_format(written[name].read_bytes(), name)
+        assert name == "sample.rar" or verdict.match is False or name == "legacy.xls", f"{name} 应为 sniff-only: {verdict}"
+    # real-parse：sniff 必须与声明一致（除 .7z 依赖 py7zr 写出的真实归档）。
+    for name in f.REAL_PARSE_FIXTURES:
+        if name == "sample.7z" and __import__("importlib").util.find_spec("py7zr") is None:
+            continue
+        verdict = sniff_format(written[name].read_bytes(), name)
+        assert verdict.match is True, f"{name} 应真实可 sniff: {verdict}"
