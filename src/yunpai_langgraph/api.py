@@ -74,26 +74,46 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
 
     @app.post("/runs/upload")
     async def upload_run(file: Any = File(...), message: str = "请解析并验证这份订单", tenant_id: str = "default", workflow: str | None = None):
-        from .order_workbook import parse_order_workbook
+        """单文件上传入口：保存原字节/哈希/类型/相对路径为 attachment reference，
+        再交给 Planner 选择 workflow。API 层不做固定 XLSX 解析；支持的实际类型
+        以 M1 工具合同为准（PDF/图片/XLS*/CSV/DOCX/DXF-DWG/ZIP-TAR-RAR-7Z 等）。
+        """
+        from .file_sniff import sniff_format
+        from .uploads import MAX_FILE_BYTES, sha256_of
 
         raw = await file.read()
         if not raw:
             raise HTTPException(400, "uploaded file is empty")
-        filename = str(file.filename or "order.xlsx")
-        if Path(filename).suffix.lower() != ".xlsx":
-            raise HTTPException(415, {"code": "UNSUPPORTED_FILE_TYPE", "message": "订单上传当前仅支持 XLSX"})
+        if len(raw) > MAX_FILE_BYTES:
+            raise HTTPException(413, {"code": "FILE_TOO_LARGE", "message": f"单文件超过 {MAX_FILE_BYTES // (1024 * 1024)} MiB 上限"})
+        filename = str(file.filename or "upload.bin")
+        verdict = sniff_format(raw, filename)
+        if verdict.detected_format == "unknown" or not verdict.match:
+            raise HTTPException(415, {
+                "code": "UNSUPPORTED_FILE_TYPE",
+                "message": f"无法识别的文件类型（声明 .{verdict.declared_suffix.strip('.')}，嗅探 {verdict.detected_format}）；请上传 M1 支持的订单/业务资料格式",
+            })
+        attachment = {
+            "id": "upload-1",
+            "kind": "order",
+            "filename": filename,
+            "relative_path": filename,
+            "content_type": verdict.mime_type,
+            "content_b64": base64.b64encode(raw).decode("ascii"),
+            "size": len(raw),
+            "sha256": sha256_of(raw),
+            "detected_format": verdict.detected_format,
+        }
+        request: dict[str, Any] = {
+            "message": message,
+            "attachments": [attachment],
+        }
+        if workflow:
+            request["workflow"] = workflow
         try:
-            document = parse_order_workbook(filename, raw)
-            request: dict[str, Any] = {
-                "message": message,
-                "documents": [{"filename": filename, "content_type": file.content_type or "application/octet-stream", "content_b64": base64.b64encode(raw).decode("ascii")}],
-                "document": document,
-            }
-            if workflow:
-                request["workflow"] = workflow
             state = await graph.run(new_state(request, tenant_id=tenant_id))
             return graph._public_state(state)
-        except (KeyError, ValueError, RuntimeError) as exc:
+        except (KeyError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @app.post("/runs/upload/batch")

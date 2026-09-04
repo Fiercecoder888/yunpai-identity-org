@@ -86,14 +86,28 @@ def test_api_uploads_xlsx_and_records_intent_route(tmp_path):
     assert state["plan"][0]["tool"] == "ingest_document"
 
 
-def test_api_rejects_non_xlsx_upload_with_controlled_status(tmp_path):
+def test_api_accepts_m1_supported_non_xlsx_and_rejects_unknown_type(tmp_path):
+    """断点 1 修复：上传层不再只收 XLSX/API 层提前失败；M1 合同支持的
+    CSV/PDF/图片等进入 M1 流程，只有无法识别的类型才 415。"""
     client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "csv.sqlite")))
+    # M1 合同支持 CSV：不再 415，进入 ingest_document（本地 fixture 对 CSV
+    # 会失败关闭为 LOCAL_FIXTURE_UNSUPPORTED_FORMAT，而不是 API 层提前拒绝）。
     response = client.post(
         "/runs/upload",
+        params={"message": "请解析并验证这份订单"},
         files={"file": ("order.csv", b"order_id,quantity\nSO-1,1\n", "text/csv")},
     )
-    assert response.status_code == 415
-    assert response.json()["detail"]["code"] == "UNSUPPORTED_FILE_TYPE"
+    assert response.status_code == 200
+    state = response.json()
+    assert state["plan"][0]["tool"] == "ingest_document"
+    assert state["route"] in {"free", "workflow"}
+    # 无法识别的二进制类型仍然受控拒绝。
+    unknown = client.post(
+        "/runs/upload",
+        files={"file": ("order.exe", b"\x7fELFgarbage", "application/octet-stream")},
+    )
+    assert unknown.status_code == 415
+    assert unknown.json()["detail"]["code"] == "UNSUPPORTED_FILE_TYPE"
 
 
 def test_api_batch_upload_requires_explicit_mode(tmp_path):

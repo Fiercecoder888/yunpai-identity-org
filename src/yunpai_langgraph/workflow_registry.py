@@ -5,6 +5,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+#: 版本化受控工作流（文件名即稳定 id）。
+KNOWN_WORKFLOWS = (
+    "m0_m5",
+    "m1_m5_document_to_plan",
+    "canonical_to_m5",
+)
+
 
 @lru_cache(maxsize=8)
 def load_workflow(workflow_id: str = "m0_m5") -> dict[str, Any]:
@@ -21,3 +28,12 @@ def load_workflow(workflow_id: str = "m0_m5") -> dict[str, Any]:
             raise ValueError(f"step {step['id']} has unresolved dependencies: {sorted(missing)}")
         seen.add(step["id"])
     return workflow
+
+
+def required_capabilities(workflow_id: str) -> list[dict[str, str]]:
+    """返回 workflow 全链必需的 (module, tool) 能力清单，用于绑定 Gate。"""
+    workflow = load_workflow(workflow_id)
+    return [
+        {"module": str(step["module"]), "tool": str(step["tool"])}
+        for step in workflow.get("steps", [])
+    ]

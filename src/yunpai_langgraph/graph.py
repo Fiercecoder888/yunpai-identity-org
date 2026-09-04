@@ -59,6 +59,24 @@ class YunpaiGraph:
         self.worker = WorkerAgent(self.registry, self.skills)
         self.reviewer = ReviewerAgent()
 
+    def _required_capability_gap(self, state: RunState) -> list[dict[str, str]]:
+        """主链必需工具绑定 Gate：workflow 每一步的 tool 都必须有可执行 handler。
+
+        只对受控 workflow 生效；free/chat 路径沿用原有"调用即失败"语义，
+        避免把单工具自由路径的显式错误改成静默通过。
+        """
+        if state.get("route") != "workflow":
+            return []
+        missing: list[dict[str, str]] = []
+        for step in state.get("plan", []):
+            tool = step.get("tool", "")
+            module = step.get("module", "")
+            if step.get("kind") == "skill" or tool in self.skills.specs:
+                continue
+            if tool not in self.registry.handlers:
+                missing.append({"module": module, "tool": tool})
+        return missing
+
     def _save(self, state: RunState) -> RunState:
         self.repository.save(state)
         return state
@@ -104,6 +122,22 @@ class YunpaiGraph:
             state["trace"].append({"event": "agent.model", "agent": "planner", "provider": state["model"].get("provider"), "model": state["model"].get("model"), "status": state["model"].get("status"), "latency_ms": state["model"].get("latency_ms"), "at": _now()})
             state["trace"].append({"event": "agent.intent", "agent": "planner", **state["intent"], "at": _now()})
             state["trace"].append({"event": "agent.route", "agent": "planner", "route": state["route"], "source": state["route_decision"].get("source"), "selected_tools": [step["tool"] for step in state["plan"]], "reason": decision["reason"], "model": state["model"].get("model"), "at": _now()})
+        capability_gap = self._required_capability_gap(state)
+        if capability_gap:
+            # 主链必需工具未绑定时，在执行任何步骤前返回结构化能力缺口，
+            # 不得执行到中途才报 generic 500。
+            state["status"] = "failed"
+            state["errors"] = [{
+                "code": "CAPABILITY_UNAVAILABLE",
+                "message": "工作流所需工具未全部绑定，无法开始执行",
+                "missing": capability_gap,
+                "workflow_id": state.get("workflow_id", ""),
+            }]
+            state["response"] = "主链必需工具未绑定：\n" + "\n".join(
+                f"- {item['module']} / {item['tool']}" for item in capability_gap
+            )
+            state["trace"].append({"event": "run.capability_unavailable", "missing": capability_gap, "at": _now()})
+            return self._save(state)
         if not state["plan"] or int(state.get("next_step_index", 0)) >= len(state["plan"]):
             state["status"] = "completed"
             state["response"] = (
