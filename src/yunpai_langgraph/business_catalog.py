@@ -95,6 +95,9 @@ REQUIRED_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
     "inventory": ("material_code", "warehouse", "available_qty"),
     "supplier": ("supplier_code", "supplier_name"),
     "finance_cost": ("cost_item", "period", "unit_cost"),
+    "calendar": ("date", "shift", "start_time", "end_time"),
+    "tooling": ("tooling_code", "tooling_name"),
+    "procurement": ("supplier_code", "material_code", "quantity"),
 }
 
 # 表头/内容样本关键词 -> 分类（用于低置信路径分类的内容修正）。
@@ -105,6 +108,7 @@ _CONTENT_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...], float], ...] = (
     ("route", ("工序编码", "工序名称", "标准工时", "前置工序", "作业顺序"), 0.92),
     ("sop", ("工站", "作业步骤", "作业指导", "投入人数", "质量要求"), 0.90),
     ("equipment", ("设备编码", "设备名称", "设备台账", "产线", "保养周期"), 0.92),
+    ("tooling", ("模具编码", "模具名称", "工装编码", "模治具", "tooling", "模具清单"), 0.90),
     ("station", ("工位编码", "工位名称", "生产单元", "绑定工位"), 0.90),
     ("worker", ("工号", "姓名", "技能", "资格", "班次", "员工"), 0.85),
     ("inventory", ("物料编码", "仓库", "库位", "批次", "现存数量", "库存"), 0.90),
@@ -178,6 +182,7 @@ def classify_with_content(path: Path, *, current_kind: str, current_confidence: 
 _SUBTYPE_BY_KIND = {
     "order": "customer_or_stocking_order", "product": "product_master", "bom": "engineering_bom",
     "route": "production_route", "sop": "production_sop", "equipment": "equipment_master",
+    "tooling": "tooling_master",
     "station": "station_master", "worker": "worker_master", "calendar": "production_calendar",
     "inventory": "inventory_record", "supplier": "supplier_master", "finance_cost": "cost_record",
     "tabular": "unclassified_table", "document": "unclassified_document", "archive": "compressed_archive",
