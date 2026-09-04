@@ -10,8 +10,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .order_workbook import parse_order_workbook
-
 
 SCHEMA_VERSION = "yunpai.business-catalog.v2"
 IGNORED_NAMES = {".DS_Store"}
@@ -345,27 +343,17 @@ def _extract_xlsx(path: Path, kind: str) -> dict[str, Any]:
             })
         result["active_sheet"] = workbook.active.title if workbook.active else None
         if kind == "order":
+            # 与 graph fixture / M1 HTTP 补充共用 order_semantics：表头驱动解析
+            # 优先、老式坐标模板兜底，任何字段缺口进入 needs_review，不用写死的
+            # 单元格坐标把真实订单解析成 0 行。
             try:
-                from .order_parser_v2 import parse_order_sheets
+                from .order_semantics import parse_order_document
 
-                v2 = parse_order_sheets(path.name, path.read_bytes())
-                try:
-                    legacy = parse_order_workbook(path.name, path.read_bytes())
-                except Exception:
-                    legacy = {}
-                v2_has_facts = bool(v2.get("lines")) and any(v2.get(key) for key in ("order_id", "order_date", "due_date", "supplier_name", "field_evidence"))
-                legacy_has_facts = bool(legacy.get("order_id") or legacy.get("lines"))
-                if v2_has_facts and not (legacy_has_facts and legacy.get("order_id") and not v2.get("order_id")):
-                    # 表头驱动解析成功且事实不劣于坐标解析：采用 v2（sheet/行/列证据齐备）。
-                    result["order_document"] = v2
-                    result["parser_version"] = v2.get("parser_version")
-                elif legacy_has_facts:
-                    # 真实微信裸值模板：坐标解析可提取 P6/X7 等表头事实。
-                    result["order_document"] = legacy
-                    result["parser_version"] = "order.workbook.coordinates.v1"
-                else:
-                    result["order_document"] = v2 if v2.get("lines") else legacy
-                    result["parser_version"] = (v2 or legacy).get("parser_version")
+                parsed = parse_order_document(path.name, path.read_bytes())
+                order_document = parsed.get("document") or {}
+                result["order_document"] = order_document
+                result["parser_version"] = parsed.get("parser_version") or order_document.get("parser_version") or "order.parser.v2"
+                result["order_parser_revision"] = parsed.get("parser_version")
             except Exception as exc:
                 result["order_parse_error"] = str(exc)
     finally:
@@ -530,6 +518,31 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
     suffix = path.suffix.lower()
     size = path.stat().st_size
     raw = path.read_bytes() if size <= 16 * 1024 * 1024 else b""
+    # 订单/库存等表格式样误判修正（任务书 T1）：路径/文件名把一张含完整订单
+    # 表头的表格判成库存/未分类时，用与 M1 相同的确定性解析器复核。只有 v2
+    # 表头驱动能读到“数量+单价/金额/客户/订单号”等多列订单语义才改判为订单；
+    # 仓库/库位/现存数量等库存表头不命中订单别名，保持原分类，绝不把库存表
+    # 强行改判成订单。
+    if (
+        suffix in {".xlsx", ".xlsm"}
+        and kind in {"inventory", "tabular", "other", "document"}
+        and parse_xlsx
+        and size <= deep_limit_bytes
+        and raw
+    ):
+        try:
+            from .order_semantics import workbook_looks_like_order
+
+            if workbook_looks_like_order(raw, path.name):
+                kind = "order"
+                subtype = "customer_or_stocking_order"
+                classification_confidence = max(classification_confidence, 0.9)
+                rules = list(content_class.get("rules", []))
+                rules.append({"rule": "content:order_deterministic", "score": 0.9, "evidence": "表头/行结构命中订单语义（数量+单价/金额/订单号/客户）"})
+                content_class = {**content_class, "kind": kind, "subtype": subtype, "confidence": classification_confidence, "rules": rules}
+        except Exception:
+            # 复核失败保持原分类，不让目录识别因单个文件崩掉。
+            pass
     sniffed: dict[str, Any] = {}
     if raw:
         from .file_sniff import sniff_format

@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from .models import RunState, summarize
@@ -186,7 +187,25 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                            missing_fields=["request.attachments(原始文件)"],
                            required_tool="ingest_document",
                            recovery="请上传原始订单/业务文件后再重试 M1 解析")
-        return {"file": file_value}
+        payload: dict[str, Any] = {"file": file_value}
+        # 本地 fixture transport：把 XLSX 订单附件用与 business_catalog/M1 HTTP
+        # 补充同一套 order_semantics 先做确定性解析作为 _fixture_document，使
+        # 真实订单结构能在本地重放出订单头/行并进入 review Gate（0 行/缺订单号
+        # 不会空成功）；HTTP transport 由真实 M1 服务解析，这里不附加 fixture。
+        if os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower() != "http":
+            filename = str(file_value.get("filename") or "")
+            encoded = file_value.get("content_b64")
+            if filename.lower().endswith((".xlsx", ".xlsm")) and isinstance(encoded, str):
+                try:
+                    import base64 as _b64
+
+                    from .order_semantics import parse_order_document
+
+                    parsed = parse_order_document(filename, _b64.b64decode(encoded))
+                    payload["_fixture_document"] = parsed.get("document") or {}
+                except Exception:
+                    payload["_fixture_document"] = {}
+        return payload
     if tool == "data_import_run":
         m1 = output_data(state, "ingest_document")
         # M0 以 M1 已复核解析为依据（保留 sha 证据），本地 fixture 模式允许

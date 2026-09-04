@@ -134,16 +134,22 @@ def _make_m1_handler(spec, base_url: str, configured: dict[str, str]):
                 path = path.replace(marker, quote(str(body.pop(key)), safe=""))
         headers = _m1_headers(name, body, context, configured)
         files, request_kwargs = _m1_request_kwargs(spec, body)
+        # ingest_document 需要保留上传字节，用于外部 M1 缺订单事实时附加本地
+        # 确定性候选（不覆盖外部结果，只补充并强制 review）。
+        upload_filename, upload_raw = _payload_file_bytes(payload) if name == "ingest_document" else (None, None)
         try:
             async with httpx.AsyncClient(timeout=spec.timeout_s or 60.0) as client:
                 response = await client.request(spec.method, base_url.rstrip("/") + path, headers=headers, **request_kwargs)
                 if response.status_code == 202:
-                    return await _handle_accepted(client, name, response, headers, base_url)
-                if response.status_code >= 400:
-                    response.raise_for_status()
-                value = _response_json(name, response)
+                    value = await _handle_accepted(client, name, response, headers, base_url)
+                else:
+                    if response.status_code >= 400:
+                        response.raise_for_status()
+                    value = _response_json(name, response)
                 if isinstance(value, list) and name == "search_m1_orders":
                     value = _filter_order_rows(value, payload)
+                if isinstance(value, dict) and name == "ingest_document":
+                    value = _attach_semantic_supplement(value, upload_filename, upload_raw)
                 return value
         except ToolHTTPError:
             raise
@@ -156,6 +162,62 @@ def _make_m1_handler(spec, base_url: str, configured: dict[str, str]):
         except ValueError as exc:
             raise ToolHTTPError(name, "INVALID_JSON_RESPONSE", str(exc)) from exc
     return handler
+
+
+def _payload_file_bytes(payload: dict[str, Any]) -> tuple[str | None, bytes | None]:
+    """从 ingest_document payload 还原上传文件（string base64 或 file object）。"""
+    import base64 as _b64
+
+    file_value = payload.get("file") if isinstance(payload, dict) else None
+    if file_value is None:
+        return None, None
+    if isinstance(file_value, dict):
+        filename = str(file_value.get("filename") or "document.bin")
+        encoded = file_value.get("content_b64")
+        if not isinstance(encoded, str):
+            return filename, None
+        try:
+            return filename, _b64.b64decode(encoded)
+        except Exception:
+            return filename, None
+    if isinstance(file_value, str):
+        try:
+            return "document.bin", _b64.b64decode(file_value)
+        except Exception:
+            return "document.bin", None
+    return None, None
+
+
+def _attach_semantic_supplement(value: dict[str, Any], filename: str | None, raw: bytes | None) -> dict[str, Any]:
+    """外部 M1 声明订单但缺订单头/行时，附加本地确定性候选并强制 review。
+
+    - 原样保留外部 ``document``/任务结果，仅新增 ``semantic_supplement``；
+    - 只对可解析的 XLSX/XLSM 附加；无法给出有依据候选时保持原结果不动，
+      绝不伪造补充或把 0 行订单当成成功；
+    - 只要启用了补充，就强制 ``needs_review=True``（打开 review Gate），由
+      人工在“外部结果 vs 本地候选”之间复核后再放行下游。
+    """
+    if filename is None or raw is None:
+        return value
+    if not filename.lower().endswith((".xlsx", ".xlsm")):
+        return value
+    try:
+        from .order_semantics import build_semantic_supplement, result_has_order_gap
+
+        if not result_has_order_gap(value):
+            return value
+        supplement = build_semantic_supplement(filename, raw, external=value)
+    except Exception:
+        # 语义补充失败绝不能让一次真实 M1 调用失败：保持外部原结果。
+        return value
+    if not isinstance(supplement, dict):
+        return value
+    out = dict(value)
+    out["semantic_supplement"] = supplement
+    out["needs_review"] = True
+    if not out.get("processing_stage"):
+        out["processing_stage"] = "review"
+    return out
 
 
 def _m1_headers(tool: str, payload: dict[str, Any], context: dict[str, Any], configured: dict[str, str]) -> dict[str, str]:

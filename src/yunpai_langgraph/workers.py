@@ -268,6 +268,32 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
         "quantity": parsed_source.get("quantity"), "due_date": parsed_source.get("due_date"),
     }
     missing = [key for key, value in header.items() if value in (None, "")]
+    order_prefix = str(parsed_source.get("order_id") or "order")
+
+    def _stable_line_id(line: dict[str, Any], index: int) -> str:
+        existing = line.get("line_id")
+        if isinstance(existing, str) and existing.strip():
+            return existing.strip()
+        sheet = line.get("sheet")
+        row = line.get("row")
+        if sheet is not None and row is not None:
+            return f"{order_prefix}::{sheet}!R{row}"
+        return f"{order_prefix}::L{index:02d}"
+
+    normalized_lines: list[dict[str, Any]] = []
+    for index, line in enumerate(lines, start=1):
+        if not isinstance(line, dict):
+            continue
+        normalized = dict(line)
+        normalized["line_id"] = _stable_line_id(normalized, index)
+        # 契约需要的 display 字段：model/name_raw 与 product_code/name 对齐，
+        # 保持缺失为 None，不伪造编码。
+        if "model" not in normalized:
+            normalized["model"] = normalized.get("product_code")
+        if "name_raw" not in normalized and normalized.get("product_name") is not None:
+            normalized["name_raw"] = normalized.get("product_name")
+        normalized_lines.append(normalized)
+    lines = normalized_lines
     document = {
         "schema_version": "m1.document.v2",
         "source": {"original_filename": filename, "sha256": sha256(raw).hexdigest()},
