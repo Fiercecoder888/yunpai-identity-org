@@ -79,6 +79,8 @@ DATABASE_URL="sqlite+aiosqlite:////tmp/m1run/data/m1.db" UPLOAD_DIR="/tmp/m1run/
 M1_URL=http://127.0.0.1:18081 pytest tests/test_m1_real_service_contract.py -q   # opt-in，需 M1_REAL_TEST=1
 ```
 
+服务本体无模型相关本地测试套件在 python3.12 venv 下运行：`57 passed, 1 failed`（唯一失败 `test_orchestrator_task_list_declarations_expose_optional_pagination` 需要外部 orchestrator 目录 `yunpai-orchestrator/module_decls/m1.well-known/tool.json`，归档未含该目录，非服务缺陷）。
+
 实测：/health `/ready` 可达并如实报告 `degraded`/`not_ready`（mineru_shadow 未配置）；只读任务/审核队列/知识端点空库正确；真实 XLSX multipart 上传进入 `needs_review` 候选且可回读 `m1.document.v2`（lines=0、1 个校验问题，不伪造成功）；跨租户读同任务 404。以上只证明“真实服务代码可运行 + 编排器 HTTP 联通”，**不是**生产验收（/ready ok、PostgreSQL/Neo4j 回读、模型字段证据均未通过）。
 
 ## 5. 真实验收
