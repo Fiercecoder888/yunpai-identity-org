@@ -37,3 +37,15 @@
 - 最终 commit：待定（本地 pmctooldev 最新 a7a89b6）
 - 未完成事项：GB10 真实联调；验证通过后把改动提交 dev 等待合并（不直接推 main）。
 - 接手人：集成负责人 zhb / 用户（GB10 环境）
+
+### 2026-09-04（Round 2 补强）
+
+- 实际修改：
+  - transition 服务端守卫：仅 production 且 validation pass 可 release/dispatch/execution；pressure_only/preview → `PURPOSE_NOT_RELEASABLE`，validation fail → `VALIDATION_FAILED`（`06fb51c`）
+  - ingest 只建/校验六类快照、不再隐式求解（`06fb51c`）
+  - replan 保留 event/freeze_policy/base 元数据到新版本 schedule（`3f20373`）
+  - progress 的 order 状态/完成率/on-time summary 只由持久化 execution events 推导；execution event 与 message 审批幂等/非法状态负向测试（`7e090db`、`9505cfd` 等）
+- 文件：src/yunpai_langgraph/{m5_repository,m5_tools}.py、tests/test_m5_plan_repository.py、tests/test_m5_lifecycle_tools.py、handoff 笔记、本报告。
+- 验证：`.venv/bin/python -m pytest -q` → **109 passed / exit 0**；`git diff --check` 通过；registry 114/20/8、M5 bound 18、排除 2 未绑定；已推送 origin/pmctooldev。
+- 阻塞：仍无 `m5-api:8000` 可达；192.168.110.19:39092 为旧版编排部署（bound_tools=13，不含新 M5 handler），无法作为本次代码的真实读回证据。GB10 新 release 部署/联调属集成负责人操作。按用户流程，GB10 验证通过前不提交 dev。
+- 证据：远端 origin/pmctooldev（9505cfd 最新）。
