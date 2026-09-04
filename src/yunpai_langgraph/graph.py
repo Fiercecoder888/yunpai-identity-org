@@ -107,16 +107,21 @@ class YunpaiGraph:
 
     @staticmethod
     def _public_state(state: RunState) -> RunState:
-        """Remove file bodies from streamed snapshots while retaining metadata."""
+        """Remove file bodies from snapshots while retaining metadata."""
         public = deepcopy(state)
-        request = public.get("request", {})
-        for collection_name in ("attachments", "documents"):
-            collection = request.get(collection_name)
-            if not isinstance(collection, list):
-                continue
-            for item in collection:
-                if isinstance(item, dict) and "content_b64" in item:
-                    item["content_b64"] = "[omitted]"
+
+        def redact(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key == "content_b64" and isinstance(child, str):
+                        value[key] = "[omitted]"
+                    else:
+                        redact(child)
+            elif isinstance(value, list):
+                for child in value:
+                    redact(child)
+
+        redact(public)
         return public
 
     @classmethod

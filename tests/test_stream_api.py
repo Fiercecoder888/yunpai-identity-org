@@ -4,6 +4,7 @@ import json
 from fastapi.testclient import TestClient
 
 from yunpai_langgraph.api import create_app
+from yunpai_langgraph.graph import YunpaiGraph
 from yunpai_langgraph.repository import InMemoryRunRepository
 
 from test_graph import workflow_request
@@ -51,3 +52,15 @@ def test_stream_api_accepts_attachment_metadata_without_streaming_file_body():
     assert snapshot["request"]["attachments"][0]["filename"] == "master.json"
     assert snapshot["request"]["attachments"][0]["content_b64"] == "[omitted]"
     assert next(event for event in events if event["type"] == "gate_opened")["gate"]["type"] == "candidate"
+
+
+def test_public_state_redacts_nested_file_bodies():
+    state = {
+        "request": {"attachments": [{"filename": "order.xlsx", "content_b64": "secret"}]},
+        "outputs": {"m2": {"bom_files": [{"filename": "bom.xlsx", "content_b64": "secret-2"}]}},
+    }
+
+    public = YunpaiGraph._public_state(state)
+
+    assert public["request"]["attachments"][0]["content_b64"] == "[omitted]"
+    assert public["outputs"]["m2"]["bom_files"][0]["content_b64"] == "[omitted]"
