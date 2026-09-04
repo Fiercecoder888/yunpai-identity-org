@@ -177,6 +177,19 @@ def test_semantic_supplement_repairs_missing_header_product_code():
     assert not any(item["field"] == "header.product_code" for item in supplement["missing_fields"])
 
 
+def test_semantic_supplement_can_promote_external_order_line_model():
+    external = {
+        "status": "needs_review", "doc_type": "order",
+        "document": {
+            "header": {"order_number": "PO-1"},
+            "lines": [{"model": "W-H909", "product_code": None}],
+        },
+    }
+    supplement = build_semantic_supplement("order.xlsx", real_order_twin_bytes(), external=external)
+    assert supplement is not None
+    assert supplement["document"]["header"]["product_code"] == "W-H909"
+
+
 def test_no_supplement_for_non_order_or_complete_external():
     assert result_has_order_gap({"task_id": "t", "status": "done"}) is False
     complete = {

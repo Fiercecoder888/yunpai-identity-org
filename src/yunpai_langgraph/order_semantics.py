@@ -244,6 +244,17 @@ def build_semantic_supplement(filename: str, raw: bytes, *, external: dict[str, 
                 product_code = _cell_text(line.get("product_code") or line.get("model"))
                 if product_code:
                     break
+    # Some real M1 templates return reliable order lines but omit the product
+    # code at the document header. Reuse that already-observed line model as a
+    # candidate fact; it is still review-gated and never overwrites M1 output.
+    external_doc = external.get("document") if isinstance(external, dict) and isinstance(external.get("document"), dict) else {}
+    external_lines = external_doc.get("lines") if isinstance(external_doc.get("lines"), list) else []
+    if not product_code:
+        for line in external_lines:
+            if isinstance(line, dict):
+                product_code = _cell_text(line.get("product_code") or line.get("model"))
+                if product_code:
+                    break
     header_block = {
         "order_number": order_id,
         "order_date": _cell_text(document.get("order_date")),
