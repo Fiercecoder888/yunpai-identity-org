@@ -211,6 +211,8 @@ async def test_data_gate_requires_business_supplement_and_blocks_empty_bom():
     assert state["pending_gate"]["type"] == "data"
     with pytest.raises(ValueError, match="data gate cannot be approved"):
         await graph.resume(state, "approve")
+    with pytest.raises(ValueError, match="supplement must be a JSON object"):
+        await graph.resume(state, "retry", ["not", "an", "object"])
     assert state["status"] == "waiting_human"
 
     state = await graph.resume(state, "retry", {"bom_lines": [{"material_code": "MAT-1", "quantity_per": 1}]})
