@@ -38,4 +38,14 @@ describe('agent state reducer', () => {
     } } }));
     expect(summarizeResult(state)).toEqual({ scheduleMinutes: 120, lifecycle: 'draft', onTimeRate: 0.5, tardinessMinutes: 90, resourceLoadMinutes: 180 });
   });
+
+  it('summarizes M0 sandbox batch state without canonical claim', () => {
+    const state = applyEvent(emptyAgentState(), event('run_done', { state: { run_id: 'run-1', task_id: 'task-1', status: 'waiting_human', outputs: {
+      data_import_run: { batch_id: 'batch-TASK-M0-1', environment: 'sandbox', canonical: false },
+    } } }));
+    const result = summarizeResult(state);
+    expect(result.m0BatchId).toBe('batch-TASK-M0-1');
+    expect(result.m0Environment).toBe('sandbox');
+    expect(result.m0Canonical).toBe(false);
+  });
 });
