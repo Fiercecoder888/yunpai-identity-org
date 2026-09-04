@@ -6,7 +6,7 @@
 
 ## 版本与部署
 
-- Git：`origin/main` = `origin/dev` = `a09a29909cee94ac5dcb5fa1056932a9ce05449d`；GB10 运行代码为其前一功能提交 `a9a85ebfd56f3f6fd94eec7e2700e32e6236c801`（后续提交仅更新报告/账本）。
+- Git：`origin/main` = `origin/dev` = `419243818de7fc3a711e06b1a2dbb9d7d4b40097`；GB10 运行代码为其前一功能提交 `a9a85ebfd56f3f6fd94eec7e2700e32e6236c801`（后续提交仅更新报告/账本）。
 - 集成提交：`30a8df6`（M0 HTTP batch envelope 解包）、`5139527`（从 M1 输出补全 M2 的产品名和订单号）、`15d0442`（M5 apply Gate 持久化 release/head，并增加回归测试）。
 - `2b07276`（订单附件默认走 `m1_m5_document_to_plan`）、`a9a85eb`（递归脱敏公开状态中的文件正文，避免历史列表膨胀）。
 - GB10 release：`/home/wjc/yunpai-langgraph/releases/20260905071500`。
@@ -35,6 +35,15 @@
 - 通过 GB10 `39092` 的订单上传入口提交同一 `order.xlsx` 后，后端回读 `workflow_id=m1_m5_document_to_plan`，在 M1 `ingest_document` Gate 等待人工确认；页面截图显示任务列表、订单任务和“M1 解析置信度不足或存在字段缺口”卡片。
 - 该运行没有越过字段缺口自动猜测产品编码，证明新入口和 fail-closed 行为生效；旧运行的 M2 阻塞结论仍有效。
 
+### W-H909 正确数据包复跑（本次验收）
+
+- 基础资料前端上传任务：运行 `run-c37163744b2a421bac6814ac545d9235`，任务 `task-ed16ca6a9e49454f8d6280d58e4b98e5`。页面先显示“业务资料候选已写入识别库，必须审核后才能进入 M0 canonical 发布”，点击“接收”后任务完成；4 个文件接收，超过 20 MB 的 `HDTV 作业指导书.xls` 被明确跳过，使用同包 5.6 MB PDF 作为 SOP 证据。
+- 订单文件：`桐曦PO-20260812-00008-HD备货订单-0831验收通过.xlsx`，SHA-256 `4abf98e6221064198ebfc8596858650a466e37c32750ed2f2e4fb4a7f090066c`。前端运行 `run-f32f83fda5174d4d8b0a144cf706900a`，任务 `task-d8becc2c9a2f43929b61314ca05082ca`。
+- 前端操作证据：在 39092 页面依次执行订单 M1 “接收”、M0 candidate “接收”，随后进入 M2 “补充权威数据” Gate；截图由同一浏览器会话在 M1 review、M0 candidate、M2 data Gate 三个状态实时捕获。页面可见 M1/M0 已完成、M2 待确认及后续 M3-M5 等待前置步骤。
+- M1 实际识别：订单号 `PO-20260812-001`，W-H909 数量 `4000 PCS`、规格 `1M`，订单行 `product_code/model=W-H909`；但 M1 顶层 `header.product_code` 仍为 `null`，并且交期无法标准化，另有多行装箱数×件数校验问题，因此需要人工复核。
+- M0 实际结果：`data_import_run`、`data_import_commit` 均为 `success=true`，但 `/api/m0/readback/314d50d37da7` 返回 `canonical_readback_available=true`、`approved_candidates=0`；提交结果的 `m0_master_order`、`m0_master_bom_header`、`m0_master_bom_line`、`m0_master_document` 均为 `0`，不能视作已建立可匹配 canonical 主数据。
+- M2 实际结果：`BLOCKED_INPUT`，缺少 `m1 订单 header.product_code`，无法组装 `six-class-bundle`。前端补充了来源 BOM 中可直接核对的 W-H909 和 9 行物料后，系统仍要求 M1 权威字段，证明该 Gate 不是“缺少一段 JSON”而是上游事实模型未闭合。
+
 ### M0 结果
 
 - `data_import_run` 和 `data_import_commit` 均完成。
@@ -55,6 +64,8 @@
 - M2 仍返回 `waiting_human`，`bom_generation=not_requested`，`bom_baseline=blocked`，SOP 模板未确认。
 - 当前阻塞是业务数据而非 HTTP 或模型端点错误：需要真实产品/物料编码、可确认的 BOM 模板及编号规则，以及 SOP 的工位/设备提示。系统已保持 fail-closed，没有把相近但不相同的 `FC-15`、`HW-15` 等候选冒充为订单产品。
 
+对于本次 W-H909 数据包，BOM 工作表确实能直接找到 W-H909 和 9 条材料行，SOP PDF 也能识别为 HDTV 通用工艺骨架；但订单解析器没有将订单行型号回填到 M1 顶层权威 `header.product_code`，因此 M2 不能把这些候选拼成受控工程事实。该差异已在运行 `run-f32f83fda5174d4d8b0a144cf706900a` 的 M2 Gate 中复现。
+
 ### 基础资料与订单的一致性核对
 
 - `base-bom.xlsx` 的工作表“灰色铝合金 HDTV 4K黑色光纤线（注塑光纤线）”包含成品型号 `FC-15`（规格 15）和 `FC-20`（规格 20），材料行包含铜包钢光纤、HDTV 2.0 TX/RX 模组、灰色铝合金壳和 HDMI 防尘盖；这只构成可审阅的候选映射，不能替代 M0 canonical 产品记录。
@@ -63,12 +74,12 @@
 
 ## 距离完整订单功能还剩什么
 
-1. **M0 canonical 发布**：由有权限的部署方审核并发布基础资料，回读非零的订单、BOM、物料和文档主数据；当前 batch master counts 为零。
-2. **产品主数据确认**：确认订单 15M/20M 是否分别映射为 `FC-15`/`FC-20`，并补充交期；客户侧 `M3170FHDMI15` 需由数据责任人确认是否为内部料号。
-3. **BOM 权威匹配**：确认订单对应的 BOM 版本、模板和物料编号规则；确认后重新执行 M2 并核对逐行匹配证据。
-4. **SOP 工艺确认**：提供与 HDMI 产品绑定的 SOP/路线，确认版本、工位/机器提示和工序约束，生成可审阅的工序草稿；当前 `DEMO-USBC-001` 不能使用。
+1. **M0 canonical 发布闭环**：当前 W-H909 的 M0 commit 虽返回成功，但真实回读 `approved_candidates=0`、主数据计数为零；需要修复发布映射并由有权限的部署方重新审核，直到订单/BOM/物料/文档回读非零。
+2. **M1 权威产品字段**：将订单行 `model=W-H909` 在人工复核或解析器规则中提升为 `header.product_code`，同时处理交期和装箱校验问题；这是当前 M2 Gate 的直接阻塞。
+3. **BOM 权威匹配**：确认 W-H909 BOM 的正式编号、版本、有效期、审批和材料单位；当前工作表只有候选材料行，且标签无料号/库存。
+4. **SOP 工艺确认**：把 HDTV 通用 SOP 绑定到 W-H909，补齐版本、工位/设备、测试阈值、模具/签样，并将订单“透明骨袋+常规标签”与 SOP 包装路线对齐。
 5. **M2 Gate 审核**：审核 BOM/SOP 草稿、版本、来源 SHA 和匹配置信度后发布工程事实。
-6. **M3/M4/M5 前置事实**：提供库存/仓库、采购供应商与交期、人员技能/工位、设备能力、生产日历和当前 WIP 等真实数据，并完成相应 Gate。
+6. **M3/M4/M5 前置事实**：提供库存/仓库、采购供应商与交期、人员技能/工位、设备能力、生产日历和当前 WIP 等真实数据，并完成相应 Gate；当前 M2 尚未生成可供 M3 计算的 BOM/SOP。
 7. **PMC 最终验收**：M5 生成计划版本和工序甘特图，回读 release/head，确认资源约束、物料齐套和 MES 派发边界；当前 M3-M5 尚未启动。
 
 ## 外部变更说明
