@@ -65,7 +65,24 @@ export M1_POLL_BUDGET_S=90
   `line` JSON 做客户端过滤（`tests/test_m1_http_adapter.py` 回归），待服务端补丁后移除。
 - 服务可用 `/documents/search?field_path=$.lines[*].name_attributes.<attr>` 做服务端过滤。
 
+## 4.1 本地真实运行联调记录（2026-09-04，E-M1-LOCAL-001）
+
+无 GPU/模型层的条件下仍可启动真实服务本体（SQLite TaskStore + memory knowledge，graph_backend=memory）：
+
+```bash
+python3.12 -m venv /tmp/t8m1venv
+/tmp/t8m1venv/bin/pip install -e <t8-m1-checkout>          # 基础依赖，不含 ocr/docling extras
+cd <t8-m1-checkout>
+DATABASE_URL="sqlite+aiosqlite:////tmp/m1run/data/m1.db" UPLOAD_DIR="/tmp/m1run/uploads" \
+  /tmp/t8m1venv/bin/python -m uvicorn m1.api.main:create_app --factory --host 127.0.0.1 --port 18081
+# 编排器专用 Adapter 直连：
+M1_URL=http://127.0.0.1:18081 pytest tests/test_m1_real_service_contract.py -q   # opt-in，需 M1_REAL_TEST=1
+```
+
+实测：/health `/ready` 可达并如实报告 `degraded`/`not_ready`（mineru_shadow 未配置）；只读任务/审核队列/知识端点空库正确；真实 XLSX multipart 上传进入 `needs_review` 候选且可回读 `m1.document.v2`（lines=0、1 个校验问题，不伪造成功）；跨租户读同任务 404。以上只证明“真实服务代码可运行 + 编排器 HTTP 联通”，**不是**生产验收（/ready ok、PostgreSQL/Neo4j 回读、模型字段证据均未通过）。
+
 ## 5. 真实验收
+
 
 本地 mock 通过只声明“代码/本地 HTTP mock 通过”。生产验收需要：真实服务 `/health`、`/ready`，
 脱敏真实样本逐格式上传回读 TaskStore/PostgreSQL/Neo4j、17 个 Tool 逐个调用、双租户正向与交叉

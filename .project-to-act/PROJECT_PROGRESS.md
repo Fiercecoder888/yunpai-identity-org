@@ -42,4 +42,5 @@
 - 2026-09-04：完成 M0 -> GB10 39092 逐类只读对账；证据 `E-0904-M0-GB10-RECON-001`；确认设备/库存来源已进候选目录但未批准，供应商/成本财务/人员主数据没有对应来源 SHA，39092 local transport 无可达 M0 canonical API；下一步等待受控 M0 写入条件后按顺序补传；确认来源：本次运行态核验。
 - 2026-09-04：生成 DeepSeek Harness 实施任务书，证据 `E-PLAN-DEEPSEEK-HARNESS-001`；范围覆盖 main/dev 基线同步、上传识别、M0 canonical、M1-M5/PMC、GB10 新 release、测试、推送和 MR 合并；当前仅完成规划，未执行代码、数据或线上变更；确认来源：用户请求。
 
+- 2026-09-04 22:25：真实 T8 M1 服务本地运行联调完成（无模型层，SQLite+memory）；证据 E-M1-LOCAL-001；下一步等待 GPU MinerU/Instructor、PostgreSQL/Neo4j 与真实样本条件后执行完整生产验收。
 - 2026-09-04：完成 P-007 代码实现与本地验收；M1 17 个 Tool 全部绑定（default 61 bound，HTTP runtime 112 bound），专用 M1 HTTP Adapter（租户双头/角色/202 轮询/错误映射/属性过滤前向兼容），Skill 扩展到 17 Tool 与 19 ops；完整 pytest 117 passed、2 skipped（真实服务 opt-in）；真实 M1 独立服务联调待外部条件；证据 E-M1-TOOLS-001；确认来源：本次实施与验证。
