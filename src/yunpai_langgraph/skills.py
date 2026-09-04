@@ -140,7 +140,7 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
                 "status": "failed",
                 "code": "NO_ACCEPTED_FILES",
                 "message": "上传批次中没有可识别文件；缺失 content_b64、格式不支持或超限文件已逐文件跳过",
-                "schema_version": "yunpai.business-catalog.v1",
+                "schema_version": "yunpai.business-catalog.v2",
                 "upload_summary": summary.as_dict(),
                 "evidence": [{"module": "orchestrator", "source_ref": "files", "evidence_ref": f"business-catalog:{context.get('task_id', 'skill')}", "detail": "无 accepted 文件，未创建候选"}],
             }
@@ -154,7 +154,7 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
         "skill": "business-data-identification",
         "skill_mode": mode,
         "status": "candidate_created",
-        "schema_version": "yunpai.business-catalog.v1",
+        "schema_version": "yunpai.business-catalog.v2",
         "upload_summary": summary.as_dict(),
         "batch": batch_result,
         "evidence": [{"module": "orchestrator", "source_ref": batch_result["root_path"], "evidence_ref": f"business-catalog:{batch_result['batch_id']}", "detail": "文件哈希、分类和字段观察已写入候选库"}],

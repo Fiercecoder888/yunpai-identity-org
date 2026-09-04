@@ -13,7 +13,7 @@ from typing import Any, Iterable
 from .order_workbook import parse_order_workbook
 
 
-SCHEMA_VERSION = "yunpai.business-catalog.v1"
+SCHEMA_VERSION = "yunpai.business-catalog.v2"
 IGNORED_NAMES = {".DS_Store"}
 IGNORED_PREFIXES = ("._", "~$")
 SUPPORTED_EXTENSIONS = {
@@ -80,6 +80,141 @@ def classify_path(path: Path) -> tuple[str, str, float]:
     if path.suffix.lower() in {".zip", ".rar", ".7z"}:
         return "archive", "compressed_archive", 0.80
     return "other", "unclassified", 0.20
+
+
+# 制造资料分类最低识别字段（任务书 §3.3）：无法满足时进入 needs_review。
+REQUIRED_FIELDS_BY_KIND: dict[str, tuple[str, ...]] = {
+    "order": ("order_id", "quantity", "due_date"),
+    "product": ("product_code", "product_name"),
+    "bom": ("material_code", "material_name", "quantity"),
+    "route": ("operation_code", "operation_name", "sequence", "standard_minutes"),
+    "sop": ("station", "step_name", "worker_count"),
+    "equipment": ("equipment_code", "equipment_name"),
+    "station": ("station_code", "operation_code"),
+    "worker": ("worker_code", "worker_name"),
+    "inventory": ("material_code", "warehouse", "available_qty"),
+    "supplier": ("supplier_code", "supplier_name"),
+    "finance_cost": ("cost_item", "period", "unit_cost"),
+}
+
+# 表头/内容样本关键词 -> 分类（用于低置信路径分类的内容修正）。
+_CONTENT_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...], float], ...] = (
+    ("order", ("订单号", "序号", "型号", "交期", "单价", "采购数量", "金额", "po号", "order"), 0.92),
+    ("product", ("产品编码", "产品名称", "型号", "规格", "版本号"), 0.80),
+    ("bom", ("物料编码", "料号", "材料名称", "用量", "bom版本", "物料清单"), 0.93),
+    ("route", ("工序编码", "工序名称", "标准工时", "前置工序", "作业顺序"), 0.92),
+    ("sop", ("工站", "作业步骤", "作业指导", "投入人数", "质量要求"), 0.90),
+    ("equipment", ("设备编码", "设备名称", "设备台账", "产线", "保养周期"), 0.92),
+    ("station", ("工位编码", "工位名称", "生产单元", "绑定工位"), 0.90),
+    ("worker", ("工号", "姓名", "技能", "资格", "班次", "员工"), 0.85),
+    ("inventory", ("物料编码", "仓库", "库位", "批次", "现存数量", "库存"), 0.90),
+    ("supplier", ("供应商编码", "供应商名称", "采购订单", "po编号"), 0.90),
+    ("finance_cost", ("成本项目", "期间", "币种", "单位成本", "含税", "费用"), 0.82),
+    ("calendar", ("日期", "班次", "开始时间", "结束时间", "假期"), 0.80),
+)
+
+
+def _sample_tokens_for(path: Path) -> list[str]:
+    """读取少量表头/内容样本（大文件截断），返回归一化 token。"""
+    suffix = path.suffix.lower()
+    try:
+        if suffix in {".xlsx", ".xlsm"}:
+            from openpyxl import load_workbook
+
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            try:
+                tokens: list[str] = []
+                for sheet in workbook.worksheets[:3]:
+                    for row in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row or 0, 6), values_only=True):
+                        for value in row[:30]:
+                            if value not in (None, ""):
+                                tokens.append(str(value).strip().replace(" ", "")[:30])
+                return [token for token in tokens if token]
+            finally:
+                workbook.close()
+        if suffix in {".csv", ".tsv"}:
+            import csv
+
+            try:
+                with path.open(encoding="utf-8-sig", errors="replace") as stream:
+                    rows = list(csv.reader(stream))[:6]
+                return [str(value).strip().replace(" ", "") for row in rows for value in row if value not in (None, "")]
+            except OSError:
+                return []
+    except Exception:
+        return []
+    return []
+
+
+def classify_with_content(path: Path, *, current_kind: str, current_confidence: float) -> dict[str, Any]:
+    """文件名/路径 + 表头/内容样本 的多信号分类器。
+
+    返回 {"kind", "subtype", "confidence", "rules": [{"rule", "score", "evidence"}],
+          "content_signals": int}。低置信路径分类（tabular/document/other）在内容
+    命中足够关键词时被修正；高置信路径分类（>=0.8）优先保留。
+    """
+    base = {"kind": current_kind, "subtype": _subtype_for(current_kind), "confidence": current_confidence, "rules": [{"rule": "path", "score": current_confidence}], "content_signals": 0}
+    if current_confidence >= 0.8:
+        return base
+    tokens = _sample_tokens_for(path)
+    if not tokens:
+        return base
+    token_set = "".join(tokens)
+    best_kind, best_hits, best_conf = None, 0, 0.0
+    for kind, keywords, conf in _CONTENT_KEYWORD_RULES:
+        hits = sum(1 for keyword in keywords if keyword.lower() in token_set.lower() or any(keyword in token for token in tokens))
+        if hits > best_hits:
+            best_kind, best_hits, best_conf = kind, hits, conf
+    if best_kind and best_hits >= 2:
+        return {
+            "kind": best_kind, "subtype": _subtype_for(best_kind),
+            "confidence": max(current_confidence, best_conf - 0.08 * (3 - min(best_hits, 3))),
+            "rules": [{"rule": "path", "score": current_confidence}, {"rule": f"content:{best_kind}", "score": best_conf, "evidence": f"{best_hits} 个表头关键词命中"}],
+            "content_signals": best_hits,
+        }
+    return base
+
+
+_SUBTYPE_BY_KIND = {
+    "order": "customer_or_stocking_order", "product": "product_master", "bom": "engineering_bom",
+    "route": "production_route", "sop": "production_sop", "equipment": "equipment_master",
+    "station": "station_master", "worker": "worker_master", "calendar": "production_calendar",
+    "inventory": "inventory_record", "supplier": "supplier_master", "finance_cost": "cost_record",
+    "tabular": "unclassified_table", "document": "unclassified_document", "archive": "compressed_archive",
+    "other": "unclassified", "engineering_document": "supplier_approval_or_spec", "engineering_drawing": "cad_or_drawing",
+    "procurement": "purchase_order_or_record",
+}
+
+
+def _subtype_for(kind: str) -> str:
+    return _SUBTYPE_BY_KIND.get(kind, "unclassified")
+
+
+# 敏感数据分类（任务书 §3.4：普通/内部/HR/财务）。基于路径与文件名，不做内容推测。
+_SENSITIVITY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("hr", ("工资", "薪资", "社保", "公积金", "身份证", "银行卡", "人员档案", "入职", "离职", "考勤")),
+    ("financial", ("财务", "成本", "报价", "对账单", "发票", "含税", "税额", "银行流水", "审计")),
+    ("hr_financial", ("工资表", "个税", "奖金", "报销")),
+)
+
+
+def sensitivity_of(extracted: dict[str, Any], kind: str) -> str:
+    """按路径/文件名关键词给敏感度分类（普通/内部/HR/财务）；关键词保留可版本化。"""
+    if kind == "worker":
+        return "hr"
+    if kind == "finance_cost":
+        return "financial"
+    text = str(extracted.get("relative_path", "")).lower() + " " + str(extracted.get("extraction", {}).get("sniffed_mime", "") if isinstance(extracted.get("extraction"), dict) else "").lower()
+    score: dict[str, int] = {}
+    for sensitivity, keywords in _SENSITIVITY_KEYWORDS:
+        score[sensitivity] = sum(1 for keyword in keywords if keyword in text)
+    if score.get("hr", 0):
+        return "hr"
+    if score.get("hr_financial", 0) and not score.get("financial", 0):
+        return "hr"
+    if score.get("financial", 0):
+        return "financial"
+    return "internal"
 
 
 def _extract_xlsx(path: Path, kind: str) -> dict[str, Any]:
@@ -280,7 +415,10 @@ def _extract_text(path: Path) -> dict[str, Any]:
 
 
 def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, parse_xlsx: bool = False) -> dict[str, Any]:
-    kind, subtype, classification_confidence = classify_path(path)
+    path_kind, path_subtype, path_confidence = classify_path(path)
+    content_class = classify_with_content(path, current_kind=path_kind, current_confidence=path_confidence)
+    kind, subtype = content_class["kind"], content_class["subtype"]
+    classification_confidence = float(content_class["confidence"])
     suffix = path.suffix.lower()
     size = path.stat().st_size
     raw = path.read_bytes() if size <= 16 * 1024 * 1024 else b""
@@ -404,23 +542,41 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
                         "raw_value": line[field], "normalized_value": line[field], "physical_type": _text_type(line[field]),
                         "semantic_type": field, "confidence": document["confidence"], "status": "candidate",
                     })
+    document_payload = {
+        "schema_version": document.get("schema_version") if isinstance(document, dict) and document.get("schema_version") else ("m1.document.v2" if order else None),
+        "document_type": document.get("document_type") if isinstance(document, dict) and document.get("document_type") else (order.get("document_type") if order else kind),
+        "document_subtype": document.get("document_subtype") if isinstance(document, dict) and document.get("document_subtype") else (order.get("document_subtype") if order else subtype),
+        "order_id": order.get("order_id"),
+        "product_code": order.get("product_code"),
+        "confidence": document.get("confidence") if isinstance(document, dict) and document.get("confidence") is not None else order.get("confidence", classification_confidence),
+        "review_status": document.get("review_status") if isinstance(document, dict) and document.get("review_status") else ("needs_review" if order else "unclassified"),
+        **({"sheet_count": document.get("sheet_count"), "bom_line_count": document.get("bom_line_count")} if kind == "bom" and isinstance(document, dict) else {}),
+    }
+    # 最低字段门槛（任务书 §3.3）：缺少必需字段进入 needs_review 并返回缺失列表，
+    # 不允许把缺字段表格当作普通表格后结束。
+    required = REQUIRED_FIELDS_BY_KIND.get(kind)
+    present_fields = {observation.get("semantic_type") for observation in field_observations if observation.get("semantic_type")}
+    missing_fields: list[dict[str, Any]] = []
+    if required:
+        missing_fields = [
+            {"field": field, "reason": "required_field_missing"}
+            for field in required
+            if field not in present_fields
+            and not any(str(observation.get("field_path", "")).endswith(f".{field}") or f"[{field}]" in str(observation.get("field_path", "")) for observation in field_observations)
+        ]
+    if required and missing_fields and document_payload.get("review_status") in (None, "unclassified", "candidate"):
+        document_payload["review_status"] = "needs_review"
+    document_payload["missing_fields"] = missing_fields
+    document_payload["classification_rules"] = content_class.get("rules", [])
     return {
         "schema_version": SCHEMA_VERSION,
         "relative_path": str(path.relative_to(root)),
         "file_kind": kind,
         "document_subtype": subtype,
         "classification_confidence": classification_confidence,
+        "classification_rules": content_class.get("rules", []),
         "extraction": extraction,
-        "document": {
-            "schema_version": document.get("schema_version") if isinstance(document, dict) and document.get("schema_version") else ("m1.document.v2" if order else None),
-            "document_type": document.get("document_type") if isinstance(document, dict) and document.get("document_type") else (order.get("document_type") if order else kind),
-            "document_subtype": document.get("document_subtype") if isinstance(document, dict) and document.get("document_subtype") else (order.get("document_subtype") if order else subtype),
-            "order_id": order.get("order_id"),
-            "product_code": order.get("product_code"),
-            "confidence": document.get("confidence") if isinstance(document, dict) and document.get("confidence") is not None else order.get("confidence", classification_confidence),
-            "review_status": document.get("review_status") if isinstance(document, dict) and document.get("review_status") else ("needs_review" if order else "unclassified"),
-            **({"sheet_count": document.get("sheet_count"), "bom_line_count": document.get("bom_line_count")} if kind == "bom" and isinstance(document, dict) else {}),
-        },
+        "document": document_payload,
         "field_observations": field_observations,
     }
 
@@ -481,6 +637,17 @@ def init_catalog(db_path: str | Path) -> None:
                 review_status TEXT NOT NULL,
                 payload_json TEXT NOT NULL,
                 validation_issues_json TEXT NOT NULL DEFAULT '[]',
+                tenant_id TEXT,
+                task_id TEXT,
+                batch_id TEXT,
+                parser_version TEXT,
+                classification_confidence REAL,
+                missing_fields_json TEXT NOT NULL DEFAULT '[]',
+                sensitivity_classification TEXT NOT NULL DEFAULT 'internal',
+                reviewer TEXT,
+                reviewed_at TEXT,
+                entity_key TEXT,
+                entity_version TEXT,
                 UNIQUE(file_id)
             );
             CREATE TABLE IF NOT EXISTS field_observations (
@@ -501,6 +668,31 @@ def init_catalog(db_path: str | Path) -> None:
             CREATE INDEX IF NOT EXISTS idx_field_observations_path ON field_observations(field_path);
             """
         )
+        _migrate_catalog(db)
+
+
+def _migrate_catalog(db: sqlite3.Connection) -> None:
+    """轻量列迁移：让 v1 旧库也能补上 v2 新增列（不丢数据）。"""
+    existing = {row[1] for row in db.execute("PRAGMA table_info(document_candidates)").fetchall()}
+    additions = {
+        "tenant_id": "TEXT",
+        "task_id": "TEXT",
+        "batch_id": "TEXT",
+        "parser_version": "TEXT",
+        "classification_confidence": "REAL",
+        "missing_fields_json": "TEXT NOT NULL DEFAULT '[]'",
+        "sensitivity_classification": "TEXT NOT NULL DEFAULT 'internal'",
+        "reviewer": "TEXT",
+        "reviewed_at": "TEXT",
+        "entity_key": "TEXT",
+        "entity_version": "TEXT",
+    }
+    for column, definition in additions.items():
+        if column not in existing:
+            try:
+                db.execute(f"ALTER TABLE document_candidates ADD COLUMN {column} {definition}")
+            except sqlite3.OperationalError:
+                pass
 
 
 def ingest_tree(root: str | Path, db_path: str | Path, *, batch_id: str | None = None, limit: int | None = None, parse_xlsx: bool = False, deep_limit_bytes: int = 4_000_000) -> dict[str, Any]:
@@ -540,11 +732,14 @@ def ingest_tree(root: str | Path, db_path: str | Path, *, batch_id: str | None =
                 )
                 db.execute("DELETE FROM field_observations WHERE document_id=?", (document_id,))
                 document = extracted["document"]
+                sensitivity = sensitivity_of(extracted, kind)
+                issues = list(document.get("validation_issues") or [])
+                missing = list(document.get("missing_fields") or [])
                 db.execute(
-                    """INSERT INTO document_candidates(document_id,file_id,schema_version,document_type,document_subtype,order_id,product_code,confidence,review_status,payload_json,validation_issues_json)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?)
-                       ON CONFLICT(file_id) DO UPDATE SET document_id=excluded.document_id, payload_json=excluded.payload_json, order_id=excluded.order_id, product_code=excluded.product_code, confidence=excluded.confidence, review_status=excluded.review_status""",
-                    (document_id, file_id, document.get("schema_version") or SCHEMA_VERSION, document.get("document_type") or kind, document.get("document_subtype") or extracted["document_subtype"], document.get("order_id"), document.get("product_code"), float(document.get("confidence") or 0), document.get("review_status") or "unclassified", json_text({"document": document, "extraction": extracted["extraction"]}), json_text([])),
+                    """INSERT INTO document_candidates(document_id,file_id,schema_version,document_type,document_subtype,order_id,product_code,confidence,review_status,payload_json,validation_issues_json,tenant_id,task_id,batch_id,parser_version,classification_confidence,missing_fields_json,sensitivity_classification,entity_key,entity_version)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                       ON CONFLICT(file_id) DO UPDATE SET document_id=excluded.document_id, payload_json=excluded.payload_json, order_id=excluded.order_id, product_code=excluded.product_code, confidence=excluded.confidence, review_status=excluded.review_status, classification_confidence=excluded.classification_confidence, missing_fields_json=excluded.missing_fields_json, sensitivity_classification=excluded.sensitivity_classification, parser_version=excluded.parser_version""",
+                    (document_id, file_id, document.get("schema_version") or SCHEMA_VERSION, document.get("document_type") or kind, document.get("document_subtype") or extracted["document_subtype"], document.get("order_id"), document.get("product_code"), float(document.get("confidence") or 0), document.get("review_status") or "unclassified", json_text({"document": document, "extraction": extracted["extraction"]}), json_text(issues), None, None, batch_id, extracted.get("parser_version") or (document.get("parser_version") if isinstance(document, dict) else None) or "unknown", extracted["classification_confidence"], json_text(missing), sensitivity, document.get("entity_key"), document.get("entity_version")),
                 )
                 for obs_index, observation in enumerate(extracted["field_observations"]):
                     obs_id = f"obs-{source_key[:16]}-{obs_index}"

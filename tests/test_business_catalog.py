@@ -83,3 +83,68 @@ def test_ingest_tree_keeps_binary_business_file_types(tmp_path):
     assert result["file_count"] == 1
     assert result["error_count"] == 0
     assert result["counts_by_kind"] == {"bom": 1}
+
+
+def test_content_classifier_upgrades_unnamed_equipment_sheet(tmp_path):
+    from openpyxl import Workbook
+
+    root = tmp_path / "资料"
+    root.mkdir()
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["设备编码", "设备名称", "规格", "产线", "能力"])
+    sheet.append(["EQ-001", "注塑机", "HTF250", "线1", "250T"])
+    workbook.save(root / "无名表.xlsx")
+
+    db = tmp_path / "catalog.sqlite"
+    result = ingest_tree(root, db, parse_xlsx=True)
+    assert result["error_count"] == 0
+    assert result["counts_by_kind"].get("equipment", 0) == 1
+    import sqlite3
+
+    with sqlite3.connect(db) as connection:
+        row = connection.execute("SELECT review_status, sensitivity_classification, classification_confidence, document_type FROM document_candidates").fetchone()
+    assert row[0] == "candidate" or row[0] == "needs_review"
+    assert row[1] == "internal"
+    assert row[3] == "equipment"
+
+
+def test_missing_fields_force_needs_review(tmp_path):
+    root = tmp_path / "残缺BOM"
+    root.mkdir()
+    # 只有材料名称无编码/用量 -> bom 最低字段不足。
+    (root / "bom残缺.xlsx").write_bytes(_bom_with_only_name())
+    db = tmp_path / "catalog.sqlite"
+    result = ingest_tree(root, db, parse_xlsx=True)
+    assert result["error_count"] == 0
+    import sqlite3
+
+    with sqlite3.connect(db) as connection:
+        payload = connection.execute("SELECT payload_json, missing_fields_json, review_status FROM document_candidates").fetchone()
+    assert payload[2] == "needs_review"
+    assert '"material_code"' in payload[1]
+
+
+def test_hr_sensitivity_marks_worker_and_wage_paths(tmp_path):
+    root = tmp_path / "人事资料"
+    root.mkdir()
+    (root / "员工工资表.xlsx").write_bytes(_bom_with_only_name())
+    db = tmp_path / "catalog.sqlite"
+    ingest_tree(root, db, parse_xlsx=True)
+    import sqlite3
+
+    with sqlite3.connect(db) as connection:
+        sensitivity = connection.execute("SELECT sensitivity_classification FROM document_candidates").fetchone()[0]
+    assert sensitivity == "hr"
+
+
+def _bom_with_only_name() -> bytes:
+    from io import BytesIO
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["材料名称"])
+    sheet.append(["普通螺丝"])
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()

@@ -29,7 +29,7 @@ Skill 名称：`business-data-identification`
 
 ## 输出与落库
 
-返回 `schema_version=yunpai.business-catalog.v1`、`batch`、分类计数、异常计数和 `evidence`。数据库包括 `ingest_batches`、`source_files`、`document_candidates`、`field_observations`：保存路径、相对路径、扩展名、MIME、大小、修改时间、SHA-256、文档分类、订单字段、字段路径、原值/归一化值、置信度和证据定位。
+返回 `schema_version=yunpai.business-catalog.v2`、`batch`、分类计数、异常计数和 `evidence`。数据库包括 `ingest_batches`、`source_files`、`document_candidates`、`field_observations`：保存路径、相对路径、扩展名、MIME、大小、修改时间、SHA-256、文档分类、订单字段、字段路径、原值/归一化值、置信度和证据定位。
 
 外置目录批处理对 Excel 先做轻量登记并标记 `xlsx_deferred_to_m1_parser`，避免大表被误判为已解析；上传到 Skill 的小型 Excel 会在隔离 staging 中尝试 M1 级字段抽取。
 
