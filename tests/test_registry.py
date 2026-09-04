@@ -15,8 +15,10 @@ def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
     assert len(registry.specs) == 114
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
-    # 7 pre-existing local handlers + 17 newly bound M5 PMC v2 tools.
-    assert len(registry.handlers) == 24
+    # 合并后本地绑定：dev M0 五工具 + M1-M5 基础五工具 = 10，加上
+    # pmctooldev 新增的 17 个 M5 PMC v2 工具 = 27。
+    assert len(registry.handlers) == 27
+    assert {"data_import_run", "data_import_status", "data_import_preview", "data_import_resolve", "data_import_commit"} <= set(registry.handlers)
 
 
 def test_packaged_and_documented_manifests_are_identical():

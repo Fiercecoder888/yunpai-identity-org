@@ -40,6 +40,15 @@ def _number(value: Any, default: float = 0.0) -> float:
     return float(value)
 
 
+def _m0_store(ctx: dict[str, Any]):
+    import os
+
+    from .m0_sandbox import M0SandboxStore
+
+    db_path = ctx.get("m0_sandbox_db") or os.getenv("YUNPAI_M0_SANDBOX_DB") or "runtime/yunpai-m0-sandbox.sqlite"
+    return M0SandboxStore(db_path)
+
+
 def _extract_uploaded_bom(files: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Parse uploaded BOM workbooks into M2 lines with source evidence.
 
@@ -104,33 +113,121 @@ def _extract_uploaded_bom(files: Any) -> tuple[list[dict[str, Any]], list[dict[s
 
 
 async def m0_import(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-    candidates, quarantined = [], []
-    for item in payload["files"]:
-        name, raw = _decode_file(item)
-        if not raw:
-            quarantined.append({"filename": name, "reason": "empty_content"})
-            continue
-        digest = sha256(raw).hexdigest()
-        candidates.append({
-            "candidate_id": f"cand-{digest[:12]}", "filename": name, "sha256": digest,
-            "status": "needs_review", "records": _json_content(raw).get("records", []),
-            "evidence": [_evidence("m0", name, "原始文件哈希")],
-        })
-    batch_id = f"batch-{ctx['task_id'][-12:]}"
+    from .file_sniff import sniff_documents
+
+    files = payload.get("files") or []
+    items = [item for item in files if isinstance(item, dict)]
+    sniffed = sniff_documents(items)
+    accepted = [item for item in sniffed if item.get("status") == "accepted"]
+    skipped = [item for item in sniffed if item.get("status") != "accepted"]
+    encoded_by_name = {str(item.get("filename")): item for item in items}
+    store = _m0_store(ctx)
+    registered = store.register_batch(
+        task_id=str(ctx.get("task_id") or "local"),
+        tenant_id=str(ctx.get("tenant_id") or "default"),
+        files=[{**encoded_by_name.get(item.get("filename"), {}), "filename": item.get("filename")} for item in accepted],
+        batch_id=payload.get("batch_id"),
+    )
+    batch_id = registered["batch_id"]
+    quarantined = [{"filename": item.get("filename"), "reason": item.get("reason") or "unsupported_or_invalid"} for item in skipped]
+    preview_documents = store.preview(batch_id).get("documents", [])
+    if not preview_documents and not quarantined:
+        return {"id": batch_id, "batch_id": batch_id, "status": "failed", "candidates": [], "quarantined": [], "environment": "sandbox", "canonical": False, "readback": {"available": False, "detail": "没有可登记文件"}, "evidence": []}
     return {
         "id": batch_id, "batch_id": batch_id,
-        "status": "awaiting_review" if candidates or quarantined else "failed",
-        "candidates": candidates, "quarantined": quarantined,
-        "evidence": [_evidence("m0", "import", f"{len(candidates)} candidates")],
+        "status": "awaiting_review",
+        "candidates": [
+            {
+                "candidate_id": doc["candidate_id"], "filename": doc["filename"], "sha256": doc["sha256"],
+                "status": doc["review_status"], "document_kind": doc["document_kind"],
+                "records": doc.get("payload_json") if isinstance(doc.get("payload_json"), list) else [],
+                "evidence": [_evidence("m0", doc["filename"], "sandbox 候选登记哈希")],
+            }
+            for doc in preview_documents
+        ],
+        "quarantined": quarantined,
+        # 本地 sandbox 语义：候选不是 M0 canonical；生产发布需 HTTP transport + 真实 M0 回读。
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "environment": "sandbox",
+        "readback": {"available": False, "detail": "本地 sandbox 只登记候选，未发布 canonical；需要 YUNPAI_TOOL_TRANSPORT=http 与真实 M0 base URL/审核授权"},
+        "evidence": [_evidence("m0", "import", f"{len(preview_documents)} candidates registered in sandbox (non-canonical)")],
     }
 
 
+async def m0_status(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    result = _m0_store(ctx).status(str(payload.get("batch_id") or ""))
+    if result is None:
+        raise ValueError(f"batch not found: {payload.get('batch_id')}")
+    return result
+
+
+async def m0_preview(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    return _m0_store(ctx).preview(str(payload.get("batch_id") or ""))
+
+
+async def m0_resolve(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    batch_id = str(payload.get("batch_id") or "")
+    kind = str(payload.get("kind") or "")
+    action = str(payload.get("action") or "")
+    raw_id = payload.get("id")
+    candidate_id = str(payload.get("candidate_id") or "")
+    if kind not in {"entity", "mapping", "candidate"}:
+        raise ValueError("resolve kind 必须为 entity|mapping|candidate")
+    if action not in {"approve", "reject"}:
+        raise ValueError("resolve action 必须为 approve|reject")
+    store = _m0_store(ctx)
+    try:
+        if candidate_id:
+            return store.resolve(batch_id=batch_id, candidate_id=candidate_id, action=action, actor=str(ctx.get("actor") or "operator"))
+        resolve_id = int(raw_id) if str(raw_id).strip().isdigit() else None
+        if resolve_id is None:
+            raise ValueError("resolve 需要显式 id(候选序号) 或 candidate_id")
+        return store.resolve(batch_id=batch_id, resolve_id=resolve_id, action=action, actor=str(ctx.get("actor") or "operator"))
+    except ValueError as exc:
+        if "already decided" in str(exc):
+            raise
+        raise ValueError(str(exc)) from exc
+
+
 async def m0_commit(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    batch_id = str(payload.get("batch_id") or "")
+    store = _m0_store(ctx)
+    status_result = store.status(batch_id)
+    if status_result is None:
+        raise ValueError(f"batch not found: {batch_id}")
+    require_resolved = str(payload.get("require_resolved") or "").lower() in {"true", "1", "yes"}
+    pending = store.pending_count(batch_id)
+    if require_resolved and pending > 0:
+        return {
+            "status": "blocked", "code": "BLOCKED_INPUT",
+            "errors": [{"code": "PENDING_REVIEW", "message": f"batch {batch_id} 仍有 {pending} 个候选未裁决，禁止 commit", "details": []}],
+            "batch_id": batch_id,
+            # 本地 sandbox 语义：绝不表述为已发布 canonical。
+            "provider": "local_fixture", "canonical": False, "transport": "local", "environment": "sandbox",
+            "readback": {"available": False, "detail": "未完成人工裁决，未发布 canonical"},
+            "evidence": [_evidence("m0", batch_id, "commit 被拒：存在未裁决候选")],
+        }
     return {
-        "status": "committed", "batch_id": payload["batch_id"],
-        "master_counts": {"published_batches": 1},
-        "revision": "m0-v1", "ledger_id": f"ledger-{ctx['task_id'][-10:]}",
-        "evidence": [_evidence("m0", payload["batch_id"], "人工批准后的 canonical 发布")],
+        # 任务书 §1.4：data_import_commit=committed 只有在 canonical entity/version、
+        # ledger、outbox 可回读时才成立。本地 sandbox 无真实 M0 表，故只记录意图，
+        # 状态显式标记 fixture_recorded，不得表述为已发布 canonical。
+        "status": "fixture_recorded",
+        "batch_id": batch_id,
+        "provider": "local_fixture",
+        "canonical": False,
+        "transport": "local",
+        "environment": "sandbox",
+        "revision": "",
+        "ledger_id": "",
+        "master_counts": {},
+        "pending_review_before_commit": pending if require_resolved else 0,
+        "readback": {
+            "available": False,
+            "detail": "local transport 无 M0 canonical 表与回读接口；真实发布需部署方提供 M0 URL、PostgreSQL schema/权限、审核授权和写入回读接口",
+        },
+        "evidence": [_evidence("m0", batch_id or "fixture", "本地 sandbox 记录发布意图；未发布 canonical、无 ledger/outbox 回读，需人工 Gate 后才可对接真实 M0")],
     }
 
 
@@ -433,6 +530,9 @@ def _m5(name: str):
 
 HANDLERS = {
     "data_import_run": m0_import,
+    "data_import_status": m0_status,
+    "data_import_preview": m0_preview,
+    "data_import_resolve": m0_resolve,
     "data_import_commit": m0_commit,
     "ingest_document": m1_parse,
     "run_bom_sop_workflow": m2_bom,

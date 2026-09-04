@@ -357,10 +357,12 @@ class YunpaiGraph:
                     files.append(_file_object(filename, document))
             return {"files": files}
         if tool == "business-data-identification":
+            upload_mode = str(request.get("upload_mode") or request.get("mode") or "master_data")
             return {
                 "root_path": request.get("business_data_root") or request.get("root_path"),
                 "files": request.get("documents") or request.get("attachments") or [],
                 "db_path": request.get("business_catalog_db") or "runtime/yunpai-business-catalog.sqlite",
+                "mode": upload_mode,
             }
         if tool in self.skills.specs:
             skill_payload = request.get("skill_payload")
@@ -379,9 +381,15 @@ class YunpaiGraph:
             return {"batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id")}
         if tool == "data_import_resolve":
             imported = outputs.get("data_import_run", {})
+            kind = request.get("kind")
+            action = request.get("action")
+            if kind not in {"entity", "mapping", "field"}:
+                raise ValueError("data_import_resolve 需要显式 kind(entity|mapping|field)，禁止伪造裁决")
+            if action not in {"approve", "reject"}:
+                raise ValueError("data_import_resolve 需要显式 action(approve|reject)，禁止伪造裁决")
             return {
                 "batch_id": request.get("batch_id") or imported.get("batch_id") or imported.get("id"),
-                "kind": request.get("kind", "mapping"), "id": request.get("id", 0), "action": request.get("action", "approve"),
+                "kind": kind, "id": request.get("id", 0), "action": action,
             }
         if tool == "ingest_document":
             document = request.get("document") or request.get("order") or {}
