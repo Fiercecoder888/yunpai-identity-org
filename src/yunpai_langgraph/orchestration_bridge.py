@@ -18,6 +18,10 @@
 """
 from __future__ import annotations
 
+import json
+import os
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from typing import Any
 
 from .models import RunState, summarize
@@ -124,6 +128,63 @@ def read_approved_bom(state: RunState) -> list[dict[str, Any]]:
         return []
     lines = generation.get("bom_lines")
     return [item for item in lines if isinstance(item, dict)] if isinstance(lines, list) else []
+
+
+def _bom_lines_from_overview(payload: dict[str, Any], product_code: str) -> list[dict[str, Any]]:
+    """Extract only an approved BOM for the requested product from M0 overview."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        return []
+    indexes = data.get("indexes")
+    boms = indexes.get("boms") if isinstance(indexes, dict) else None
+    if not isinstance(boms, list):
+        return []
+    for item in boms:
+        entity = item.get("entity") if isinstance(item, dict) else None
+        if not isinstance(entity, dict) or str(entity.get("review_status") or "") != "approved":
+            continue
+        attrs = entity.get("attributes")
+        if not isinstance(attrs, dict):
+            continue
+        entity_product = str(attrs.get("product_code") or entity.get("business_key") or "")
+        if entity_product != product_code:
+            continue
+        lines = attrs.get("lines")
+        if not isinstance(lines, list):
+            continue
+        normalized: list[dict[str, Any]] = []
+        for index, line in enumerate(lines, start=1):
+            if not isinstance(line, dict) or not str(line.get("material_code") or "").strip():
+                continue
+            normalized.append({
+                "line_id": str(line.get("line_id") or line.get("line_no") or f"{product_code}::BOM-{index}"),
+                "material_code": str(line.get("material_code") or ""),
+                "material_name": str(line.get("material_name") or line.get("material_code") or ""),
+                "quantity_per": line.get("quantity_per", line.get("quantity", 0)),
+                "quantity": line.get("quantity", line.get("quantity_per", 0)),
+                "uom": str(line.get("uom") or line.get("unit") or "pcs"),
+                "loss_rate": line.get("loss_rate", 0),
+                "requires_procurement": line.get("requires_procurement", True),
+            })
+        return normalized
+    return []
+
+
+def _read_m0_product_overview(state: RunState, product_code: str) -> dict[str, Any]:
+    """Best-effort M0 canonical read; callers fail closed when it is unavailable."""
+    base_url = str(os.getenv("M0_URL") or "").rstrip("/")
+    tenant_id = str(state.get("tenant_id") or "").strip()
+    if not base_url or not tenant_id or not product_code:
+        return {}
+    url = f"{base_url}/api/m0/catalog/products/{product_code}/overview"
+    request = Request(url, headers={"X-Tenant-ID": tenant_id, "Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=float(os.getenv("M0_CATALOG_TIMEOUT_S", "3"))) as response:
+            body = response.read()
+        parsed = json.loads(body.decode("utf-8"))
+        return parsed if isinstance(parsed, dict) else {}
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError):
+        return {}
 
 
 def read_approved_route(state: RunState) -> list[dict[str, Any]]:
@@ -247,9 +308,13 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                            missing_fields=["m1 订单 header.product_code"],
                            required_tool="ingest_document",
                            recovery="请先完成 M1 解析/复核，使订单产品编码成为权威事实")
-        bom_lines = read_approved_bom(state)
+        approved_bom = read_approved_bom(state)
+        bom_lines = approved_bom
         if not bom_lines:
             bom_lines = request.get("bom_lines") or []
+        if not bom_lines:
+            m0_overview = _read_m0_product_overview(state, product_code)
+            bom_lines = _bom_lines_from_overview(m0_overview, product_code)
         routing_steps = read_approved_route(state)
         attachments = [item for item in (request.get("attachments") or [])
                        if isinstance(item, dict) and item.get("kind") == "master_data"]
@@ -284,7 +349,11 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             "bom_files": request.get("bom_files") or attachments,
             "sop_files": request.get("sop_files") or attachments,
             "use_demo_sources": False,
-            "_source": {"module": "m1", "ref": "ingest_document", "evidence": bool(order)},
+            "_source": {
+                "module": "m0" if not approved_bom and not request.get("bom_lines") else "m1",
+                "ref": "get_m0_product_overview" if not approved_bom and not request.get("bom_lines") else "ingest_document",
+                "evidence": bool(order),
+            },
         }
     if tool == "run_m3_procurement_requirements":
         order = read_order(state)

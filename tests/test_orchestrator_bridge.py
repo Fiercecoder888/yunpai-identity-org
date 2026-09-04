@@ -11,6 +11,7 @@
 import pytest
 
 from yunpai_langgraph.models import new_state
+import yunpai_langgraph.orchestration_bridge as orchestration_bridge
 from yunpai_langgraph.orchestration_bridge import bridge_payload
 from yunpai_langgraph.planning_snapshot import (
     assemble_bundle, bundle_checksum, checksum_of, finalize, snapshot_header,
@@ -61,6 +62,40 @@ def test_m2_payload_uses_semantic_supplement_for_missing_header_product_code():
     }
     payload = bridge_payload(state, "run_bom_sop_workflow")
     assert payload["product_profile"]["product_code"] == "W-H909"
+
+
+def test_m2_payload_reads_approved_m0_bom_when_request_has_no_bom(monkeypatch):
+    state = _approved_m2_state({"bom_lines": [], "legacy_preview": False})
+    state["outputs"]["run_bom_sop_workflow"] = {}
+    monkeypatch.setattr(orchestration_bridge, "_read_m0_product_overview", lambda *_args: {
+        "success": True,
+        "data": {"indexes": {"boms": [{"entity": {
+            "business_key": "P-1", "review_status": "approved",
+            "attributes": {"product_code": "P-1", "lines": [
+                {"line_no": "1", "material_code": "MAT-1", "material_name": "Material", "quantity": "3", "uom": "pcs"},
+            ]},
+        }}]}},
+    })
+    payload = bridge_payload(state, "run_bom_sop_workflow")
+    assert payload["bom_lines"][0]["material_code"] == "MAT-1"
+    assert payload["bom_lines"][0]["quantity_per"] == "3"
+    assert payload["_source"]["ref"] == "get_m0_product_overview"
+
+
+def test_m2_payload_ignores_unapproved_or_wrong_product_m0_bom(monkeypatch):
+    state = _approved_m2_state({"bom_lines": [], "legacy_preview": False})
+    state["outputs"]["run_bom_sop_workflow"] = {}
+    monkeypatch.setattr(orchestration_bridge, "_read_m0_product_overview", lambda *_args: {
+        "data": {"indexes": {"boms": [{"entity": {
+            "business_key": "OTHER", "review_status": "approved",
+            "attributes": {"product_code": "OTHER", "lines": [{"material_code": "BAD", "quantity": 1}]},
+        }}, {"entity": {
+            "business_key": "P-1", "review_status": "candidate",
+            "attributes": {"product_code": "P-1", "lines": [{"material_code": "DRAFT", "quantity": 1}]},
+        }}]}},
+    })
+    payload = bridge_payload(state, "run_bom_sop_workflow")
+    assert payload["bom_lines"] == []
 
 
 def test_m3_without_approved_bom_returns_blocked_input():
