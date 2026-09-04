@@ -105,16 +105,33 @@ def test_missing_fields_block_rates_are_structured(tmp_path):
 
 
 def test_no_false_production_claim_from_local_fixture(tmp_path):
-    """本地 fixture 绝不断言 canonical/committed 生产事实。"""
-    from yunpai_langgraph.workers import m0_commit
+    """本地 sandbox 绝不断言 canonical/committed 生产事实。"""
+    from yunpai_langgraph.workers import m0_commit, m0_import
 
     import asyncio
+    import base64
+    import os
+    import tempfile
 
-    result = asyncio.run(m0_commit({"batch_id": "batch-fixture-1"}, {"task_id": "TASK-FIX-1"}))
-    assert result["canonical"] is False
-    assert result["provider"] == "local_fixture"
-    assert result["readback"]["available"] is False
-    assert "committed" != result["status"]
+    sandbox_db = os.path.join(tempfile.mkdtemp(), "m0-sandbox.sqlite")
+    prior = os.environ.get("YUNPAI_M0_SANDBOX_DB")
+    os.environ["YUNPAI_M0_SANDBOX_DB"] = sandbox_db
+    try:
+        imported = asyncio.run(m0_import(
+            {"files": [{"filename": "fixture.json", "content_b64": base64.b64encode(b'{"records":[]}').decode()}]},
+            {"task_id": "TASK-FIX-1", "tenant_id": "default"},
+        ))
+        result = asyncio.run(m0_commit({"batch_id": imported["batch_id"]}, {"task_id": "TASK-FIX-1"}))
+        assert result["canonical"] is False
+        assert result["provider"] == "local_fixture"
+        assert result["environment"] == "sandbox"
+        assert result["readback"]["available"] is False
+        assert "committed" != result["status"]
+    finally:
+        if prior is None:
+            os.environ.pop("YUNPAI_M0_SANDBOX_DB", None)
+        else:
+            os.environ["YUNPAI_M0_SANDBOX_DB"] = prior
 
 
 def test_planner_routes_master_data_upload_without_filename_hacks():

@@ -13,7 +13,7 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     assert health["status"] == "ok"
     assert health["module"] == "yunpai-langgraph"
     assert health["tools"] == 114
-    assert health["bound_tools"] == 7
+    assert health["bound_tools"] == 10
     assert health["skills"] == 8
     assert health["planner_model"]["provider"] == "qwen"
     created = client.post("/runs", json=workflow_request()).json()

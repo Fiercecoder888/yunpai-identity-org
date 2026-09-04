@@ -15,7 +15,9 @@ def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
     assert len(registry.specs) == 114
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
-    assert len(registry.handlers) == 7
+    # 本地绑定：M0 五工具（run/status/preview/resolve/commit）+ M1-M5 五工具。
+    assert len(registry.handlers) == 10
+    assert {"data_import_run", "data_import_status", "data_import_preview", "data_import_resolve", "data_import_commit"} <= set(registry.handlers)
 
 
 def test_packaged_and_documented_manifests_are_identical():
