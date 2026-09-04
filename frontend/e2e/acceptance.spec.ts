@@ -37,6 +37,51 @@ test('renders three-column workspace and upload menu', async ({ page }, testInfo
   await page.screenshot({ path: screenshotPath('01-initial', testInfo.project.name), fullPage: true });
 });
 
+test('preserves the compact progress rail visual structure', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'Desktop geometry checks run in the desktop project.');
+  await mockApi(page); await page.goto('/');
+  const metrics = await page.evaluate(() => {
+    const rail = document.querySelector<HTMLElement>('[data-testid="progress-rail"]');
+    const wrap = document.querySelector<HTMLElement>('.right-panel-wrap');
+    const module = document.querySelector<HTMLElement>('.module-progress');
+    const node = document.querySelector<HTMLElement>('.module-node');
+    const line = document.querySelector<HTMLElement>('.progress-line');
+    const current = document.querySelector<HTMLElement>('.current-agent-box');
+    if (!rail || !wrap || !module || !node || !line || !current) throw new Error('progress rail DOM is incomplete');
+    const railRect = rail.getBoundingClientRect();
+    const wrapRect = wrap.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const lineRect = line.getBoundingClientRect();
+    return {
+      viewportHeight: window.innerHeight,
+      railTop: railRect.top,
+      railBottom: railRect.bottom,
+      wrapTop: wrapRect.top,
+      wrapBottom: wrapRect.bottom,
+      railOverflow: getComputedStyle(rail).overflowY,
+      moduleDisplay: getComputedStyle(module).display,
+      nodeDisplay: getComputedStyle(node).display,
+      nodeWidth: nodeRect.width,
+      nodeHeight: nodeRect.height,
+      nodeRadius: getComputedStyle(node).borderRadius,
+      lineHeight: lineRect.height,
+      currentVisible: getComputedStyle(current).display !== 'none',
+    };
+  });
+  expect(Math.abs(metrics.railTop)).toBeLessThan(1);
+  expect(Math.abs(metrics.railBottom - metrics.viewportHeight)).toBeLessThan(1);
+  expect(Math.abs(metrics.wrapTop)).toBeLessThan(1);
+  expect(Math.abs(metrics.wrapBottom - metrics.viewportHeight)).toBeLessThan(1);
+  expect(metrics.railOverflow).toBe('auto');
+  expect(metrics.moduleDisplay).toBe('grid');
+  expect(metrics.nodeDisplay).toBe('grid');
+  expect(metrics.nodeWidth).toBe(25);
+  expect(metrics.nodeHeight).toBe(25);
+  expect(metrics.nodeRadius).toBe('50%');
+  expect(metrics.lineHeight).toBeGreaterThan(0);
+  expect(metrics.currentVisible).toBe(true);
+});
+
 test('uploads an order, streams the gate and renders the completed result', async ({ page }, testInfo) => {
   await mockApi(page); await page.goto('/');
   await page.getByRole('button', { name: '上传或导入' }).click(); await page.getByRole('menuitem', { name: /上传订单/ }).click();
@@ -78,8 +123,13 @@ test('keeps panels usable on mobile', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-mobile', 'Mobile drawer checks run in the mobile project.');
   await mockApi(page); await page.goto('/');
   await page.getByRole('button', { name: '打开任务列表' }).click(); await expect(page.getByTestId('left-rail')).toBeVisible();
-  await page.locator('.mobile-scrim').click({ position: { x: 380, y: 20 } });
-  await page.getByRole('button', { name: '打开执行进度' }).click(); await expect(page.getByTestId('progress-rail')).toBeVisible();
+  const scrim = page.locator('.mobile-scrim');
+  await expect(scrim).toBeVisible();
+  await scrim.click({ position: { x: 195, y: 400 } });
+  await expect(scrim).toBeHidden();
+  await page.getByRole('button', { name: '打开执行进度' }).click();
+  await expect(page.locator('.right-panel-wrap')).toHaveClass(/panel-open/);
+  await expect(page.getByTestId('progress-rail')).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   expect(overflow).toBe(false);
   await page.screenshot({ path: screenshotPath('03-mobile', testInfo.project.name), fullPage: true });
