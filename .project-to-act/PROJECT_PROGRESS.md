@@ -12,7 +12,7 @@
 | P-004 | 已阻塞 | zhb / 集成负责人 | 逐类核对 M0 -> GB10 39092 的来源 SHA、候选审核、canonical 表和写入回读；具备 M0 受控写入条件后补传并逐笔复核 | E-0904-M0-GB10-RECON-001 | 2026-09-04 |
 | P-005 | 已规划 | zhb / DeepSeek Harness | 按任务书完成上传识别、M0 canonical、下游 M1-M5/PMC 实施；从最新 main 同步 dev，在 GB10 测试，通过后推送并发起合并 | E-PLAN-DEEPSEEK-HARNESS-001 | 2026-09-04 |
 | P-006 | 已完成 | Codex / M1 接包开发者 | 独立 M1 Tool/Skill 任务包包含基线、17 个工具/Skill 差距、逐项源码映射、净化源码、实施合同及分层验收要求；包完整性和项目回归通过 | E-HANDOFF-M1-001 | 2026-09-04 |
-| P-007 | 已规划 | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate，在 GB10 用真实订单完成 M1-M5 发布回读 | E-PLAN-M1M5-ORCH-001 | 2026-09-04 |
+| P-007 | 代码集成完成，GB10 真实验收待外部条件 | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate；完整后端测试 292 passed，GB10 真实订单发布回读待受信 principal 与 M0/M3/M4 可达 | E-M1M5-ORCH-CODE-001 | 2026-09-05 |
 | P-008 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过（从 origin/main 并入 dev 时登记，原并行分支编号 P-006 与 M1 handoff 撞号） | E-M3M4-TOOLS-001 | 2026-09-04 |
 | P-009 | 已完成（代码验收） | DeepSeek Harness / s-m1-tools-20260904 | M1 17 个 Tool 全部绑定（专用 HTTP Adapter）与 Skill 全操作映射落地，117 项测试通过（从 M1 分支并入 dev 时登记，原并行分支编号 P-007 与 orchestration 规划撞号） | E-M1-TOOLS-001 | 2026-09-04 |
 
@@ -23,6 +23,7 @@
 | Windows 工作树 JSON 换行导致 provenance 字节哈希测试误报 | 完整 pytest 在该环境多 1 个失败；运行代码与 Git blob 内容未受影响 | 统一仓库 EOL 或在 Linux/CI 复核 | 已记录 |
 | 39092 未暴露 M0 canonical 写入链路 | 只能核对 orchestrator 候选 SQLite，不能证明产品/物料/设备/人员/财务等 canonical 落库；直接补写会绕过审核和 Outbox | 部署方提供可访问的 M0 base URL、PostgreSQL schema/权限、审核授权和写入回读接口 | 新增，未解除 |
 | 本机无可达 M3/M4 独立服务 | 已完成 Adapter、合同、Gate 和 mock HTTP 全链路验证，但无法声明真实服务或数据库验收 | 提供可访问的 M3_URL、M4_URL、认证信息及受控数据库回读条件 | 外部联调待办 |
+| GB10 审批身份/角色与真实订单样本未人工指定 | 已实现受信 principal/角色 Gate 与真实 M5 release 落库代码，但不能用 fake principal 或未知订单冒充生产验收 | 人工确认：M0 candidate/M1 review/engineering/procurement/M5 apply 审批人角色与脱敏真实订单；配置 X-Yunpai-Principal 注入 | 新增，未解除 |
 
 ## 下一步
 
@@ -33,6 +34,8 @@
 ## 进度历史
 
 按时间倒序追加：日期、完成事项、证据 ID、遗留问题、下一步和确认来源。不要覆盖旧记录。
+
+- 2026-09-05：完成 M1-M5 Orchestrator 集成代码与本地验收；集成 origin/dev(M5)+origin/main(M3/M4)+M1 分支到 dev；新增 m1_m5_document_to_plan/canonical_to_m5 workflow、多格式上传入口、required-capability Gate、orchestration_bridge 六类 snapshot、Apply Gate 真实 M5 release（单事务 draft→approved→released+head CAS）、受信 principal/角色 Gate、MES durable pending 边界；完整后端 292 passed、2 skipped，账本/diff 通过；证据 E-M1M5-ORCH-CODE-001；遗留为 GB10 真实订单发布回读需人工审批角色与样本；确认来源：本次实施与验证。
 
 - 2026-09-04：生成不依赖聊天历史的 M1-M5 Orchestrator 直接执行任务书；证据 `E-PLAN-M1M5-ORCH-001`；任务书列明当前工具分支、全部基础资料位置、GB10/Qwen、九个流程断点、六项实施任务、真实 E2E 门槛和最终回执；当前只完成规划与任务交接，尚未实施或声明生产闭环完成；确认来源：用户请求。
 - 2026-09-04：完成 M3/M4 代码实现和本地验收；补齐 M3/M4 HTTP Adapter、39 个目标工具映射、Skill operation、授权 Gate、错误映射和 M3→M4 集成测试；完整 pytest 69 项通过，本地 FastAPI 运行态为 114/45 bound；遗留为真实 M3/M4 服务不可达；证据 E-M3M4-TOOLS-001；确认来源：本次实施与验证。
