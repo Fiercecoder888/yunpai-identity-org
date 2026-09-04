@@ -138,3 +138,35 @@ async def test_m0_readback_report_dry_run_and_production(sandbox_env):
     production = store.readback_report(batch_id, real_m0_available=True)
     assert production["canonical_readback_available"] is True
     assert production["environment"] == "production"
+
+
+@pytest.mark.asyncio
+async def test_m0_import_isolates_bad_files_and_retry_is_idempotent(sandbox_env):
+    """混合批次：好文件登记、坏文件 quarantine、整体不 failed；重试不重复写入。"""
+    ctx = {"task_id": "TASK-M0-ISOLATE", "tenant_id": "default"}
+    good = {"filename": "ok.json", "content_b64": base64.b64encode(json.dumps({"records": [{"kind": "order"}]}).encode()).decode()}
+    bad_b64 = {"filename": "bad-base64.json", "content_b64": "!!!not-base64!!!"}
+    fake_ext = {"filename": "fake.xlsx", "content_b64": base64.b64encode(b"plain text not xlsx").decode()}
+    empty = {"filename": "empty.json", "content_b64": ""}
+    files = [good, bad_b64, fake_ext, empty]
+
+    first = await m0_import({"files": files}, ctx)
+    assert first["status"] == "awaiting_review"  # 坏文件不使整体失败
+    batch_id = first["batch_id"]
+    quarantined = {item["filename"] for item in first["quarantined"]}
+    assert {"bad-base64.json", "fake.xlsx", "empty.json"} <= quarantined
+    preview = await m0_preview({"batch_id": batch_id}, ctx)
+    assert [doc["filename"] for doc in preview["documents"]] == ["ok.json"]
+
+    # 重试同输入：成功文件不重复登记。
+    second = await m0_import({"files": files}, ctx)
+    assert second["batch_id"] == batch_id
+    preview_again = await m0_preview({"batch_id": batch_id}, ctx)
+    assert len(preview_again["documents"]) == 1
+
+    # 重试仅坏文件：此前成功文件不在 payload，重新登记为新文件也幂等（不同 task 快照各自 batch）。
+    retry_ctx = {"task_id": "TASK-M0-ISOLATE-R", "tenant_id": "default"}
+    retried = await m0_import({"files": [good, bad_b64]}, retry_ctx)
+    assert retried["status"] == "awaiting_review"
+    retry_preview = await m0_preview({"batch_id": retried["batch_id"]}, retry_ctx)
+    assert len(retry_preview["documents"]) == 1  # 只登记 good
