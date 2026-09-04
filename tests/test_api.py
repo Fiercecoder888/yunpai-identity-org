@@ -54,14 +54,20 @@ def test_api_accepts_request_envelope_and_rejects_invalid_resume(tmp_path):
     )
     assert rejected.status_code == 200
     assert rejected.json()["outputs"] == {}
-    # body actor 冒充受信身份：无受信 principal 头时非受信 actor 只能做 operator 决策；
-    # 一旦 approval/apply 类决策需要角色，冒充会被 403 拒绝。
-    conflict = client.post(
+    # body actor 冒充受信身份 -> 403（T5.4 impersonation）。
+    impersonated = client.post(
         f"/runs/{created['run_id']}/resume",
         json={"decision": "approve", "actor": "not-steward"},
         headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
     )
-    # run 已 failed（reject 终止），重复 resume 报 409 run is not waiting_human
+    assert impersonated.status_code == 403
+    assert impersonated.json()["detail"]["code"] == "ACTOR_IMPERSONATION"
+    # run 已 failed（reject 终止），一致 principal 重复 resume 报 409 run is not waiting_human
+    conflict = client.post(
+        f"/runs/{created['run_id']}/resume",
+        json={"decision": "approve", "actor": "steward"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward,admin"},
+    )
     assert conflict.status_code == 409
     skills = {item["name"]: item for item in client.get("/skills").json()["skills"]}
     assert "business-data-identification" in skills

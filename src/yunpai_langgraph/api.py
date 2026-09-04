@@ -55,10 +55,17 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         return {}, False
 
     def _principal_actor(principal: dict[str, Any], trusted: bool, body: dict[str, Any]) -> tuple[str, list[str]]:
+        body_actor = str(body.get("actor") or "")
         if trusted:
-            return str(principal.get("actor") or ""), list(principal.get("roles") or [])
-        # dev/preview 降级：不接受 body 冒充受信身份，仅标记非受信。
-        return str(body.get("actor") or "operator"), []
+            actor = str(principal.get("actor") or "")
+            if body_actor and body_actor != actor:
+                # T5.4：body 冒充受信 principal 必须拒绝并记录审计。
+                raise HTTPException(403, {"code": "ACTOR_IMPERSONATION",
+                                          "message": f"请求体 actor={body_actor} 与受信 principal={actor} 不一致，拒绝冒充审批"})
+            return actor, list(principal.get("roles") or [])
+        # dev/preview 降级：无受信头时 body actor 不构成受信身份；若部署方
+        # 要求受信（YUNPAI_REQUIRE_TRUSTED_PRINCIPAL=1）已在解析处拒绝。
+        return body_actor or "operator", []
 
     @app.get("/health")
     async def health():
@@ -264,8 +271,11 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         decision = str(body.get("decision", "allow"))
         try:
             graph.validate_resume_decision(state, decision, body.get("supplement"))
-            graph.authorize_gate(state, actor=actor, roles=roles,
-                                 tenant_id=principal.get("tenant_id") or None)
+            if trusted:
+                # 只有受信 principal 才做角色/租户 Gate；本地无认证降级路径
+                # 保留操作能力但审计标记 untrusted_body（生产强制受信）。
+                graph.authorize_gate(state, actor=actor, roles=roles,
+                                     tenant_id=principal.get("tenant_id") or None)
         except ValueError as exc:
             status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
             raise HTTPException(status, str(exc)) from exc
@@ -305,8 +315,9 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(409, "unsupported gate decision")
         try:
             graph.validate_resume_decision(state, decision, body.get("supplement"))
-            graph.authorize_gate(state, actor=actor, roles=roles,
-                                 tenant_id=principal.get("tenant_id") or None)
+            if trusted:
+                graph.authorize_gate(state, actor=actor, roles=roles,
+                                     tenant_id=principal.get("tenant_id") or None)
         except ValueError as exc:
             status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
             raise HTTPException(status, str(exc)) from exc

@@ -37,16 +37,18 @@ def _open_authorization_gate(client):
 
 def test_body_actor_impersonation_is_rejected(client):
     run_id = _open_authorization_gate(client)
-    # body 自称 zhb 但没有受信 principal 头：authorization Gate 需要 operator/admin，
-    # 无角色 -> 403；同时 actor 未被采信。
-    resp = client.post(f"/runs/{run_id}/resume",
-                       json={"decision": "approve", "actor": "zhb"})
-    assert resp.status_code == 403
-    assert "需要角色" in resp.text or "operator" in resp.text
-    # 提供受信头后，body 中不同的 actor 被忽略，实际以 header actor 审批。
-    ok = client.post(
+    # 提供受信头后，body 中冒充的 actor 被拒绝（T5.4 impersonation）。
+    denied = client.post(
         f"/runs/{run_id}/resume",
         json={"decision": "approve", "actor": "imposter"},
+        headers={"X-Actor-User": "op-1", "X-Actor-Roles": "operator"},
+    )
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "ACTOR_IMPERSONATION"
+    # 一致的受信 actor 放行，审批主体来自 principal 头而非 body。
+    ok = client.post(
+        f"/runs/{run_id}/resume",
+        json={"decision": "approve", "actor": "op-1"},
         headers={"X-Actor-User": "op-1", "X-Actor-Roles": "operator"},
     )
     assert ok.status_code == 200
@@ -60,7 +62,7 @@ def test_json_principal_header_supported(client):
     run_id = _open_authorization_gate(client)
     resp = client.post(
         f"/runs/{run_id}/resume",
-        json={"decision": "approve", "actor": "fake"},
+        json={"decision": "approve", "actor": "zhb"},
         headers={"X-Yunpai-Principal": json.dumps({"actor": "zhb", "roles": ["admin"], "tenant_id": "tenant-a"})},
     )
     assert resp.status_code == 200
