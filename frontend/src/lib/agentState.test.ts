@@ -32,13 +32,6 @@ describe('agent state reducer', () => {
     expect(deriveUploadSummary(fromOutputs)?.accepted).toBe(1);
   });
 
-  it('summarizes PMC P1 objective metrics', () => {
-    const state = applyEvent(emptyAgentState(), event('run_done', { state: { run_id: 'run-1', task_id: 'task-1', status: 'completed', outputs: {
-      solve_scheduling: { data: { lifecycle_status: 'draft', schedule: { metrics: { makespan_minutes: 120, on_time_rate: 0.5, total_tardiness_minutes: 90, resource_load_minutes: 180 } } } },
-    } } }));
-    expect(summarizeResult(state)).toEqual({ scheduleMinutes: 120, lifecycle: 'draft', onTimeRate: 0.5, tardinessMinutes: 90, resourceLoadMinutes: 180 });
-  });
-
   it('summarizes M0 sandbox batch state without canonical claim', () => {
     const state = applyEvent(emptyAgentState(), event('run_done', { state: { run_id: 'run-1', task_id: 'task-1', status: 'waiting_human', outputs: {
       data_import_run: { batch_id: 'batch-TASK-M0-1', environment: 'sandbox', canonical: false },

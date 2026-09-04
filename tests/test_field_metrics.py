@@ -158,3 +158,47 @@ def test_supplier_field_metrics(tmp_path):
     truth = {(2, "supplier_code"): "S-1", (2, "supplier_name"): "苏州厂"}
     metrics = _precision_recall(truth, observed, fields={"supplier_code", "supplier_name", "material_code"})
     assert metrics["recall"] >= 0.9, f"supplier recall {metrics['recall']}: {metrics} obs={observed}"
+
+
+def test_sop_field_metrics(tmp_path):
+    """sop（工站/作业步骤/投入人数）字段命中，required 映射一致。"""
+    raw = fixtures.xlsx_bytes(["工站", "作业步骤", "投入人数", "材料"], [["S-1", "锁付", 2, "螺丝"]])
+    from pathlib import Path
+    import tempfile
+    from yunpai_langgraph.business_catalog import extract_file
+
+    tmp = Path(tempfile.mkdtemp())
+    path = tmp / "sop.xlsx"
+    path.write_bytes(raw)
+    extracted = extract_file(path, root=tmp, parse_xlsx=True)
+    assert extracted["file_kind"] == "sop"
+    observed = {}
+    for observation in extracted.get("field_observations", []):
+        if observation.get("row") is not None and observation.get("semantic_type") and observation.get("raw_value") not in (None, ""):
+            observed[(observation["row"], observation["semantic_type"])] = observation["raw_value"]
+    truth = {(2, "station"): "S-1", (2, "step_name"): "锁付", (2, "worker_count"): "2"}
+    metrics = _precision_recall(truth, observed, fields={"station", "step_name", "worker_count"})
+    assert metrics["recall"] >= 0.9, f"sop recall {metrics['recall']}: {metrics} obs={observed}"
+    assert metrics["precision"] >= 0.9
+
+
+def test_calendar_field_metrics(tmp_path):
+    """calendar（日期/班次/开始/结束）字段命中，required 映射一致。"""
+    raw = fixtures.xlsx_bytes(["日期", "班次", "开始时间", "结束时间"], [["2026-09-01", "白班", "08:00", "17:00"]])
+    from pathlib import Path
+    import tempfile
+    from yunpai_langgraph.business_catalog import extract_file
+
+    tmp = Path(tempfile.mkdtemp())
+    path = tmp / "calendar.xlsx"
+    path.write_bytes(raw)
+    extracted = extract_file(path, root=tmp, parse_xlsx=True)
+    assert extracted["file_kind"] == "calendar"
+    observed = {}
+    for observation in extracted.get("field_observations", []):
+        if observation.get("row") is not None and observation.get("semantic_type") and observation.get("raw_value") not in (None, ""):
+            observed[(observation["row"], observation["semantic_type"])] = observation["raw_value"]
+    truth = {(2, "calendar_date"): "2026-09-01", (2, "shift"): "白班", (2, "start_time"): "08:00", (2, "end_time"): "17:00"}
+    metrics = _precision_recall(truth, observed, fields={"calendar_date", "shift", "start_time", "end_time"})
+    assert metrics["recall"] >= 0.9, f"calendar recall {metrics['recall']}: {metrics} obs={observed}"
+    assert metrics["precision"] >= 0.9

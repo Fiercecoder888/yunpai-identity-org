@@ -209,50 +209,6 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             )
         )
 
-    # ---- PMC 计划/执行双轨只读与管理端点（本地 fixture 语义；HTTP 真实 M5 由部署方提供） ----
-
-    def _plan_store_path() -> Path:
-        path = Path(os.getenv("YUNPAI_PLAN_DB", "runtime/yunpai-plans.sqlite"))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
-
-    @app.get("/plans/{scenario_id}")
-    async def list_plans(scenario_id: str):
-        from .pmc_plan_store import PmcPlanStore
-
-        return {"scenario_id": scenario_id, "versions": PmcPlanStore(_plan_store_path()).list_versions(scenario_id)}
-
-    @app.get("/plans/{scenario_id}/diff")
-    async def diff_plans(scenario_id: str, left: str, right: str):
-        from .pmc_plan_store import PmcPlanStore
-
-        try:
-            return PmcPlanStore(_plan_store_path()).diff_versions(scenario_id, left, right)
-        except ValueError as exc:
-            raise HTTPException(404, str(exc)) from exc
-
-    @app.post("/plans/{scenario_id}/{plan_version}/transition")
-    async def transition_plan(scenario_id: str, plan_version: str, body: dict[str, Any]):
-        from .pmc_plan_store import PmcPlanStore
-
-        target = str(body.get("target") or "")
-        try:
-            result = PmcPlanStore(_plan_store_path()).transition(
-                scenario_id=scenario_id, plan_version=plan_version, target=target,
-                actor=str(body.get("actor") or "operator"), task_id=str(body.get("task_id") or ""),
-            )
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
-        return result
-
-    @app.get("/pmc/execution/{plan_version}")
-    async def pmc_execution_summary(plan_version: str):
-        from .pmc_execution import PmcExecutionStore
-
-        db_path = Path(os.getenv("YUNPAI_EXEC_DB", "runtime/yunpai-execution.sqlite"))
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        return PmcExecutionStore(db_path).execution_summary(plan_version)
-
     @app.get("/m0/readback/{batch_id}")
     async def m0_readback(batch_id: str):
         """M0 canonical 回读报告（dry-run 语义）。
