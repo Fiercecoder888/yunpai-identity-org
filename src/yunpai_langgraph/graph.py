@@ -440,7 +440,7 @@ class YunpaiGraph:
                 "bom_items": bom_items,
                 "routing_steps": routing_steps,
                 "requirement_text": str(request.get("requirement_text") or request.get("message") or ""),
-                "rule_package_path": str(request.get("rule_package_path") or "/app/m2_bom_sop_agent/bom"),
+                "rule_package_path": str(request.get("rule_package_path") or "/home/soft/yunpai/prod-39092/app/m8/material_numbering"),
                 "document_no": str(request.get("document_no") or product.get("product_code") or "M2-DRAFT"),
                 "history_bom_paths": request.get("history_bom_paths") or [],
                 "history_sop_paths": request.get("history_sop_paths") or [],
