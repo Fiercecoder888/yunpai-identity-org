@@ -13,8 +13,10 @@
 | Task 3/4/5 17 个 handler + lifecycle + progress/readiness + messages/knowledge/procurement | 完成 | `2a189f4` |
 | Task 6 Skill operation 映射与 agents Gate 同步 | 完成 | 同 `2a189f4` |
 | 测试矩阵（strict/tool binding/skill ops/http+metrics/lifecycle tools） | 完成 | `b437c32` |
+| solve 落库幂等（registry 真实入口 replay/conflict） | 完成 | `a7a89b6` |
+| session 报告 | 完成 | `27fac5f` |
 
-本地回归：**99 passed**（原 60 passed 基线全部保留并按新合同等价升级；新增约 39 项 M5 测试）。
+本地回归：**103 passed**（原 60 passed 基线全部保留并按新合同等价升级；新增 43 项 M5 测试；最近一轮又补 solve 落库幂等 4 项）。
 
 Registry 数量实测：工具总数 **114**、M5 manifest **20**、Skill **8**；M5 已绑定 **18**（17 新增 + solve_scheduling），排除工具 `report_workload`/`bind_worker_to_order` 保持未绑定且不在任何 Skill。
 
@@ -70,8 +72,8 @@ advise_m5_schedule / run_m5_intelligent_schedule / generate_m5_material_procurem
 
 | 项 | 值 |
 |---|---|
-| local_tests_passed | ✅ 99 passed（.venv/bin/python -m pytest -q，exit 0） |
-| contract_tests_passed | ✅ strict/binding/skill/http/metrics/lifecycle 契约测试全绿 |
+| local_tests_passed | ✅ 103 passed（.venv/bin/python -m pytest -q，exit 0） |
+| contract_tests_passed | ✅ strict/binding/skill/http/metrics/lifecycle/solve-idempotency 契约测试全绿 |
 | real_http_readback | ❌ 阻塞：本工作区无 `m5-api:8000`/GB10 M5 服务可读（未运行） |
 | real_db_readback | ⚠️ 本地 sqlite 读回已验证（runtime/yunpai-m5.sqlite 语义）；生产 DB 读回待 GB10 联调 |
 | lifecycle_verified | ✅ 本地 repository 状态机 + 事件日志（approved/released/dispatched/execution） |
