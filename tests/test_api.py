@@ -153,5 +153,35 @@ def test_api_batch_upload_flags_empty_files_as_skipped(tmp_path):
     assert summary["total"] == 2
     statuses = {item["filename"]: item["status"] for item in summary["files"]}
     assert statuses["a.xlsx"] == "skipped"
-    assert statuses["a.xlsx"] or True
     assert any(item["reason"] for item in summary["files"])
+
+
+def test_api_pmc_plan_and_execution_endpoints(tmp_path, monkeypatch):
+    import json
+
+    from yunpai_langgraph.pmc_plan_store import PmcPlanStore
+
+    plan_db = tmp_path / "plans.sqlite"
+    exec_db = tmp_path / "exec.sqlite"
+    monkeypatch.setenv("YUNPAI_PLAN_DB", str(plan_db))
+    monkeypatch.setenv("YUNPAI_EXEC_DB", str(exec_db))
+    store = PmcPlanStore(plan_db)
+    store.save_draft(scenario_id="SC-API-1", purpose="production", payload={"orders": []}, input_hash="h", solver_hash="s", idempotency_key="ik-1", task_id="T-1")
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "api-pmc.sqlite")))
+
+    versions = client.get("/plans/SC-API-1").json()
+    assert versions["versions"][0]["plan_version"] == "SC-API-1::v1"
+
+    transitioned = client.post("/plans/SC-API-1/SC-API-1::v1/transition", json={"target": "approved", "actor": "zhb"})
+    assert transitioned.status_code == 200
+    assert transitioned.json()["lifecycle_status"] == "approved"
+
+    # approved -> released 合法；跳过状态的 approved -> execution 非法 -> 409。
+    released = client.post("/plans/SC-API-1/SC-API-1::v1/transition", json={"target": "released", "actor": "zhb"})
+    assert released.status_code == 200
+    assert released.json()["lifecycle_status"] == "released"
+    rejected = client.post("/plans/SC-API-1/SC-API-1::v1/transition", json={"target": "execution"})
+    assert rejected.status_code == 409
+
+    summary = client.get("/pmc/execution/SC-API-1::v1").json()
+    assert summary["event_count"] == 0
