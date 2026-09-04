@@ -85,3 +85,41 @@ async def test_m0_resolve_rejects_bad_action_and_missing_id(sandbox_env):
         await m0_resolve({"batch_id": imported["batch_id"], "kind": "entity", "id": 1, "action": "maybe"}, ctx)
     with pytest.raises(ValueError, match="需要显式 id"):
         await m0_resolve({"batch_id": imported["batch_id"], "kind": "entity", "action": "approve"}, ctx)
+
+
+@pytest.mark.asyncio
+async def test_m0_chain_resolve_all_then_commit_tracks_batch_and_evidence(sandbox_env):
+    """编排级证据链：注册 -> preview -> 逐个 resolve -> require_resolved commit。
+
+    候选必须带 source(sha)/document_kind/confidence/review_status；commit 只做
+    fixture_recorded（无真实 M0 回读），绝不写入 canonical 断言。
+    """
+    ctx = {"task_id": "TASK-M0-E2E", "tenant_id": "tenant-1"}
+    imported = await m0_import(
+        {"files": _files({"records": [{"kind": "order"}]}, {"records": [{"kind": "bom"}]}, {"records": [{"kind": "supplier"}]})},
+        ctx,
+    )
+    batch_id = imported["batch_id"]
+    assert imported["readback"]["available"] is False
+
+    preview = await m0_preview({"batch_id": batch_id}, ctx)
+    assert len(preview["documents"]) == 3
+    for doc in preview["documents"]:
+        assert doc["sha256"]
+        assert doc["document_kind"] in {"order", "bom", "supplier"}
+        assert doc["confidence"] > 0
+        assert doc["review_status"] in {"candidate", "needs_review"}
+
+    for doc in preview["documents"]:
+        decided = await m0_resolve({"batch_id": batch_id, "kind": "entity", "id": doc["id"], "action": "approve"}, ctx)
+        assert decided["status"] == "approved"
+
+    status = await m0_status({"batch_id": batch_id}, ctx)
+    assert status["candidates"].get("approved", 0) == 3
+
+    committed = await m0_commit({"batch_id": batch_id, "require_resolved": True}, ctx)
+    assert committed["status"] == "fixture_recorded"
+    assert committed["canonical"] is False
+    assert committed["environment"] == "sandbox"
+    assert committed["readback"]["available"] is False
+    assert any(item.get("module") == "m0" for item in committed.get("evidence", []))
