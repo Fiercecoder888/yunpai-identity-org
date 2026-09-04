@@ -13,7 +13,8 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     assert health["status"] == "ok"
     assert health["module"] == "yunpai-langgraph"
     assert health["tools"] == 114
-    assert health["bound_tools"] == 10
+    # dev 本地 handler 10（M0 五+M1-M5 各一）+ pmctooldev 新增 17 个 M5 handler。
+    assert health["bound_tools"] == 27
     assert health["skills"] == 8
     assert health["planner_model"]["provider"] == "qwen"
     created = client.post("/runs", json=workflow_request()).json()

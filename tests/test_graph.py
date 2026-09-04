@@ -16,6 +16,9 @@ def workflow_request(*, shortage: bool = True):
         "inventory": [{"material_code": "MAT-1", "quantity": 2 if shortage else 6}],
         "routing_steps": [{"operation_id": "OP-1", "sequence": 1, "processing_minutes": 5}],
         "resources": [{"resource_id": "R-1", "status": "available"}],
+        # The m0_m5 chain runs on fixture/demo data only; PMC solve on this
+        # path must stay an explicit preview/sandbox run (P0-2 boundary).
+        "legacy_preview": True,
     }
 
 

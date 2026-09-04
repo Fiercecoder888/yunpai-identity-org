@@ -5,8 +5,8 @@ def _payload():
     resources = []
     for index in range(12):
         resources.extend([
-            {"resource_id": f"S-{index + 1:02d}", "resource_type": "STATION"},
-            {"resource_id": f"W-{index + 1:02d}", "resource_type": "PERSON", "qualified_operation_codes": [f"OP-{index + 1:02d}"]},
+            {"resource_id": f"S-{index + 1:02d}", "resource_type": "STATION", "calendar_ref": "CAL-PROD", "status": "available"},
+            {"resource_id": f"W-{index + 1:02d}", "resource_type": "PERSON", "qualified_operation_codes": [f"OP-{index + 1:02d}"], "calendar_ref": "CAL-PROD", "status": "available"},
         ])
     return {
         "idempotency_key": "streaming-regression",
@@ -15,9 +15,11 @@ def _payload():
         "production_use_allowed": True,
         "execution_model": "STREAMING_FLOW",
         "transfer_batch_size": 10,
-        "calendar_windows": [{"start_at": "2026-09-03T08:00:00+08:00", "end_at": "2026-09-03T17:00:00+08:00"}],
+        "calendar_windows": [{"calendar_ref": "CAL-PROD", "shift_code": "DAY", "start_at": "2026-09-03T08:00:00+08:00", "end_at": "2026-09-03T17:00:00+08:00"}],
         "resources": resources,
         "orders": [{"order_id": "PO-STREAM-001", "product_id": "W-H128", "quantity": 30, "uom": "PCS"}],
+        "supply_entries": [{"order_line_id": "PO-STREAM-001::L1", "readiness": "READY",
+                            "requirement_ref": "MAT-1", "inventory_snapshot_ref": "INV-1"}],
         "routing_steps": [
             {"product_id": "W-H128", "operation_id": f"OP-{i:02d}", "sequence": i,
              "operation_name": f"工序{i:02d}", "standard_minutes": 2 if i == 1 else 1,
@@ -55,12 +57,19 @@ def test_streaming_adapter_satisfies_registered_m5_output_contract():
     payload["tracking_task_id"] = "TASK-PMCV2-REGISTRY"
     payload["planning_start"] = "2026-09-03T08:00:00+08:00"
     payload["orders"][0]["due_time"] = "2026-09-04T17:00:00+08:00"
-    payload["resources"] = [{**item, "name": item.get("resource_id")} for item in payload["resources"]]
-    payload["resources"].append({"resource_id": "EQ-01", "name": "验证设备", "resource_type": "EQUIPMENT"})
+    payload["resources"] = [{**item, "name": item.get("resource_id"), "calendar_ref": item.get("calendar_ref") or "CAL-PROD"} for item in payload["resources"]]
+    payload["resources"].append({"resource_id": "EQ-01", "name": "验证设备", "resource_type": "EQUIPMENT",
+                                 "equipment_type": "machine", "capacity_per_hour": 60, "efficiency_factor": 1,
+                                 "calendar_ref": "CAL-PROD", "status": "available",
+                                 "capability_codes": ["ASSEMBLY"]})
     payload["routing_steps"] = [
-        {**item, "eligible_resources": [{"resource_id": "EQ-01", "processing_minutes": 1}]}
+        {**item, "approval_ref": "APPROVED-ROUTE-001",
+         "eligible_resources": [{"resource_id": "EQ-01", "processing_minutes": 1}]}
         for item in payload["routing_steps"]
     ]
+    payload["route_approval_ref"] = "APPROVED-ROUTE-001"
+    payload["route_code"] = "ROUTE-W-H128"
+    payload["route_version"] = "approved-v2"
     result = __import__("asyncio").run(
         build_default_registry().call("solve_scheduling", payload, {"task_id": "TASK-PMCV2-REGISTRY"})
     )

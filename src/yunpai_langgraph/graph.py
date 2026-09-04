@@ -507,7 +507,7 @@ class YunpaiGraph:
             for item in request.get("routing_steps", []):
                 eligible = item.get("eligible_resources") or [{"resource_id": resource_id, "processing_minutes": max(1, int(item.get("processing_minutes", 1)))} for resource_id in resource_ids[:1]]
                 routes.append({**item, "product_id": item.get("product_id") or product_id, "operation_name": item.get("operation_name") or item.get("operation_id"), "eligible_resources": eligible})
-            advanced = {key: request[key] for key in ("pmc_v2", "pmc_v2_bundle", "wip_pmc", "wip_pmc_mode", "production_use_allowed", "calendar_windows", "calendar", "resource_snapshot", "resource_unavailability", "supply_entries", "wip_status", "material_availability", "changeover_rules", "setup_matrix", "route_approval_ref", "route_version", "route_code") if key in request}
+            advanced = {key: request[key] for key in ("pmc_v2", "pmc_v2_bundle", "wip_pmc", "wip_pmc_mode", "production_use_allowed", "calendar_windows", "calendar", "resource_snapshot", "resource_unavailability", "supply_entries", "wip_status", "material_availability", "changeover_rules", "setup_matrix", "route_approval_ref", "route_version", "route_code", "legacy_preview") if key in request}
             # M1 order workbooks may contain multiple product lines. Preserve
             # those lines as separate M5 orders so routing and capacity are not
             # silently reduced to the first header product.
