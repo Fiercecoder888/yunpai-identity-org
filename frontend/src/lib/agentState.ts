@@ -1,4 +1,4 @@
-import type { Activity, ChatMessage, Gate, RunState, StreamEvent } from './types';
+import type { Activity, ChatMessage, Gate, RunState, Step, StreamEvent } from './types';
 import { MODULES } from './types';
 
 export type AgentUiState = {
@@ -23,6 +23,9 @@ export const emptyAgentState = (): AgentUiState => ({
   pendingGate: null, response: '', messages: [], activity: [],
 });
 
+function asArray<T>(value: unknown, fallback: T[]): T[] { return Array.isArray(value) ? value as T[] : fallback; }
+function asObject<T extends Record<string, unknown>>(value: unknown, fallback: T): T { return value && typeof value === 'object' && !Array.isArray(value) ? value as T : fallback; }
+
 export function mergeRunState(current: AgentUiState, state: RunState): AgentUiState {
   return {
     ...current,
@@ -30,14 +33,14 @@ export function mergeRunState(current: AgentUiState, state: RunState): AgentUiSt
     taskId: state.task_id || current.taskId,
     status: state.status ?? current.status,
     route: state.route ?? current.route,
-    plan: state.plan ?? current.plan,
+    plan: asArray<Step>(state.plan, current.plan ?? []),
     nextStepIndex: state.next_step_index ?? current.nextStepIndex,
     currentStep: state.current_step ?? current.currentStep,
-    steps: state.steps ?? current.steps,
-    outputs: state.outputs ?? current.outputs,
-    pendingGate: state.pending_gate ?? null,
+    steps: asArray<Step>(state.steps, current.steps ?? []),
+    outputs: asObject<Record<string, any>>(state.outputs, current.outputs ?? {}),
+    pendingGate: state.pending_gate && typeof state.pending_gate === 'object' && !Array.isArray(state.pending_gate) ? state.pending_gate : null,
     response: state.response ?? current.response,
-    error: state.errors?.at(-1)?.message ? String(state.errors.at(-1)?.message) : current.error,
+    error: Array.isArray(state.errors) && state.errors.at(-1)?.message ? String(state.errors.at(-1)?.message) : current.error,
   };
 }
 
@@ -102,14 +105,16 @@ export function moduleProgress(state: AgentUiState, moduleId: string) {
 }
 
 export function summarizeResult(state: AgentUiState) {
-  const m3 = state.outputs?.run_m3_procurement_requirements?.data;
-  const m4 = state.outputs?.import_m4_purchase_suggestions_json;
-  const m5 = state.outputs?.solve_scheduling?.data;
+  const m3 = asObject<Record<string, any>>(state.outputs?.run_m3_procurement_requirements?.data, {});
+  const m4 = asObject<Record<string, any>>(state.outputs?.import_m4_purchase_suggestions_json, {});
+  const m5 = asObject<Record<string, any>>(state.outputs?.solve_scheduling?.data, {});
+  const schedule = asObject<Record<string, any>>(m5.schedule, {});
+  const metrics = asObject<Record<string, any>>(schedule.metrics, {});
   return {
     shortage: Array.isArray(m3?.shortage_lines) ? m3.shortage_lines.reduce((sum: number, line: any) => sum + Number(line.shortage_qty || 0), 0) : undefined,
     purchaseCount: Array.isArray(m4?.suggestions) ? m4.suggestions.length : undefined,
-    scheduleMinutes: m5?.schedule?.metrics?.makespan_minutes,
-    lifecycle: m5?.lifecycle_status,
+    scheduleMinutes: typeof metrics.makespan_minutes === 'number' ? metrics.makespan_minutes : undefined,
+    lifecycle: typeof m5.lifecycle_status === 'string' ? m5.lifecycle_status : undefined,
   };
 }
 
