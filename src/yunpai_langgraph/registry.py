@@ -111,7 +111,10 @@ class ToolRegistry:
                     headers["X-Yunpai-Tenant-ID"] = str(context["tenant_id"])
                 if context.get("idempotency_key"):
                     headers["Idempotency-Key"] = str(context["idempotency_key"])
-                files = _extract_uploads(body)
+                # The standalone M2 API consumes uploaded source files as
+                # base64 JSON and stages them itself; other modules use the
+                # generic multipart adapter.
+                files = [] if _spec.module == "m2" else _extract_uploads(body)
                 request_kwargs: dict[str, Any] = {"headers": headers}
                 if files:
                     request_kwargs["files"] = files
