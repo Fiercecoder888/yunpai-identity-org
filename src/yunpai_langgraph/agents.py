@@ -323,7 +323,11 @@ class ReviewerAgent:
             message = "业务资料候选已写入识别库，必须审核后才能进入 M0 canonical 发布" if effective_tool == "business-data-identification" else "M0 候选必须审核后才能发布 canonical 事实"
             return self._gate("candidate", effective_module, effective_tool, message, ["批准候选", "补充裁决", "终止"])
         if effective_tool == "ingest_document" and (result.get("needs_review") or float(result.get("overall_confidence") or 0) < 0.8):
-            return self._gate("review", effective_module, effective_tool, "M1 解析置信度不足或存在字段缺口", ["修正并重试", "接受结果", "终止"])
+            if isinstance(result.get("semantic_supplement"), dict):
+                message = "外部 M1 未形成有效订单行/订单号；已附加本地确定性解析候选，请人工复核后再放行（外部结果与候选都保留）"
+            else:
+                message = "M1 解析置信度不足或存在字段缺口"
+            return self._gate("review", effective_module, effective_tool, message, ["修正并重试", "接受结果", "终止"])
         if effective_tool == "run_bom_sop_workflow":
             if result.get("status") == "human_input_required":
                 return self._gate("data", effective_module, effective_tool, "M2 缺少产品/BOM 权威输入", ["补充数据", "终止"])

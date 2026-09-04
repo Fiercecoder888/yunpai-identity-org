@@ -193,6 +193,25 @@ class YunpaiGraph:
         try:
             outcome = await self.worker.run(state, step, payload)
         except Exception as exc:
+            # T2：M2 工程工具(模型端点/服务)不可达或超时属可恢复运行态故障。
+            # 转成 BLOCKED_INPUT 让 Reviewer 打开数据 Gate（补充数据/重试），
+            # 绝不把“端点不可用”伪装成模型成功或直接硬失败丢失恢复路径。
+            from .registry import ToolHTTPError
+
+            if step["tool"] == "run_bom_sop_workflow" and isinstance(exc, ToolHTTPError) and exc.code in {"HTTP_UNAVAILABLE", "HTTP_TIMEOUT", "HTTP_STATUS_ERROR", "HTTP_UNAVAILABLE_BACKEND"}:
+                result = {
+                    "success": False, "code": "BLOCKED_INPUT",
+                    "errors": [{"code": "M2_MODEL_ENDPOINT_UNAVAILABLE", "message": f"M2 模型/服务端点不可用（{exc.code}）：{str(exc)[:400]}。请检查 M2_MODEL_BASE_URL 是否指向可达的 Qwen 端点（GB10 18085 代理），修复后补充数据重试", "details": []}],
+                    "evidence": [{"module": "m2", "source_ref": step["tool"], "evidence_ref": f"m2:{step['tool']}:endpoint-unavailable", "detail": "M2 模型端点不可用：已停止并转为可恢复数据 Gate，未伪造模型成功"}],
+                    "trace_id": f"{state['task_id']}:{step['tool']}",
+                }
+                state["current_result"] = result
+                state["outputs"][step["tool"]] = result
+                state["outputs"][step["module"]] = result
+                state["evidence"].extend(result["evidence"])
+                record.update(output_summary=summarize(result), evidence=result["evidence"], finished_at=_now())
+                state["trace"].append({"event": "react.observation", "agent": "worker", "tool": step["tool"], "status": "blocked_input", "at": _now()})
+                return self._save(state)
             if step["tool"] in {"run_bom_sop_workflow", "run_m3_procurement_requirements", "solve_scheduling"} and isinstance(exc, ValueError) and str(exc).startswith("invalid input"):
                 # Contract validation failures for required BOM/SOP/route
                 # facts are recoverable business-data gaps, not agent crashes.

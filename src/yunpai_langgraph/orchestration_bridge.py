@@ -186,6 +186,8 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                            missing_fields=["request.attachments(原始文件)"],
                            required_tool="ingest_document",
                            recovery="请上传原始订单/业务文件后再重试 M1 解析")
+        # 注册工具 ingest_document 的本地 handler（workers.m1_parse）会按字节结构
+        # 用同一 order_semantics 确定性解析 XLSX，这里只传文件，不在编排层预解析。
         return {"file": file_value}
     if tool == "data_import_run":
         m1 = output_data(state, "ingest_document")
