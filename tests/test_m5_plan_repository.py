@@ -210,3 +210,30 @@ def test_validation_failed_plan_cannot_release(repo):
     with pytest.raises(M5RepositoryError) as exc:
         repo.transition(version, "released", gate="release", actor="zhb")
     assert exc.value.code == "VALIDATION_FAILED"
+
+
+def test_execution_event_add_is_idempotent(repo):
+    repo.add_execution_event(
+        event={"event_id": "EV-1", "event_type": "actual_start",
+               "order_id": "SO-1", "operation_id": "OP-10", "external_ref": "e-1",
+               "occurred_at": "2026-09-03T08:00:00+08:00"},
+        plan_version="plan-x", task_id="t")
+    again = repo.add_execution_event(
+        event={"event_id": "EV-1", "event_type": "actual_start",
+               "order_id": "SO-1", "operation_id": "OP-10", "external_ref": "e-1",
+               "occurred_at": "2026-09-03T08:00:00+08:00"},
+        plan_version="plan-x", task_id="t")
+    assert again["replayed"] is True
+    assert len(repo.list_execution_events("plan-x")) == 1
+
+
+def test_message_double_approve_rejected(repo):
+    repo.create_message(draft_id="D-1", tenant_id="t", task_id="k",
+                        idempotency_key="M-1", department="PMC", channel="wecom",
+                        recipient_targets=["x"], message_kind="alert",
+                        subject="", body="b", event_summary="e",
+                        required_action="a", evidence=[])
+    repo.approve_message("D-1", actor="zhb")
+    with pytest.raises(M5RepositoryError) as exc:
+        repo.approve_message("D-1", actor="zhb")
+    assert exc.value.code == "ILLEGAL_MESSAGE_STATE"

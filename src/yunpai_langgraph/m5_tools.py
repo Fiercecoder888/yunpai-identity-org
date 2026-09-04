@@ -378,6 +378,17 @@ def _num0(value):
         return 0.0
 
 
+def _event_status(event_type: str) -> str:
+    """Map a persisted execution event type to a progress operation status."""
+    return {
+        "actual_start": "running",
+        "quantity_report": "running",
+        "actual_finish": "completed",
+        "exception": "exception",
+        "scrap": "scrapped",
+    }.get(str(event_type), "not_started")
+
+
 def _build_progress(plan, is_current_head):
     schedule = plan.get("schedule") or {}
     ops = schedule.get("operations") or []
@@ -389,12 +400,17 @@ def _build_progress(plan, is_current_head):
         row = by_order.setdefault(oid, {"order_id": oid, "operations": []})
         row["operations"].append(op)
     orders = []
+    completed_orders = 0
     for oid, row in by_order.items():
         order_ops = sorted(row["operations"], key=lambda x: int(x.get("sequence_no") or 0))
         ops_out = []
         for op in order_ops:
             op_code = str(op.get("op_code") or "")
             evid = []
+            actual_qty = 0.0
+            scrap_qty = 0.0
+            latest_status = "not_started"
+            actual_end = None
             for e in events:
                 if str(e.get("operation_id") or "") != op_code:
                     continue
@@ -413,7 +429,18 @@ def _build_progress(plan, is_current_head):
                     "reason": str(e.get("reason") or ""),
                     "source_kind": "accepted_non_simulation_execution_event",
                 })
+                actual_qty += _num0(e.get("reported_quantity"))
+                scrap_qty += _num0(e.get("scrap_quantity"))
+                st = _event_status(e.get("event_type"))
+                if st != "not_started":
+                    latest_status = st
+                if e.get("event_type") == "actual_finish":
+                    actual_end = str(e.get("occurred_at") or "")
             first_res = str(op.get("resource_id") or op.get("equipment_code") or "")
+            planned_qty = _num(op.get("qty"))
+            completion = None
+            if planned_qty and planned_qty > 0:
+                completion = round(min(100.0, actual_qty / planned_qty * 100), 2)
             ops_out.append({
                 "operation_id": op_code,
                 "order_id": oid,
@@ -431,28 +458,46 @@ def _build_progress(plan, is_current_head):
                 },
                 "planned_start_time": op.get("plan_start"),
                 "planned_end_time": op.get("plan_end"),
-                "planned_quantity": _num(op.get("qty")),
+                "planned_quantity": planned_qty,
                 "unit": op.get("uom"),
-                "actual_start_time": None,
-                "actual_end_time": None,
-                "actual_qty": None,
-                "actual_status": "not_started",
-                "completion_rate_percent": None,
+                "actual_start_time": op.get("actual_start") or None,
+                "actual_end_time": actual_end,
+                "actual_qty": round(actual_qty, 4) if evid else None,
+                "actual_status": latest_status,
+                "completion_rate_percent": completion,
                 "execution_evidence": evid,
             })
         first = row["operations"][0]
+        order_status = "not_started"
+        if ops_out:
+            statuses = {op2["actual_status"] for op2 in ops_out}
+            if statuses and statuses <= {"completed"}:
+                order_status = "completed"
+            elif any(st != "not_started" for st in statuses):
+                order_status = "wip"
+            elif "exception" in statuses:
+                order_status = "wip"
+        actual_quantity_supported = bool(
+            ops_out and any(e.get("event_type") == "quantity_report"
+                            for op2 in ops_out for e in op2.get("execution_evidence", []))
+        )
+        if order_status == "completed":
+            completed_orders += 1
         orders.append({
             "order_id": oid,
             "product_id": first.get("product_code") or None,
             "planned_quantity": _num(first.get("qty")),
             "unit": first.get("uom"),
-            "actual_qty": None, "actual_quantity_supported": False,
+            "actual_qty": sum((op2.get("actual_qty") or 0) for op2 in ops_out) or None,
+            "actual_quantity_supported": actual_quantity_supported,
             "terminal_operation_id": str(order_ops[-1].get("op_code") or "") if order_ops else None,
-            "completion_rate_percent": None,
+            "completion_rate_percent": ops_out[-1]["completion_rate_percent"] if ops_out else None,
             "due_time": None, "planned_completion_time": None,
-            "actual_completion_time": None, "status": "not_started",
+            "actual_completion_time": ops_out[-1]["actual_end_time"] if ops_out else None,
+            "status": order_status,
             "on_time": None, "personnel_bindings": [], "operations": ops_out,
         })
+    wip_count = sum(1 for o in orders if o["status"] == "wip")
     return {
         "plan_version": plan["plan_version"],
         "generated_at": _now_iso(),
@@ -474,11 +519,11 @@ def _build_progress(plan, is_current_head):
         },
         "summary": {
             "order_count": len(orders),
-            "completed_order_count": 0,
-            "wip_order_count": len(orders),
+            "completed_order_count": completed_orders,
+            "wip_order_count": wip_count,
             "late_order_count": 0,
-            "on_time_order_count": 0,
-            "on_time_rate_percent": None,
+            "on_time_order_count": completed_orders,
+            "on_time_rate_percent": round(completed_orders / len(orders) * 100, 2) if orders else None,
         },
         "orders": orders,
     }
