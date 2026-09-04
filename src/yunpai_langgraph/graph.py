@@ -654,7 +654,26 @@ class YunpaiGraph:
             return {"file": _file_object("order.json", document), "_fixture_document": document}
         if tool == "run_bom_sop_workflow":
             product = dict(request.get("product") or {})
-            product.setdefault("product_name", product.get("product_code") or "")
+            m1_result = result_data(outputs.get("ingest_document", {}))
+            m1_document = m1_result.get("document") if isinstance(m1_result.get("document"), dict) else {}
+            m1_header = m1_document.get("header") if isinstance(m1_document.get("header"), dict) else {}
+            m1_lines = m1_document.get("lines") if isinstance(m1_document.get("lines"), list) else []
+            first_line = next((line for line in m1_lines if isinstance(line, dict)), {})
+            # M1 may not be able to assign a stable product code for a
+            # customer order.  Preserve that fact, but provide M2 with the
+            # extracted product name so its own contract can evaluate the
+            # candidate instead of failing on an empty required field.
+            product.setdefault(
+                "product_name",
+                str(
+                    product.get("product_code")
+                    or first_line.get("full_product_name")
+                    or first_line.get("name_normalized")
+                    or first_line.get("name_raw")
+                    or m1_header.get("title")
+                    or ""
+                ),
+            )
             bom_lines = request.get("bom_lines", []) or []
             bom_items = [
                 {
@@ -698,7 +717,7 @@ class YunpaiGraph:
                 "routing_steps": routing_steps,
                 "requirement_text": str(request.get("requirement_text") or request.get("message") or ""),
                 "rule_package_path": str(request.get("rule_package_path") or "/home/soft/yunpai/prod-39092/app/m8/material_numbering"),
-                "document_no": str(request.get("document_no") or product.get("product_code") or "M2-DRAFT"),
+                "document_no": str(request.get("document_no") or m1_header.get("order_number") or product.get("product_code") or "M2-DRAFT"),
                 "history_bom_paths": request.get("history_bom_paths") or [],
                 "history_sop_paths": request.get("history_sop_paths") or [],
                 "template_confirmation": request.get("template_confirmation") or {"confirmed": False},

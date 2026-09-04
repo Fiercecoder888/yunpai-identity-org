@@ -137,6 +137,23 @@ def test_m0_commit_payload_unwraps_http_batch_response():
     assert graph._payload_for(state, "data_import_commit") == {"batch_id": "batch-http-001"}
 
 
+def test_m2_payload_uses_m1_product_name_when_request_has_no_product():
+    graph = YunpaiGraph()
+    state = new_state({"workflow": "m0_m5", "message": "匹配订单 BOM 和 SOP"})
+    state["outputs"] = {
+        "ingest_document": {
+            "document": {
+                "header": {"order_number": "SO-M1-001", "title": "业务订单"},
+                "lines": [{"full_product_name": "HDMI 4K 15M", "product_code": None}],
+            }
+        }
+    }
+    payload = graph._payload_for(state, "run_bom_sop_workflow")
+    assert payload["product_profile"]["product_name"] == "HDMI 4K 15M"
+    assert payload["document_no"] == "SO-M1-001"
+    assert payload["bom_lines"] == []
+
+
 @pytest.mark.asyncio
 async def test_unbound_free_tool_fails_closed():
     graph = YunpaiGraph()
