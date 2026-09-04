@@ -71,6 +71,21 @@ advise_m5_schedule / run_m5_intelligent_schedule / generate_m5_material_procurem
 - `test_m5_skill_operations.py`：白名单与 Scope 完全一致、operation→tool 映射、跨模块/排除工具拒绝、只读 Gate。
 - `test_m5_http_metrics.py`：HTTP method/path 合同、路径参数替换、metrics 不伪造、dispatch replay。
 
+## 6.1 任务书测试矩阵 → 覆盖文件对账
+
+| 任务书建议 | 实际覆盖 |
+|---|---|
+| `test_m5_pmc_v2_strict_input.py` | ✅ tests/test_m5_pmc_v2_strict_input.py |
+| `test_m5_pmc_v2_metrics.py` | ✅ tests/test_m5_http_metrics.py（metrics 不伪造）＋ strict（同 bundle 同 hash） |
+| `test_m5_plan_repository.py` / `test_m5_lifecycle.py` / `test_m5_replan.py` | ✅ tests/test_m5_plan_repository.py＋test_m5_lifecycle_tools.py（六类读回/幂等/冲突/head CAS/released 保护/合法与非法迁移/replan 恢复父 bundle） |
+| `test_m5_tool_bindings.py` | ✅ tests/test_m5_tool_bindings.py |
+| `test_m5_skill_operations.py` | ✅ tests/test_m5_skill_operations.py |
+| `test_m5_dispatch_execution.py` | ✅ test_m5_lifecycle_tools.py::test_full_lifecycle_dispatch_and_execution_summary、test_m5_http_metrics.py::test_dispatch_execution_pending_and_replayable_in_registry、test_m5_plan_repository.py::test_execution_event_add_is_idempotent |
+| `test_m5_messages_knowledge.py` | ✅ test_m5_lifecycle_tools.py（pending→approved→outbox、knowledge 仅引用已持久化 plan）＋test_m5_plan_repository.py::test_message_double_approve_rejected |
+| `test_m5_procurement_proposal.py` | ✅ test_m5_lifecycle_tools.py::test_material_readiness_and_procurement_proposal_are_readonly |
+
+测试矩阵语义与验收门槛全部覆盖；文件组织按职责合并，未新增同名空壳文件。
+
 ## 7. 验收结论（TEST_ACCEPTANCE 格式）
 
 | 项 | 值 |
