@@ -8,6 +8,7 @@ from yunpai_langgraph.agents import PlannerAgent
 from yunpai_langgraph.graph import YunpaiGraph
 from yunpai_langgraph.llm import QwenConfig, QwenRouter
 from yunpai_langgraph.models import new_state
+from yunpai_langgraph.m3_m4_tooling import M3_ADAPTER_TOOL_NAMES, M4_ADAPTER_TOOL_NAMES
 from yunpai_langgraph.registry import build_default_registry
 from yunpai_langgraph.skills import build_default_skill_registry
 
@@ -56,6 +57,8 @@ def test_skill_catalog_exposes_versioned_skill_ids():
     assert set(catalog) == expected
     assert "solve_scheduling" in catalog["yunpai-m5-pmc"]["tools"]
     assert "dispatch_m5_schedule" in catalog["yunpai-m5-pmc-lifecycle"]["tools"]
+    assert set(M3_ADAPTER_TOOL_NAMES).issubset(catalog["yunpai-m3-material-planning"]["tools"])
+    assert set(catalog["yunpai-m4-procurement"]["tools"]) == set(M4_ADAPTER_TOOL_NAMES)
     assert all(item["description"] for item in catalog.values())
     assert all(item["version"] for item in catalog.values())
     assert all(item["skill_id"] == f"{item['name']}@{item['version']}" for item in catalog.values())
@@ -172,3 +175,39 @@ async def test_worker_data_opens_sensitive_data_gate(tmp_path):
     assert state["status"] == "waiting_human"
     assert state["pending_gate"]["type"] == "sensitive_data"
     assert "敏感" in state["pending_gate"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_m4_read_skill_operation_runs_without_authorization_gate():
+    graph = YunpaiGraph()
+
+    async def list_orders(payload, context):
+        return {"items": [], "page": 1, "page_size": 20, "total": 0}
+
+    graph.registry.handlers["list_m4_purchase_orders"] = list_orders
+    state = await graph.run(new_state({
+        "skill": "yunpai-m4-procurement",
+        "skill_payload": {"operation": "orders", "tool_payload": {}},
+    }))
+    assert state["status"] == "completed"
+    result = state["outputs"]["yunpai-m4-procurement"]
+    assert result["invoked_tool"] == "list_m4_purchase_orders"
+
+
+@pytest.mark.asyncio
+async def test_m4_write_skill_operation_requires_authorization_before_http():
+    graph = YunpaiGraph()
+    state = await graph.run(new_state({
+        "skill": "yunpai-m4-procurement",
+        "skill_payload": {
+            "operation": "approve",
+            "tool_payload": {
+                "purchase_order_id": 1,
+                "expected_revision": 1,
+                "expected_checksum": "a" * 64,
+            },
+        },
+    }))
+    assert state["status"] == "waiting_human"
+    assert state["pending_gate"]["type"] == "authorization"
+    assert state["outputs"] == {}

@@ -8,6 +8,7 @@ from .registry import ToolRegistry
 from .workflow_registry import load_workflow
 from .llm import QwenRouter
 from .skills import SkillRegistry, build_default_skill_registry
+from .m3_m4_tooling import M3_READ_ONLY_SKILL_OPERATIONS, M4_READ_ONLY_SKILL_OPERATIONS
 
 
 INTENT_TO_TOOL = (
@@ -264,12 +265,11 @@ class ReviewerAgent:
     _READ_ONLY_SKILL_OPERATIONS = {
         "yunpai-m0-data-foundation": {"preview"},
         "yunpai-m1-document-parser": {"report"},
-        "yunpai-m3-material-planning": {"readiness", "readiness_summary", "plan", "handoff"},
-        "yunpai-m4-procurement": {"orders", "tracking", "alerts", "supply", "supplier_reply"},
+        "yunpai-m3-material-planning": M3_READ_ONLY_SKILL_OPERATIONS,
+        "yunpai-m4-procurement": M4_READ_ONLY_SKILL_OPERATIONS,
         # M5 PMC read-only queries (never mutate plan/snapshot state)
-        "yunpai-m5-pmc": {"schedule", "progress", "contracts", "readiness",
-                          "knowledge_search", "message_get", "message_delivery",
-                          "advise", "intelligent"},
+        "yunpai-m5-pmc": {"schedule", "progress", "versions", "readiness", "advise", "intelligent",
+                          "execution", "contracts", "knowledge_search", "message_get", "message_delivery"},
         "yunpai-m5-pmc-lifecycle": {"default", "schedule", "versions", "progress", "execution"},
     }
 

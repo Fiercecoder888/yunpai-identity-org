@@ -13,6 +13,7 @@
 | P-005 | 已规划 | zhb / DeepSeek Harness | 按任务书完成上传识别、M0 canonical、下游 M1-M5/PMC 实施；从最新 main 同步 dev，在 GB10 测试，通过后推送并发起合并 | E-PLAN-DEEPSEEK-HARNESS-001 | 2026-09-04 |
 | P-006 | 已完成 | Codex / M1 接包开发者 | 独立 M1 Tool/Skill 任务包包含基线、17 个工具/Skill 差距、逐项源码映射、净化源码、实施合同及分层验收要求；包完整性和项目回归通过 | E-HANDOFF-M1-001 | 2026-09-04 |
 | P-007 | 已规划 | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate，在 GB10 用真实订单完成 M1-M5 发布回读 | E-PLAN-M1M5-ORCH-001 | 2026-09-04 |
+| P-008 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过（从 origin/main 并入 dev 时登记，原并行分支编号 P-006 与 M1 handoff 撞号） | E-M3M4-TOOLS-001 | 2026-09-04 |
 
 ## 阻塞项
 
@@ -20,10 +21,11 @@
 |---|---|---|---|
 | Windows 工作树 JSON 换行导致 provenance 字节哈希测试误报 | 完整 pytest 在该环境多 1 个失败；运行代码与 Git blob 内容未受影响 | 统一仓库 EOL 或在 Linux/CI 复核 | 已记录 |
 | 39092 未暴露 M0 canonical 写入链路 | 只能核对 orchestrator 候选 SQLite，不能证明产品/物料/设备/人员/财务等 canonical 落库；直接补写会绕过审核和 Outbox | 部署方提供可访问的 M0 base URL、PostgreSQL schema/权限、审核授权和写入回读接口 | 新增，未解除 |
+| 本机无可达 M3/M4 独立服务 | 已完成 Adapter、合同、Gate 和 mock HTTP 全链路验证，但无法声明真实服务或数据库验收 | 提供可访问的 M3_URL、M4_URL、认证信息及受控数据库回读条件 | 外部联调待办 |
 
 ## 下一步
 
-1. 后续 session 继续创建独立 worktree、分支、claim 文件和实时报告。
+1. 具备 M3/M4 独立服务条件后，执行真实 HTTP 与数据库回读验收。
 2. 新需求按提交逐个集成，并运行受影响范围的回归集。
 3. 需要发布时登记唯一 `DEPLOY_LOCK`，发布后记录 release 与回滚点。
 
@@ -32,6 +34,8 @@
 按时间倒序追加：日期、完成事项、证据 ID、遗留问题、下一步和确认来源。不要覆盖旧记录。
 
 - 2026-09-04：生成不依赖聊天历史的 M1-M5 Orchestrator 直接执行任务书；证据 `E-PLAN-M1M5-ORCH-001`；任务书列明当前工具分支、全部基础资料位置、GB10/Qwen、九个流程断点、六项实施任务、真实 E2E 门槛和最终回执；当前只完成规划与任务交接，尚未实施或声明生产闭环完成；确认来源：用户请求。
+- 2026-09-04：完成 M3/M4 代码实现和本地验收；补齐 M3/M4 HTTP Adapter、39 个目标工具映射、Skill operation、授权 Gate、错误映射和 M3→M4 集成测试；完整 pytest 69 项通过，本地 FastAPI 运行态为 114/45 bound；遗留为真实 M3/M4 服务不可达；证据 E-M3M4-TOOLS-001；确认来源：本次实施与验证。
+- 2026-09-04：启动 M3/M4 Tool 与 Skill 补全，基线为远端最新 `main` 提交 `1829888a58855b0fd6064fa5b8ee4a858823c191`，个人分支 `codex/m3-m4-tool-skill-completion-20260904` 已推送；证据 `E-M3M4-TOOLS-001`；下一步实现公共适配层和领域 provider；确认来源：用户请求。
 - 2026-09-03：初始化项目治理账本，新增多 session 协作规则和实时报告模板；证据 `E-SESSION-001`；下一步按规则登记首个并行任务；确认来源：用户请求。
 - 2026-09-03：完成后端修复与前端右栏 session 集成，线上 `39092` 新 release 通过关键点击/滚动验收；证据 `E-INTEGRATION-002`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。
 - 2026-09-03：`dev` 推送至 `neworigin/dev`（最终交接提交 `ee8541cc`，交付基线 `d48ce911`），完成集成 session 交接和 claim 释放；证据 `E-INTEGRATION-003`；遗留为 Windows provenance 换行测试误报；下一步按规则接收后续需求；确认来源：集成负责人。

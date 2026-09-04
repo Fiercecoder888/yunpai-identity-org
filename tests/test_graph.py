@@ -127,9 +127,18 @@ async def test_m5_payload_preserves_all_m1_order_lines():
 
 @pytest.mark.asyncio
 async def test_unbound_free_tool_fails_closed():
-    state = await invoke({"tool": "list_m4_tracking"})
-    assert state["status"] == "failed"
-    assert "no local handler" in state["errors"][0]["message"]
+    graph = YunpaiGraph()
+    with pytest.raises(RuntimeError, match="no local handler"):
+        await graph.registry.call(
+            "receive_m4_schedule_impact_proposal",
+            {
+                "schema_version": "m5.procurement-impact-proposal.v1",
+                "proposal_id": "proposal-1",
+                "plan_version": "plan-1",
+                "material_id": "MAT-1",
+            },
+            {"task_id": "TASK-UNBOUND"},
+        )
 
 
 @pytest.mark.asyncio
