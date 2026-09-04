@@ -238,3 +238,162 @@ def test_twelve_kind_unknown_layouts_classify_correctly(tmp_path):
         else:
             print(f"  [mismatch] {kind}: 期望 {kind}, 实际 {verdict['kind']} 规则={verdict.get('rules')}")
     assert correct / total >= 0.9, f"未知布局分类命中 {correct}/{total} < 90%"
+
+
+# ---- 逐类硬断言（集成负责人：不能只断言关键类别总体比例；必须逐类）----
+# 每类：正例表头、反例表头、未知布局表头；expected kind/subtype/Skill。
+KIND_SPECS = {
+    "order": {
+        "subtype": "customer_or_stocking_order",
+        "positive": [["订单号", "型号", "数量", "交期"], ["SO-1", "P-1", 10, "2026-09-20"]],
+        "negative": [["审批单号", "审批结论", "签字人"], ["AP-1", "同意", "张三"]],
+        "unknown": [["序号", "交期", "包装备注", "型号", "数量"], ["1", "2026-09-20", "彩盒", "W-77", 30]],
+    },
+    "product": {
+        "subtype": "product_master",
+        "positive": [["产品编码", "产品名称", "规格", "版本"], ["P-1", "高清线", "2m", "v1"]],
+        "negative": [["请假人", "日期", "时长"], ["李四", "09-01", 2]],
+        "unknown": [["版本", "备注", "产品编码", "产品名称", "规格"], ["v2", "沿用", "P-9", "高清线", "3m"]],
+    },
+    "bom": {
+        "subtype": "engineering_bom",
+        "positive": [["物料编码", "材料名称", "用量", "单位"], ["M-1", "铜箔", 2, "m"]],
+        "negative": [["工号", "姓名", "班次"], ["E-1", "王五", "白班"]],
+        "unknown": [["单位", "用量", "物料编码", "材料名称"], ["m", 2, "M-77", "铜箔"]],
+    },
+    "route": {
+        "subtype": "production_route",
+        "positive": [["工序编码", "工序名称", "顺序", "标准工时"], ["OP-1", "裁切", 1, 5]],
+        "negative": [["客户地址", "联系人"], ["东莞市", "赵六"]],
+        "unknown": [["标准工时", "工序名称", "工序编码", "顺序"], [5, "裁切", "OP-9", 1]],
+    },
+    "sop": {
+        "subtype": "production_sop",
+        "positive": [["工站", "作业步骤", "投入人数"], ["S-1", "锁付", 1]],
+        "negative": [["PO 状态", "行号"], ["open", 1]],
+        "unknown": [["投入人数", "工站", "作业步骤", "材料"], [1, "S-2", "锁付", "螺丝"]],
+    },
+    "equipment": {
+        "subtype": "equipment_master",
+        "positive": [["设备编码", "设备名称", "产线", "能力"], ["EQ-1", "注塑机", "线1", "250"]],
+        "negative": [["会议纪要", "议题"], ["M-1", "排产"]],
+        "unknown": [["能力", "设备名称", "设备编码", "产线"], ["250", "注塑机", "EQ-7", "线2"]],
+    },
+    "tooling": {
+        "subtype": "tooling_master",
+        "positive": [["模具编码", "模具名称", "模穴数"], ["TL-1", "外壳模", 2]],
+        "negative": [["请假单", "时长"], ["L-1", "1天"]],
+        "unknown": [["模穴数", "模具名称", "模具编码"], [2, "外壳模", "TL-3"]],
+    },
+    "station": {
+        "subtype": "station_master",
+        "positive": [["工位编码", "工位名称", "绑定工序"], ["ST-1", "组装", "OP-2"]],
+        "negative": [["客户", "金额"], ["C-1", 100]],
+        "unknown": [["绑定工序", "工位名称", "工位编码"], ["OP-4", "组装", "ST-5"]],
+    },
+    "worker": {
+        "subtype": "worker_master",
+        "positive": [["工号", "姓名", "技能", "资格"], ["E-2", "钱七", "焊接", "焊工证"]],
+        "negative": [["供应商", "报价"], ["S-1", "10元"]],
+        "unknown": [["资格", "技能", "姓名", "工号"], ["焊工证", "焊接", "孙八", "E-8"]],
+    },
+    "calendar": {
+        "subtype": "production_calendar",
+        "positive": [["日期", "班次", "开始时间", "结束时间"], ["2026-09-01", "白班", "08:00", "17:00"]],
+        "negative": [["设备", "能力"], ["EQ-9", "60"]],
+        "unknown": [["结束时间", "开始时间", "班次", "日期"], ["17:00", "08:00", "白班", "2026-09-02"]],
+    },
+    "inventory": {
+        "subtype": "inventory_record",
+        "positive": [["物料编码", "仓库", "批次", "现存数量"], ["M-9", "A仓", "L-2", 10]],
+        "negative": [["产品名", "版本"], ["高清线", "v2"]],
+        "unknown": [["现存数量", "批次", "仓库", "物料编码"], [50, "L-9", "B仓", "M-3"]],
+    },
+    "supplier": {
+        "subtype": "supplier_master",
+        "positive": [["供应商编码", "供应商名称", "PO编号"], ["S-2", "苏州厂", "PO-1"]],
+        "negative": [["工站", "步骤"], ["X", "Y"]],
+        "unknown": [["PO编号", "供应商名称", "供应商编码"], ["PO-9", "宁波厂", "S-9"]],
+    },
+    "procurement": {
+        "subtype": "purchase_order_or_record",
+        "positive": [["供应商编码", "PO编号", "物料", "数量", "交期"], ["S-3", "PO-3", "M-1", 10, "2026-09-30"]],
+        "negative": [["工号", "姓名"], ["E-3", "王五"]],
+        "unknown": [["数量", "供应商编码", "PO编号", "交期"], [8, "S-4", "PO-4", "2026-10-01"]],
+    },
+    "finance_cost": {
+        "subtype": "cost_record",
+        "positive": [["成本项目", "期间", "币种", "单位成本"], ["直接材料", "2026-09", "CNY", 12]],
+        "negative": [["订单", "型号"], ["SO", "P-9"]],
+        "unknown": [["单位成本", "币种", "期间", "成本项目"], [15, "CNY", "2026-10", "制造费用"]],
+    },
+}
+
+EXPECTED_SKILL = "business-data-identification"
+
+
+def test_every_kind_classified_with_subtype_and_skill(tmp_path):
+    """逐类硬断言（order/product/bom/route/sop/equipment/tooling/station/worker/
+    calendar/inventory/supplier/procurement/finance_cost）：正例分类+subtype+Skill，
+    反例不误报，未知布局命中，confidence/missing 结构可复核。"""
+    failures: list[str] = []
+    stats = []
+    planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
+    registry = build_default_registry()
+    for kind, spec in KIND_SPECS.items():
+        # 正例：extract_file 得到 document_type/subtype/confidence/review
+        path = tmp_path / f"perkind/{kind}-positive.xlsx"
+        _write(tmp_path, f"perkind/{kind}-positive.xlsx", _xlsx_bytes(spec["positive"]))
+        result = extract_file(path, root=tmp_path, parse_xlsx=True)
+        doc = result["document"]
+        if doc.get("document_type") != kind or doc.get("document_subtype") != spec["subtype"]:
+            failures.append(f"{kind}: 正例 subtype 不匹配 doc={doc.get('document_type')}/{doc.get('document_subtype')} 期望 {kind}/{spec['subtype']}")
+            stats.append(f"{kind}: FAIL(positive-subtype)")
+            continue
+        confidence = float(doc.get("confidence") or 0)
+        if confidence <= 0:
+            failures.append(f"{kind}: confidence<=0")
+            stats.append(f"{kind}: FAIL(confidence)")
+            continue
+        if doc.get("review_status") not in ("candidate", "needs_review", "deferred_to_m1"):
+            failures.append(f"{kind}: 意外 review_status={doc.get('review_status')}")
+            stats.append(f"{kind}: FAIL(review_status)")
+            continue
+        # 缺字段/校验问题至少一项结构存在（字段观察或 missing_fields 字段本身）
+        payload_keys = set(result.keys())
+        if "field_observations" not in payload_keys:
+            failures.append(f"{kind}: 无 field_observations")
+            stats.append(f"{kind}: FAIL(field_observations)")
+            continue
+        # Skill 路由：master_data 附件 -> business-data-identification
+        import base64 as _b64
+
+        decision = planner.plan({
+            "message": "请导入并登记这些文件",
+            "attachments": [{"kind": "master_data", "filename": f"{kind}.xlsx", "content_b64": _b64.b64encode(_xlsx_bytes(spec["positive"])).decode()}],
+        }, registry)
+        actual_skill = decision["steps"][0]["tool"] if decision.get("steps") else None
+        if actual_skill != EXPECTED_SKILL:
+            failures.append(f"{kind}: Skill 路由={actual_skill} 期望 {EXPECTED_SKILL}")
+            stats.append(f"{kind}: FAIL(skill)")
+            continue
+        # 反例：不得误报为该 kind
+        neg_path = tmp_path / f"perkind/{kind}-negative.xlsx"
+        _write(tmp_path, f"perkind/{kind}-negative.xlsx", _xlsx_bytes(spec["negative"]))
+        neg_verdict = classify_with_content(neg_path, current_kind="tabular", current_confidence=0.45)
+        if neg_verdict["kind"] == kind:
+            failures.append(f"{kind}: 反例误报为 {kind}")
+            stats.append(f"{kind}: FAIL(negative-fp)")
+            continue
+        # 未知布局命中
+        unk_path = tmp_path / f"perkind/{kind}-unknown.xlsx"
+        _write(tmp_path, f"perkind/{kind}-unknown.xlsx", _xlsx_bytes(spec["unknown"]))
+        unk_verdict = classify_with_content(unk_path, current_kind="tabular", current_confidence=0.45)
+        if unk_verdict["kind"] != kind:
+            failures.append(f"{kind}: 未知布局->{unk_verdict['kind']} 期望 {kind}")
+            stats.append(f"{kind}: FAIL(unknown)")
+            continue
+        stats.append(f"{kind}: PASS confidence={confidence:.2f} skill={actual_skill} subtype={spec['subtype']}")
+    for line in stats:
+        print(line)
+    assert not failures, "\n".join(failures)

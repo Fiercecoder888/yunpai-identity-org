@@ -67,7 +67,9 @@ def classify_path(path: Path) -> tuple[str, str, float]:
         return "bom", "engineering_bom", 0.93
     if any(token in text for token in ("承认书", "规格书", "datasheet", "数据手册")):
         return "engineering_document", "supplier_approval_or_spec", 0.86
-    if any(token in text for token in ("采购", "po", "采购单", "采购订单")):
+    # 采购记录路径提示：中文词面匹配；英文 "po" 只作为独立词/前缀（如 po-2026、
+    # po_20、路径段 po/…）命中，避免 "positive"/"component" 等单词内子串误判。
+    if any(token in text for token in ("采购", "采购单", "采购订单", "purchase")) or re.search(r"(?<![a-z0-9])po(?![a-z0-9])", text):
         return "procurement", "purchase_order_or_record", 0.82
     if any(token in text for token in ("库存", "入库", "出库", "盘点")):
         return "inventory", "inventory_record", 0.82
@@ -210,6 +212,9 @@ _CONTENT_KEYWORD_RULES: tuple[tuple[str, tuple[str, ...], float], ...] = (
     ("station", ("工位编码", "工位名称", "生产单元", "绑定工位"), 0.90),
     ("worker", ("工号", "姓名", "技能", "资格", "班次", "员工"), 0.85),
     ("inventory", ("物料编码", "仓库", "库位", "批次", "现存数量", "库存"), 0.90),
+    # procurement 规则置于 supplier 之前：表头同时含供应商/PO 编号时，若再有
+    # 物料/数量/交期等采购行特征，优先判定为采购记录而非供应商主数据。
+    ("procurement", ("供应商编码", "po编号", "采购订单", "采购单", "订购数量", "采购数量", "交期", "需求日期", "到货日期", "物料", "数量"), 0.90),
     ("supplier", ("供应商编码", "供应商名称", "采购订单", "po编号"), 0.90),
     ("finance_cost", ("成本项目", "期间", "币种", "单位成本", "含税", "费用"), 0.82),
     ("calendar", ("日期", "班次", "开始时间", "结束时间", "假期"), 0.80),

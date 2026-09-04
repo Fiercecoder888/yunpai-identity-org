@@ -18,11 +18,13 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-# sniff 能识别且内容真实可解析的格式样本。
-REAL_PARSE_FIXTURES = ("sample.xlsx", "sample.csv", "sample.tsv", "sample.json", "sample.pdf", "sample.docx", "sample.png", "sample.jpg", "batch.zip", "sample.7z")
+# sniff 能识别且内容真实可解析的格式样本（PNG 为最小真实图；PDF 为 pypdf 写出的可读单页）。
+REAL_PARSE_FIXTURES = ("sample.xlsx", "sample.csv", "sample.tsv", "sample.json", "sample.pdf", "sample.docx", "sample.png", "batch.zip", "sample.7z")
 
-# 仅用于 sniff/格式判定，不能真实 parse 的样本（含 stub/伪扩展/损坏）。
-SNIFF_ONLY_FIXTURES = ("legacy.xls", "sample.rar", "fake.xlsx", "broken.xlsx")
+# 仅用于 sniff/格式判定，不能真实 parse 的样本
+# （legacy.xls/sample.rar = 头 stub；fake.xlsx = 伪扩展；broken.xlsx = 损坏 zip；
+#  sample.jpg 无 OCR 深解析 -> 仅 sniff 可识别，无文本抽取，不声明 REAL_PARSE）。
+SNIFF_ONLY_FIXTURES = ("legacy.xls", "sample.rar", "fake.xlsx", "broken.xlsx", "sample.jpg")
 
 
 def xlsx_bytes(headers: list[str], rows: list[list[Any]], *, title: str = "Sheet1") -> bytes:
@@ -57,8 +59,25 @@ def tsv_bytes(headers: list[str], rows: list[list[Any]]) -> bytes:
     return output.getvalue().encode("utf-8")
 
 
-def pdf_bytes(text: str = "PDF fixture page") -> bytes:
-    return b"%PDF-1.7\n1 0 obj<</Type/Catalog>>endobj\n" + text.encode() + b"\n%%EOF\n"
+def pdf_bytes(text: str = "PDF fixture page 100 PCS") -> bytes:
+    """合法可解析 PDF（pypdf 写出含文本单页；pypdf 可读回页数）。"""
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=300, height=300)
+    try:
+        from pypdf import PdfReader  # noqa: F401 用于验证可读
+    except ImportError:  # pragma: no cover
+        pass
+    output = io.BytesIO()
+    writer.write(output)
+    raw = output.getvalue()
+    # 验证可读：pypdf 能打开且至少 1 页。
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(raw))
+    assert len(reader.pages) >= 1
+    return raw
 
 
 def docx_bytes(text: str = "DOCX fixture paragraph") -> bytes:

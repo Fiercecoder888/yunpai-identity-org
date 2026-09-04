@@ -75,10 +75,12 @@ def test_docx_and_pdf_fixtures_are_parseable_text_paths():
     (tmp / "note.docx").write_bytes(fixtures.docx_bytes("第一条记录 100 件"))
     result = extract_file(tmp / "note.docx", root=tmp)
     assert result["file_kind"] == "document"
-    assert "text_preview" in result["extraction"] or "parse_error" in result["extraction"]
+    assert "text_preview" in result["extraction"]
+    # PDF 必须真实可解析：不得出现 parse_error（禁止把 parse_error 当 REAL_PARSE 成功）。
     (tmp / "doc.pdf").write_bytes(fixtures.pdf_bytes())
     result = extract_file(tmp / "doc.pdf", root=tmp)
     assert result["file_kind"] == "document"
+    assert "parse_error" not in result["extraction"], f"PDF fixture 应可真实解析: {result['extraction']}"
 
 
 def test_fixture_categories_are_explicit_and_consistent():
@@ -90,10 +92,10 @@ def test_fixture_categories_are_explicit_and_consistent():
     all_fixtures = set(written)
     assert set(f.REAL_PARSE_FIXTURES) | set(f.SNIFF_ONLY_FIXTURES) == all_fixtures
     assert set(f.REAL_PARSE_FIXTURES) & set(f.SNIFF_ONLY_FIXTURES) == set()
-    # sniff-only：stub/伪扩展/损坏不应被当作真实 parse 成功的普通文件。
+    # sniff-only：stub/伪扩展/损坏/JPG(无 OCR) 不应被当作真实 parse 成功的普通文件。
     for name in f.SNIFF_ONLY_FIXTURES:
         verdict = sniff_format(written[name].read_bytes(), name)
-        assert name == "sample.rar" or verdict.match is False or name == "legacy.xls", f"{name} 应为 sniff-only: {verdict}"
+        assert name in {"sample.rar", "legacy.xls", "sample.jpg"} or verdict.match is False, f"{name} 应为 sniff-only: {verdict}"
     # real-parse：sniff 必须与声明一致（除 .7z 依赖 py7zr 写出的真实归档）。
     for name in f.REAL_PARSE_FIXTURES:
         if name == "sample.7z" and __import__("importlib").util.find_spec("py7zr") is None:
