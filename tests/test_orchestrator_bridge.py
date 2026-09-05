@@ -154,6 +154,27 @@ def test_m3_without_approved_bom_returns_blocked_input():
     assert result["data"]["required_tool"] == "run_bom_sop_workflow"
 
 
+def test_m3_prefers_enriched_inventory_snapshot_over_compact_inventory():
+    state = _approved_m2_state({"legacy_preview": False})
+    state["request"]["inventory"] = [{"material_code": "MAT-1", "available_qty": 10}]
+    state["request"]["inventory_snapshot"] = [{
+        "material_code": "MAT-1",
+        "available_qty": 10,
+        "warehouse": "WH-1",
+        "lot_no": "LOT-1",
+        "qc_status": "released",
+    }]
+    state["outputs"]["run_bom_sop_workflow"] = {
+        "data": {"bom_generation": {
+            "approval_status": "approved",
+            "bom_lines": [{"material_code": "MAT-1", "quantity_per": 1}],
+        }}
+    }
+    payload = bridge_payload(state, "run_m3_procurement_requirements")
+    assert payload["inventory_snapshot"][0]["warehouse"] == "WH-1"
+    assert payload["inventory_snapshot"][0]["lot_no"] == "LOT-1"
+
+
 def test_m3_inventory_rejects_implicit_defaults_in_production():
     # production（无 legacy_preview）缺 warehouse/lot/qc 库存事实 -> BLOCKED_INPUT，
     # 不接受隐式仓库/lot/qc 默认（断点 4）。

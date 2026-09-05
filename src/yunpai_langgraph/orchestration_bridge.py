@@ -344,7 +344,11 @@ def read_inventory_facts(state: RunState) -> list[dict[str, Any]]:
     """库存只允许来自显式事实快照：M3 回读快照或 request.inventory 显式条目
     （warehouse/lot/qc/observed_at 均不能由桥接补默认）。"""
     request = state.get("request", {})
-    inventory = request.get("inventory") or request.get("inventory_snapshot") or []
+    # An enriched inventory snapshot is the authoritative M3 input.  Prefer
+    # it over the compact order-level inventory list; otherwise a stale
+    # material_code/available_qty preview masks warehouse, lot and QC facts
+    # that the six-class bundle requires.
+    inventory = request.get("inventory_snapshot") or request.get("inventory") or []
     if not isinstance(inventory, list):
         return []
     items = [item for item in inventory if isinstance(item, dict)]
