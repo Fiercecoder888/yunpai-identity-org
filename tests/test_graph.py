@@ -357,6 +357,27 @@ def test_m2_payload_uses_service_routing_time_contract():
     assert payload["routing_steps"][0]["standard_time_s"] == 300
 
 
+def test_engineering_approval_marks_wrapped_m2_data_as_approved():
+    graph = YunpaiGraph()
+    state = new_state({"tool": "run_bom_sop_workflow"})
+    state["outputs"]["run_bom_sop_workflow"] = {
+        "status": "human_input_required",
+        "data": {
+            "bom_generation": {"bom_lines": [{"material_code": "MAT-1"}]},
+            "sop_generation": {"route_steps": [{"name": "Assembly", "standard_minutes": 5}]},
+        },
+    }
+    readback = graph._apply_approval(
+        state,
+        {"type": "engineering", "tool": "run_bom_sop_workflow", "module": "m2"},
+        actor="engineering-manager",
+    )
+    data = state["outputs"]["run_bom_sop_workflow"]["data"]
+    assert data["bom_generation"]["approval_status"] == "approved"
+    assert data["sop_generation"]["approval_status"] == "approved"
+    assert readback["readback"] == {"bom_rows": 1, "route_operations": 1, "approval_status": "approved"}
+
+
 @pytest.mark.asyncio
 async def test_m3_and_m5_missing_business_inputs_are_contract_valid_blockers():
     graph = YunpaiGraph()

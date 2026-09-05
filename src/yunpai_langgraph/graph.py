@@ -566,12 +566,26 @@ class YunpaiGraph:
         result = state["outputs"].get(gate["tool"], {})
         data = result_data(result)
         if gate["type"] == "engineering":
-            generation = result.setdefault("bom_generation", {})
+            # HTTP tools are wrapped in the contract envelope, so the M2
+            # draft may live under ``result.data`` while local handlers return
+            # the payload at the top level.  Persist the approval marker in
+            # the same object consumed by orchestration_bridge.read_approved_bom
+            # instead of only annotating the outer wrapper.
+            generation = data.setdefault("bom_generation", {})
             generation["approval_status"] = "approved"
-            sop_generation = result.get("sop_generation")
+            sop_generation = data.get("sop_generation")
             if isinstance(sop_generation, dict):
                 sop_generation["approval_status"] = "approved"
-            return {"applied": True, "message": "M2 BOM/SOP 已批准", "readback": None}
+            result["data"] = data
+            return {
+                "applied": True,
+                "message": "M2 BOM/SOP 已批准",
+                "readback": {
+                    "bom_rows": len(generation.get("bom_lines") or []),
+                    "route_operations": len(sop_generation.get("route_steps") or []) if isinstance(sop_generation, dict) else 0,
+                    "approval_status": generation.get("approval_status"),
+                },
+            }
         if gate["type"] == "review":
             result["review_status"] = "accepted"
             return {"applied": True, "message": "M1 复核已接受", "readback": None}
