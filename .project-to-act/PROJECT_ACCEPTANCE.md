@@ -5,10 +5,10 @@
 
 ## 当前验收结论
 
-- 结论：代码与本地回归通过；GB10 `39092` 已切换到 `20260905090437`，W-H909 真实订单入口已验证走 `m1_m5_document_to_plan`，M1/M0 可通过人工 Gate，M0 canonical 回读已匹配产品/订单/7 条 BOM/14 道 SOP 工序，M3 已完成缺料计算；M4 因供应商/采购事实缺失停在 data Gate，标准工时/资源/日历缺失使 M5 仍未通过
-- 验收范围：`origin/main`/`origin/dev` `4192438`、39092 health/tools、Qwen、W-H909 基础资料与订单上传、浏览器 Gate 操作/截图、M1/M0/M2 回读和剩余阻塞
-- 最后检查：2026-09-05 09:00 +08:00
-- 遗留问题：legacy `data_import_commit` 计数仍错误归类为采购；W-H909 的 14 道 SOP 缺标准工时，供应商/采购、人员/设备/工位/日历事实和 M5 发布回读仍缺失
+- 结论：M5 求解器跨窗口放置修复已冻结（tag `release-20260906`，`dev`/`main` 已推送）；GB10 `39092` 隔离后端(9002)已部署，合成订单 W-H128（800 PCS，CSV 真实数量）M1→M5 端到端 `completed` 且 `solver_status=feasible`，OP15（800 分钟手动维修）正确跨午休/跨天排程；生产验收仍以真实生产数据为准
+- 验收范围：`origin/dev`/`origin/main`、后端 378/前端 6 测试与构建、GB10 39092 9002 health/tools、W-H128 合成订单 M1→M5 回读
+- 最后检查：2026-09-06 +08:00
+- 遗留问题：合成 fixture 的工时/资源/日历为测试数据（`production_use_allowed=false`），makespan 约 18.7 工作天超过 07-07 交期；真实标准工时/供应/资源/日历事实仍待补齐后才能做生产验收
 
 ## 验收标准
 
@@ -25,11 +25,13 @@
 | A-009 | M3/M4 Tool 与 Skill 完整绑定并保持副作用 Gate | 通过（代码与本地运行态） | 完整 pytest、compileall、diff check、账本校验、9001 health/tools、HTTP mock 集成 | E-M3M4-TOOLS-001 |
 | A-010 | M1 Tool 与 Skill 完整绑定：17 个 M1 Tool 经专用 HTTP Adapter 可执行（租户头/202 轮询/权限/错误映射），Skill 声明 17 Tool 且查询 op 不打开写入 Gate，本地 fixture 不冒充完整 M1 解析 | 通过（代码与本地运行态） | 完整 pytest、M1 定向测试、compileall、git diff --check、Registry 绑定统计、HTTP mock 集成 | E-M1-TOOLS-001 |
 | A-011 | GB10 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（M1/M0 接通，M2/M3 完成后在 M4 供应商事实 Gate 停止） | 39092 health 114/112、真实 XLSX 上传、M1/M0 Gate、M0 overview、M2/M3 回读和浏览器截图 | E-GB10-WH909-ORDER-20260905-006 |
+| A-012 | M5 求解器支持工序跨工作窗口放置，合成订单 M1→M5 可产出 feasible 计划 | 通过（合成 fixture；生产数据待验收） | 本地 pytest/前端 test/build、GB10 9002 部署与 `run_m1_m5_39092.py` 重跑、run 回读 | E-GB10-39092-M5-FEASIBLE-20260906 |
 
 ## 证据索引
 
 | 证据 ID | 时间 | 方法或命令 | 退出状态 | 版本或文件哈希 | 结果摘要 | 证据位置 | 有效期 |
 |---|---|---|---|---|---|---|---|
+| E-GB10-39092-M5-FEASIBLE-20260906 | 2026-09-06 | 本地 `.venv/bin/python -m pytest -q`、`frontend npm test -- --run`、`npm run build`、`git diff --check`；GB10 覆盖 `pmc_v2_scheduler.py` 到 9002 release `20260906-m5-build-bundle` 并重启；`run_m1_m5_39092.py` 重跑 W-H128 订单 | 后端 378 passed/2 skipped、前端 6 passed、build 成功、diff 干净；部署后 `/health` ok 115 tools；run `run-00693e8acd434967a3117b14b873c596` `completed`、`solver_status=feasible`、`production_blocked=false` | 提交 `3aa8704`（求解器 sha `c08073c21a6fa4de`）；tag `release-20260906`；`dev`/`main` 已推送 | 修复 `NO_FEASIBLE_WINDOW op=WH128-OP15`：工序可跨工作窗口累积工作分钟；OP15（qty=800，processing=800min，manual，station=BB-WH128-S15/person=TEST-W015）排程 07-04T14:03→07-06T09:53；34 ops、makespan 8992min | `src/yunpai_langgraph/pmc_v2_scheduler.py`、`tests/test_m5_scheduler_spanning.py`、GB10 `/home/wjc/yunpai-langgraph/releases/20260906-m5-build-bundle` | 2026-09-13 |
 | E-M3M4-TOOLS-001 | 2026-09-04 19:23 | Windows venv 完整 pytest；compileall；git diff --check；项目账本 --validate；临时 9001 /health 与 /tools；显式 Yunpai SSH key 执行 fetch/push | 全部代码/本地验证退出 0；69 passed, 1 warning；远端 main 未前移；实现提交已推送 | 实现 commit f7fedaf；分支 codex/m3-m4-tool-skill-completion-20260904；基线 1829888a | 114 个 Tool、45 个 bound；M3 16/17、M4 24/26；两个 receiver 未绑定；M3→M4 mock HTTP、审批、revision/checksum、发送和供应事实确认通过；真实服务未联调 | reports/sessions/s-m3-m4-tools-20260904.md、tests/test_m3_m4_tool_integration.py | 2026-09-11 |
 | E-M5-PMC-MAIN-INTEGRATION-001 | 2026-09-04 23:28 +08:00 | `origin/pmctooldev` 合并 `origin/dev` 后运行 `.venv/bin/python -m pytest -q`、`cd frontend && npm test -- --run`、`cd frontend && npm run build`、账本 `--validate`、`git diff --check`；核对 registry | 全部退出 0；后端 210 passed；前端 6 passed；构建成功；账本 valid=true | `origin/main` / `4c6352c5fc6631644cdd6a6d2576fec1158adb11`；`origin/dev` / `3c60d30cca3c2ebf170934e155de76797d997364` | 合并后的 registry 为 114 tools、65 bound、M3 16、M4 24、M5 18；M5 `report_workload`、`bind_worker_to_order` 仍按合同未绑定；真实独立服务/数据库联调仍待部署条件 | `handoff/m5-pmc-v2-completion-20260904/ACCEPTANCE_REPORT_20260904.md`、`reports/sessions/s-pmctooldev-m5-20260904.md` | 2026-09-11 |
 | E-PLAN-M1M5-ORCH-001 | 2026-09-04 | 核对当前 Agent/Graph/API/Registry/Skill/M5 lifecycle 实现、远端 M1/M3/M4/M5 分支、交接包、数据审计、GB10/Qwen 和项目治理；逐项检查 27 个基础资料/代码路径；生成自包含 DSH 任务书；运行完整 pytest、账本 `--validate` 和 `git diff --check` | 路径检查、151 项 pytest、账本和 diff 检查全部退出 0；未执行业务代码、分支集成或生产联调 | `dev` / `85c77a4`；执行时远端 SHA 必须重新 fetch | 将 Tool 合并之外的阻塞定位到文件入口、workflow、跨模块桥接、六类 snapshot、M5 lifecycle/head、审批身份和 MES 边界；全部列明路径存在，任务书与当前回归兼容 | `docs/DEEPSEEK_HARNESS_M1_M5_ORCHESTRATOR_TASK_20260904.md` | 2026-09-30 |
@@ -63,6 +65,7 @@
 
 | Gate ID | 日期 | Gate | 对象 | 结果 | 证据 ID | 豁免与确认人 |
 |---|---|---|---|---|---|---|
+| G-004 | 2026-09-06 | M5 求解器跨窗口放置修复与冻结 Gate | `codex/m5-build-bundle` `3aa8704` | 通过（合成 fixture，非生产数据） | E-GB10-39092-M5-FEASIBLE-20260906 | Codex |
 | G-003 | 2026-09-04 | M3/M4 Tool 与 Skill 代码验收 Gate | codex/m3-m4-tool-skill-completion-20260904 | 通过（不含真实外部服务） | E-M3M4-TOOLS-001 | Codex |
 | G-001 | 2026-09-03 | 协作治理 Gate | 多 session 规则 | 通过 | E-SESSION-001 | zhb |
 | G-002 | 2026-09-03 | 前后端集成与线上关键路径 Gate | `dev` / GB10 39092 | 通过（关键路径；完整 pytest 环境性缺口已记录） | E-INTEGRATION-003 | zhb |
@@ -71,6 +74,7 @@
 
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
 
+- 2026-09-06：修复 M5 求解器单窗口放置限制（工序可跨工作窗口累积工作分钟），本地后端 378 passed/2 skipped、前端 6 passed、build 成功；部署到 GB10 39092 隔离后端(9002)后，W-H128 合成订单（800 PCS）M1→M5 端到端 `completed`、`solver_status=feasible`，OP15（800 分钟手动维修）排程 07-04→07-06；打 tag `release-20260906` 并推送 `dev`/`main`；证据 `E-GB10-39092-M5-FEASIBLE-20260906`；结论：求解器缺陷修复并冻结，链路跑通；遗留：合成 fixture 工时/资源为测试数据、makespan 超交期，生产验收仍需真实数据。
 - 2026-09-05 07:34-08:02：将 `210c30d` 部署到 GB10 `39092` release `20260905080200`，通过真实前端租户 URL `?tenant_id=w909-acceptance` 复核 W-H909 订单；M1 review 与 M0 candidate/commit Gate 通过，M0 catalog overview 回读产品/订单/7 条审核 BOM/物料，M2 进入“已匹配并审核 7 条 BOM；SOP/工艺约束仍需工程确认”工程 Gate；证据 `E-GB10-WH909-ORDER-20260905-005`；结论：BOM 匹配已可证明，SOP、库存/供应/资源与 M5 PMC 发布仍阻塞；确认来源：本次 GB10/API/浏览器实测。
 - 2026-09-05 08:48-09:00：将订单编排与业务资料发布改动部署到 GB10 `39092` release `20260905090437`；真实 BOM `.xlsx` 与 30MB SOP `.xls` 通过前端上传并在 candidate Gate 后发布 10 条 M0 canonical；订单 `run-12780724235c41758b532f47f9643728` 完成 M1 review、M0 candidate、M2 engineering 和 M3 缺料计算，M2 回读 7 条 BOM/14 道 SOP，因 14 道缺标准工时及 M4 缺供应商/采购事实而停止；证据 `E-GB10-WH909-ORDER-20260905-006`；确认来源：GB10 API、M0 overview 和 CUA 前端任务/Gate 快照。
 
