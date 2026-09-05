@@ -286,7 +286,7 @@ def test_six_class_bundle_checksum_is_stable_and_rejects_missing_kind():
     assert first == second
     # 每个快照都有 checksum，且头含正整数 revision
     assert all("checksum" in bundle[k] for k in bundle if k in {"resource_snapshot", "calendar_snapshot", "supply_snapshot", "constraint_snapshot"})
-    assert all(item.get("checksum") for item in bundle["order_snapshots"] + bundle["routes"])
+    assert all(item.get("checksum") for item in bundle["order_snapshots"] + list(bundle["routes"].values()))
     missing = assemble_bundle(
         orders=[{"order_id": "SO-1", "lines": [{"order_line_id": "SO-1::L1", "product_code": "P-1", "qty": 2}]}],
         routes=[],

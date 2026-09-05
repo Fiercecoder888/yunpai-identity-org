@@ -142,10 +142,10 @@ def assemble_bundle(*, orders: list[dict[str, Any]], routes: list[dict[str, Any]
         ), **{k: v for k, v in item.items() if k != "checksum"}})
         for item in orders
     ]
-    bundle["routes"] = []
+    bundle["routes"] = {}
     for route in routes:
         product_code = str(route.get("product_code") or route.get("product_id") or "")
-        bundle["routes"].append(finalize({
+        bundle["routes"][product_code] = finalize({
             **snapshot_header(
                 kind="routes",
                 snapshot_id=str(route.get("snapshot_id") or f"SNAP-RTE-{product_code}"),
@@ -155,7 +155,7 @@ def assemble_bundle(*, orders: list[dict[str, Any]], routes: list[dict[str, Any]
                 tenant_id=tenant_id, site_id=site_id,
             ),
             **{k: v for k, v in route.items() if k != "checksum"},
-        }))
+        })
     for kind, value in (
         ("resource_snapshot", resource_snapshot),
         ("calendar_snapshot", calendar_snapshot),
@@ -196,8 +196,11 @@ def verify_bundle(bundle: dict[str, Any]) -> list[str]:
     missing: list[str] = []
     for kind in SNAPSHOT_KINDS:
         value = bundle.get(kind)
-        if kind in {"order_snapshots", "routes"}:
+        if kind == "order_snapshots":
             if not isinstance(value, list) or not value:
+                missing.append(kind)
+        elif kind == "routes":
+            if not isinstance(value, dict) or not value:
                 missing.append(kind)
         elif not isinstance(value, dict) or not value:
             missing.append(kind)
