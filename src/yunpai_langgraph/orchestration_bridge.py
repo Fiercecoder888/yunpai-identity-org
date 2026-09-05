@@ -481,6 +481,24 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                                missing_fields=["inventory_snapshot(含 warehouse/lot/qc)"],
                                required_tool="get_material_readiness_snapshot",
                                recovery="缺少权威库存快照；请提供 M3 库存事实后重试")
+        from .m3_m4_fact_validation import validate_inventory_facts
+        inventory_validation = validate_inventory_facts(
+            inventory,
+            [str(line.get("material_code") or "") for line in bom_lines if isinstance(line, dict)],
+            strict=not bool(request.get("legacy_preview")),
+        )
+        if inventory_validation["status"] != "ready" and not bool(request.get("legacy_preview")):
+            validation_fields = [
+                item.get("field", "inventory_fact")
+                for item in inventory_validation["missing_fields"] + inventory_validation["validation_issues"]
+                if isinstance(item, dict)
+            ]
+            return blocked(
+                state, source_module="m3", tool=tool,
+                missing_fields=validation_fields,
+                required_tool="get_material_readiness_snapshot",
+                recovery="请补齐每个物料的仓库、批次、质检状态、数量和快照时间",
+            )
         payload: dict[str, Any] = {
             "tenant_id": state.get("tenant_id", "default"),
             "order": {"project_id": str(request.get("project_id") or order_id), "order_id": order_id, "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "order_qty": order.get("quantity", 0), "due_date": str(order.get("due_date") or "")},
@@ -499,6 +517,24 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                            required_tool="run_m3_procurement_requirements",
                            recovery="齐套无缺口则无需采购；若缺口存在请先完成 M3 计算")
         supplier_facts = read_supplier_facts(state)
+        from .m3_m4_fact_validation import validate_supplier_facts
+        supplier_validation = validate_supplier_facts(
+            supplier_facts,
+            [str(line.get("material_code") or "") for line in shortage_lines if isinstance(line, dict)],
+        )
+        if supplier_validation["status"] != "ready" and not bool(request.get("legacy_preview")):
+            validation_fields = [
+                item.get("field", "supplier_fact")
+                for item in supplier_validation["missing_fields"] + supplier_validation["validation_issues"]
+                if isinstance(item, dict)
+            ]
+            validation_fields.append("supplier_by_material(权威供应商主数据)")
+            return blocked(
+                state, source_module="m4", tool=tool,
+                missing_fields=validation_fields,
+                required_tool="list_m4_suppliers",
+                recovery="请补齐每个缺料物料的权威供应商映射后重试",
+            )
         suggestions = []
         for line in shortage_lines:
             if not isinstance(line, dict):
