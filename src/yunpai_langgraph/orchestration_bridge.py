@@ -567,16 +567,34 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         }
     if tool == "ingest_m5_planning_snapshot":
         from .planning_snapshot import assemble_bundle, verify_bundle
+        from .m5_fact_validation import validate_m5_facts
 
         order = read_order(state)
         m3 = output_data(state, "run_m3_procurement_requirements")
         m4 = read_m4_supply_snapshot(state)
         request_payload = _assembly_payloads_from_state(state)
+        resource_snapshot = request_payload.get("resource_snapshot") or (
+            {"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None
+        )
+        calendar_snapshot = request_payload.get("calendar_snapshot")
+        fact_validation = validate_m5_facts(
+            resource_snapshot=resource_snapshot,
+            calendar_snapshot=calendar_snapshot,
+            wip_status=request.get("wip_status"),
+            require_wip=str(request.get("scenario_purpose") or "production") == "wip_pmc",
+        )
+        if fact_validation["status"] != "ready":
+            return blocked(
+                state, source_module="m5", tool=tool,
+                missing_fields=fact_validation["missing_fields"],
+                required_tool="ingest_m5_planning_snapshot",
+                recovery="请补齐人员技能、设备能力、工位、生产日历及必要 WIP 快照后重试",
+            )
         scenario_id = str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}")
         bundle = assemble_bundle(
             orders=[{"order_id": str(order.get("order_id") or ""), "lines": read_lines(state) or [{"order_line_id": f"{order.get('order_id')}::L1", "product_code": order.get("product_code"), "qty": order.get("quantity", 0), "due_date": order.get("due_date"), "priority": "normal"}]}],
             routes=request_payload.get("routing_steps") or [],
-            resource_snapshot=request_payload.get("resource_snapshot") or ({"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None),
+            resource_snapshot=resource_snapshot,
             calendar_snapshot=request_payload.get("calendar_snapshot"),
             supply_snapshot=request_payload.get("supply_snapshot") or ({"entries": request_payload.get("supply_entries") or [], "order_kitting": request_payload.get("order_kitting")} if request_payload.get("supply_entries") or request_payload.get("order_kitting") else None),
             constraint_snapshot=request_payload.get("constraint_snapshot") or ({"changeover_rules": request_payload.get("changeover_rules") or request_payload.get("setup_matrix") or {}} if request_payload.get("changeover_rules") or request_payload.get("setup_matrix") else None),
