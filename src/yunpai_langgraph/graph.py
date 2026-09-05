@@ -762,7 +762,7 @@ class YunpaiGraph:
                 ),
                 None,
             )
-            if order_attachment:
+            if order_attachment and isinstance(order_attachment.get("content_b64"), str) and order_attachment.get("content_b64"):
                 # The browser stream path submits the XLSX as an attachment and
                 # does not call /runs/upload, so derive the M1 fixture here.
                 if not document and isinstance(order_attachment.get("content_b64"), str):
@@ -773,6 +773,11 @@ class YunpaiGraph:
                     except (ValueError, RuntimeError):
                         document = {}
                 return {"file": order_attachment, "_fixture_document": document}
+            if order_attachment and not order_attachment.get("content_b64"):
+                # Metadata-only document references cannot be sent as a
+                # multipart upload. Keep the request explicit instead of
+                # emitting a malformed file field that the M1 service rejects.
+                return {"file": _file_object("order.json", document), "_fixture_document": document}
             return {"file": _file_object("order.json", document), "_fixture_document": document}
         if tool == "run_bom_sop_workflow":
             product = dict(request.get("product") or {})

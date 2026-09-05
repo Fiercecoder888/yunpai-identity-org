@@ -400,7 +400,13 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             (item for item in attachments if isinstance(item, dict) and item.get("kind") == "order"),
             None,
         )
-        file_value = order_attachment if isinstance(order_attachment, dict) else None
+        file_value = (
+            order_attachment
+            if isinstance(order_attachment, dict)
+            and isinstance(order_attachment.get("content_b64"), str)
+            and order_attachment.get("content_b64")
+            else None
+        )
         if not file_value and request.get("document"):
             file_value = {
                 "filename": "order.json",

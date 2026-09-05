@@ -190,8 +190,15 @@ def _pick_best_document(filename: str, raw: bytes) -> dict[str, Any]:
     except Exception:
         legacy = {}
     v2_lines = v2.get("lines") or []
+    legacy_lines = legacy.get("lines") or []
     v2_has_facts = bool(v2_lines) or any(v2.get(key) for key in ("order_id", "order_date", "due_date", "supplier_name"))
-    legacy_has_facts = bool(legacy.get("order_id") or legacy.get("lines"))
+    legacy_has_facts = bool(legacy.get("order_id") or legacy_lines)
+    # Some legacy stocking-order workbooks place labels such as “结款方式：”
+    # in cells that the header-driven parser mistakes for an order number.
+    # Prefer the coordinate parser when it has actual order lines and v2 has
+    # no lines; a non-empty label is not stronger evidence than extracted rows.
+    if legacy_lines and not v2_lines:
+        return {"parser_version": "order.workbook.coordinates.v1", "document": legacy, "parser_name": "order.workbook.coordinates.v1"}
     if v2_has_facts and not (legacy_has_facts and legacy.get("order_id") and not v2.get("order_id")):
         return {"parser_version": v2.get("parser_version") or "order.parser.v2", "document": v2, "parser_name": "order.parser.v2"}
     if legacy_has_facts:
