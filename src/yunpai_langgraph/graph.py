@@ -374,7 +374,13 @@ class YunpaiGraph:
             yield self._event(state, "run_done", state=self._public_state(state))
 
     @staticmethod
-    def validate_resume_decision(state: RunState, decision: str, supplement: dict[str, Any] | None = None) -> None:
+    def validate_resume_decision(
+        state: RunState,
+        decision: str,
+        supplement: dict[str, Any] | None = None,
+        *,
+        human_override: bool = False,
+    ) -> None:
         if state.get("status") != "waiting_human" or not state.get("pending_gate"):
             raise ValueError("run is not waiting_human")
         if decision not in {"allow", "approve", "continue", "retry", "reject", "stop"}:
@@ -383,9 +389,11 @@ class YunpaiGraph:
             raise ValueError("supplement must be a JSON object")
         gate = state["pending_gate"]
         if gate.get("type") == "data":
-            if decision == "approve":
+            if decision == "approve" and not human_override:
                 raise ValueError("data gate cannot be approved; provide business-data supplement or reject")
-            if decision not in {"allow", "continue", "retry", "reject", "stop"} or (decision not in {"reject", "stop"} and not supplement):
+            if decision not in {"allow", "approve", "continue", "retry", "reject", "stop"} or (
+                decision not in {"reject", "stop"} and not supplement and not human_override
+            ):
                 raise ValueError("data gate requires business-data supplement or rejection")
 
     #: Gate 类型 -> 允许的角色（T5.3）。HTTP /resume 只接受带这些角色的受信
@@ -437,10 +445,28 @@ class YunpaiGraph:
             # 调用方没有提供受信 principal，会由调用方直接拒绝，这里只留钩子。
             return
 
-    def _prepare_resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator") -> RunState:
-        self.validate_resume_decision(state, decision, supplement)
+    def _prepare_resume(
+        self,
+        state: RunState,
+        decision: str,
+        supplement: dict[str, Any] | None = None,
+        *,
+        actor: str = "operator",
+        human_override: bool = False,
+        override_reason: str = "",
+    ) -> RunState:
+        self.validate_resume_decision(state, decision, supplement, human_override=human_override)
         gate = dict(state["pending_gate"])
-        audit = {"actor": actor, "decision": decision, "gate": gate, "at": _now(), "supplemented": bool(supplement)}
+        audit = {
+            "actor": actor,
+            "decision": decision,
+            "gate": gate,
+            "at": _now(),
+            "supplemented": bool(supplement),
+            "human_override": bool(human_override),
+        }
+        if human_override:
+            audit["override_reason"] = str(override_reason or "人工批准覆盖数据 Gate")
         state["approvals"].append(audit)
         state["trace"].append({"event": "gate.decided", "decision": decision, "actor": actor, "step_index": gate["step_index"], "at": audit["at"]})
         state["pending_gate"] = None
@@ -473,12 +499,44 @@ class YunpaiGraph:
         state["status"] = "running"
         return self._save(state)
 
-    async def resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator") -> RunState:
-        state = self._prepare_resume(state, decision, supplement, actor=actor)
+    async def resume(
+        self,
+        state: RunState,
+        decision: str,
+        supplement: dict[str, Any] | None = None,
+        *,
+        actor: str = "operator",
+        human_override: bool = False,
+        override_reason: str = "",
+    ) -> RunState:
+        state = self._prepare_resume(
+            state,
+            decision,
+            supplement,
+            actor=actor,
+            human_override=human_override,
+            override_reason=override_reason,
+        )
         return state if state.get("status") != "running" else await self.run(state)
 
-    async def stream_resume(self, state: RunState, decision: str, supplement: dict[str, Any] | None = None, *, actor: str = "operator"):
-        state = self._prepare_resume(state, decision, supplement, actor=actor)
+    async def stream_resume(
+        self,
+        state: RunState,
+        decision: str,
+        supplement: dict[str, Any] | None = None,
+        *,
+        actor: str = "operator",
+        human_override: bool = False,
+        override_reason: str = "",
+    ):
+        state = self._prepare_resume(
+            state,
+            decision,
+            supplement,
+            actor=actor,
+            human_override=human_override,
+            override_reason=override_reason,
+        )
         if state.get("status") == "running":
             async for event in self.stream(state):
                 yield event
@@ -519,11 +577,20 @@ class YunpaiGraph:
             if isinstance(records, list) and records:
                 from .m0_catalog import publish_records
 
+                approval = next(
+                    (
+                        item for item in reversed(state.get("approvals", []))
+                        if item.get("gate", {}).get("type") == "candidate"
+                    ),
+                    {},
+                )
                 publication = publish_records(
                     records,
                     tenant_id=str(state.get("tenant_id") or "default"),
                     task_id=str(state.get("task_id") or "task"),
                     actor=actor,
+                    human_override=bool(approval.get("human_override")),
+                    override_reason=str(approval.get("override_reason") or ""),
                 )
                 result["m0_catalog_publish"] = publication
                 if publication.get("status") == "failed":
@@ -650,7 +717,21 @@ class YunpaiGraph:
             }
         if tool == "data_import_commit":
             imported = outputs.get("data_import_run", {})
-            return {"batch_id": _batch_id_from_result(imported) or ""}
+            payload = {"batch_id": _batch_id_from_result(imported) or ""}
+            approval = next(
+                (
+                    item for item in reversed(state.get("approvals", []))
+                    if item.get("human_override")
+                ),
+                {},
+            )
+            if approval:
+                payload.update({
+                    "human_override": True,
+                    "approved_by": str(approval.get("actor") or ""),
+                    "override_reason": str(approval.get("override_reason") or ""),
+                })
+            return payload
         if tool == "data_import_preview":
             imported = outputs.get("data_import_run", {})
             return {"batch_id": request.get("batch_id") or _batch_id_from_result(imported) or ""}
