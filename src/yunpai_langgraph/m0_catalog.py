@@ -6,10 +6,19 @@ import json
 import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 from typing import Any
 
 
-def publish_records(records: list[dict[str, Any]], *, tenant_id: str, task_id: str, actor: str = "operator") -> dict[str, Any]:
+def publish_records(
+    records: list[dict[str, Any]],
+    *,
+    tenant_id: str,
+    task_id: str,
+    actor: str = "operator",
+    human_override: bool = False,
+    override_reason: str = "",
+) -> dict[str, Any]:
     """Validate then publish records through the configured M0 HTTP service.
 
     An unset M0_URL is a local/unit-test configuration and is reported as a
@@ -21,7 +30,15 @@ def publish_records(records: list[dict[str, Any]], *, tenant_id: str, task_id: s
     base = str(os.getenv("M0_URL") or "").rstrip("/")
     if not base:
         return {"status": "skipped", "published": 0, "reason": "M0_URL is not configured"}
-    body = json.dumps({"records": records}, ensure_ascii=False).encode("utf-8")
+    body = json.dumps({
+        "records": records,
+        "task_id": task_id,
+        "approval": {
+            "mode": "human_override" if human_override else "standard",
+            "approved_by": actor,
+            "reason": override_reason,
+        },
+    }, ensure_ascii=False).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -30,6 +47,7 @@ def publish_records(records: list[dict[str, Any]], *, tenant_id: str, task_id: s
         "X-Yunpai-Task-ID": task_id,
         "X-Yunpai-Principal": actor,
         "X-Yunpai-Roles": "data-steward,m0-reviewer,admin",
+        "X-Yunpai-Approval-Mode": "human_override" if human_override else "standard",
     }
     result: dict[str, Any] = {}
     try:
