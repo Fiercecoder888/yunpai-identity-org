@@ -6,9 +6,11 @@ Working model v1 (documented assumptions):
   * Time is integer minutes over half-open intervals.  Working windows come
     exclusively from the calendar snapshot (calendar_ref per resource); a
     closed minute is never implicitly available.
-  * A scheduled operation occupies ONE contiguous wall interval; an operation
-    whose (setup + processing) exceeds the longest common working window is
-    BLOCKED_INPUT NO_FEASIBLE_WINDOW (single-window placement, no splitting).
+  * A scheduled operation needs ``processing`` *working* minutes and may span
+    multiple calendar windows: the gaps between working windows (lunch,
+    overnight, weekend) are non-working time and simply extend the wall span.
+    It is BLOCKED_INPUT NO_FEASIBLE_WINDOW only when the calendar truly runs
+    out of working time before the feasible horizon.
   * Processing minutes = standard_minutes x (qty / quantity_basis) scaled by
     the assigned equipment's real capacity_per_hour x efficiency_factor
     (reference = 60/h at efficiency 1; a 120/h machine halves the minutes).
@@ -107,6 +109,54 @@ def _intersect_many(lists_of_segs):
                 j += 1
         result = nxt
     return result
+
+
+def _working_end(segs, start, need):
+    """Wall-clock end minute after consuming `need` working minutes from `start`
+    across sorted disjoint segments; None when the total working time from
+    `start` onward is less than `need`."""
+    if need <= 0:
+        return start
+    acc = 0
+    for a, b in segs:
+        if b <= start:
+            continue
+        s = max(a, start)
+        if acc + (b - s) >= need:
+            return s + (need - acc)
+        acc += b - s
+    return None
+
+
+def _working_back(segs, end, need):
+    """Wall-clock start minute `need` working minutes before `end` across sorted
+    disjoint segments; None when the working time before `end` is < `need`."""
+    if need <= 0:
+        return end
+    acc = 0
+    for a, b in reversed(segs):
+        if a >= end:
+            continue
+        e = min(b, end)
+        if acc + (e - a) >= need:
+            return e - (need - acc)
+        acc += e - a
+    return None
+
+
+def _earliest_span(segs, min_start, need):
+    """Earliest (start, end) wall interval covering `need` working minutes across
+    sorted disjoint segments, with start >= min_start; None when infeasible."""
+    if need <= 0:
+        return (min_start, min_start)
+    for a, b in segs:
+        if b <= min_start:
+            continue
+        start = max(a, min_start)
+        end = _working_end(segs, start, need)
+        if end is not None:
+            return (start, end)
+    return None
 
 
 def _saturated_from_events(events, cap):
@@ -346,11 +396,16 @@ def _setup_minutes_for(ctx, op, equipment, prev_op):
 # ---------------------------------------------------------------------------
 
 def _place_processing(ctx, combo, anchor_min, setup_min, processing_min):
-    """Earliest processing start P (minutes) or None for one combination.
+    """Earliest feasible (start, end) wall minutes for one combination, or None.
 
-    The equipment (when used) must be free for [P-setup, P+processing); every
-    other resource of the combination must be free for [P, P+processing).
-    The whole operation starts at P-setup which must be >= anchor_min.
+    ``start`` is the wall-clock processing start and ``end`` the wall-clock
+    processing end.  Processing needs ``processing_min`` *working* minutes and
+    may span multiple calendar windows: gaps between working windows (lunch,
+    overnight, weekend) are non-working time and simply extend the wall span.
+    The equipment (when bound) additionally holds ``setup_min`` working minutes
+    immediately before ``start`` for setup/changeover, beginning no earlier than
+    ``anchor_min``.  A manual operation treats ``setup_min`` as lead time, so
+    its processing starts at or after ``anchor_min + setup_min``.
     """
     eq = combo["equipment"]
     others = []
@@ -362,38 +417,40 @@ def _place_processing(ctx, combo, anchor_min, setup_min, processing_min):
         others.append(ctx.resource_for("TOOLING", pool["tooling_code"]).free_segments())
     common = _intersect_many(others) if others else None
 
-    p_low_global = anchor_min + setup_min
-
     if eq is not None:
-        eq_res = ctx.resource_for("EQUIPMENT", eq["equipment_code"])
-        eq_free = eq_res.free_segments()
-        for a, b in eq_free:
-            if b - a < setup_min + processing_min:
+        eq_free = ctx.resource_for("EQUIPMENT", eq["equipment_code"]).free_segments()
+        if not eq_free:
+            return None
+        # Processing must run where the equipment and every co-resource are free
+        # at the same wall time.
+        proc_segs = _intersect_many([eq_free, common]) if common is not None else list(eq_free)
+        for a, b in proc_segs:
+            if b <= anchor_min:
                 continue
-            lo = max(a + setup_min, p_low_global)
-            hi = b - processing_min
-            if lo > hi:
-                continue
-            if common is None:
-                return lo
-            for c, d in common:
-                if d < lo:
-                    continue
-                if c > hi:
-                    break
-                p = max(lo, c)
-                if p <= min(hi, d - processing_min):
-                    return p
+            start = max(a, anchor_min)
+            end = _working_end(proc_segs, start, processing_min)
+            if end is None:
+                # no later start recovers lost working time
+                break
+            # Setup occupies `setup_min` working minutes on the equipment ending
+            # at `start`; its own start must be >= anchor_min.
+            setup_start = _working_back(eq_free, start, setup_min)
+            if setup_start is not None and setup_start >= anchor_min:
+                return (start, end)
+            # Not enough room before `start`; the earliest feasible processing
+            # start is after running setup from anchor_min on the equipment.
+            alt = _working_end(eq_free, anchor_min, setup_min)
+            if alt is not None and alt > start:
+                alt_end = _working_end(proc_segs, alt, processing_min)
+                if alt_end is not None:
+                    return (alt, alt_end)
         return None
+
+    # Manual operation: no equipment; setup_minutes is lead time, so processing
+    # must start at or after anchor_min + setup_min.
     if not common:
         return None
-    for c, d in common:
-        if d - c < processing_min:
-            continue
-        p = max(c, p_low_global)
-        if p + processing_min <= d:
-            return p
-    return None
+    return _earliest_span(common, anchor_min + setup_min, processing_min)
 
 
 def _prev_op_on_equipment(ctx, equipment_code):
@@ -499,12 +556,13 @@ def _schedule_streaming_operations(bundle):
                         placed = _place_processing(ctx, combo, anchor, setup, processing)
                         if placed is None:
                             continue
-                        candidate = (placed, combo_index, combo, setup, processing)
+                        start, end_min = placed
+                        candidate = (start, combo_index, end_min, combo, setup, processing)
                         if best is None or candidate[:2] < best[:2]:
                             best = candidate
                     if best is None:
                         raise PmcError(BLOCKED, "NO_FEASIBLE_WINDOW streaming op_code=%s batch=%d" % (op_code, batch_index + 1))
-                    p, _, combo, setup, processing = best
+                    p, _, end_min, combo, setup, processing = best
                     eq = combo["equipment"]
                     sid = "%s::%s#%d/B%02d" % (line["order_line_id"], op_code, op["sequence_no"], batch_index + 1)
                     out = {
@@ -514,7 +572,7 @@ def _schedule_streaming_operations(bundle):
                         "person_code": combo["person"]["person_code"] if combo["person"] else "",
                         "tooling_codes": [t["tooling_code"] for t in combo["tooling"]],
                         "station_code": combo["station"]["station_code"] if combo["station"] else "",
-                        "plan_start": to_iso(from_minutes(p - setup)), "plan_end": to_iso(from_minutes(p + processing)),
+                        "plan_start": to_iso(from_minutes(p - setup)), "plan_end": to_iso(from_minutes(end_min)),
                         "qty": str(batch_qty), "uom": line["uom"], "setup_minutes": setup,
                         "processing_minutes": processing, "batch_index": batch_index + 1,
                         "batch_count": batch_count, "transfer_batch_size": route_default,
@@ -525,13 +583,13 @@ def _schedule_streaming_operations(bundle):
                     previous_by_op[op_code] = sid
                     cur = {**op, "product_code": line["product_code"]}
                     if eq:
-                        _reserve(ctx, "EQUIPMENT", eq["equipment_code"], p - setup, p + processing, sid, cur, intervals)
+                        _reserve(ctx, "EQUIPMENT", eq["equipment_code"], p - setup, end_min, sid, cur, intervals)
                     if combo["person"]:
-                        _reserve(ctx, "PERSON", combo["person"]["person_code"], p, p + processing, sid, cur, intervals)
+                        _reserve(ctx, "PERSON", combo["person"]["person_code"], p, end_min, sid, cur, intervals)
                     if combo["station"]:
-                        _reserve(ctx, "STATION", combo["station"]["station_code"], p, p + processing, sid, cur, intervals)
+                        _reserve(ctx, "STATION", combo["station"]["station_code"], p, end_min, sid, cur, intervals)
                     for tool in combo["tooling"]:
-                        _reserve(ctx, "TOOLING", tool["tooling_code"], p, p + processing, sid, cur, intervals)
+                        _reserve(ctx, "TOOLING", tool["tooling_code"], p, end_min, sid, cur, intervals)
     return operations, intervals, blocks
 
 
@@ -669,17 +727,18 @@ def schedule_operations(bundle):
                 p = _place_processing(ctx, combo, anchor, setup, processing)
                 if p is None:
                     continue
-                meta = (p, combo_index)
+                start, end_min = p
+                meta = (start, combo_index)
                 if best is None or meta < best:
                     best = meta
-                    best_meta = (combo, p, setup, processing)
+                    best_meta = (combo, start, end_min, setup, processing)
             if best is None:
                 raise PmcError(BLOCKED,
                                "NO_FEASIBLE_WINDOW op_code=%s order_line=%s "
                                "(setup+processing exceeds common working windows "
                                "or no calendar remains)" % (op["op_code"],
                                                             rec["line"]["order_line_id"]))
-            combo, p, setup, processing = best_meta
+            combo, p, end_min, setup, processing = best_meta
             eq = combo["equipment"]
             sid = ctx.schedule_id(rec["line"]["order_line_id"], op["op_code"],
                                   op["sequence_no"])
@@ -697,7 +756,7 @@ def schedule_operations(bundle):
                 "station_code": (combo["station"]["station_code"]
                                  if combo["station"] is not None else ""),
                 "plan_start": to_iso(from_minutes(p - setup)),
-                "plan_end": to_iso(from_minutes(p + processing)),
+                "plan_end": to_iso(from_minutes(end_min)),
                 "qty": str(qty),
                 "uom": rec["line"]["uom"],
                 "setup_minutes": setup,
@@ -707,15 +766,15 @@ def schedule_operations(bundle):
             # resource reservations (equipment includes setup span)
             if eq is not None:
                 _reserve(ctx, "EQUIPMENT", eq["equipment_code"], p - setup,
-                         p + processing, sid, cur_op, intervals)
+                         end_min, sid, cur_op, intervals)
             if combo["person"] is not None:
                 _reserve(ctx, "PERSON", combo["person"]["person_code"], p,
-                         p + processing, sid, cur_op, intervals)
+                         end_min, sid, cur_op, intervals)
             if combo["station"] is not None:
                 _reserve(ctx, "STATION", combo["station"]["station_code"], p,
-                         p + processing, sid, cur_op, intervals)
+                         end_min, sid, cur_op, intervals)
             for t in combo["tooling"]:
-                _reserve(ctx, "TOOLING", t["tooling_code"], p, p + processing,
+                _reserve(ctx, "TOOLING", t["tooling_code"], p, end_min,
                          sid, cur_op, intervals)
             rec["done"][op["op_code"]] = op_out
             rec["next"] += 1
