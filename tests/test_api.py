@@ -74,6 +74,37 @@ def test_api_accepts_request_envelope_and_rejects_invalid_resume(tmp_path):
     assert "dispatch_m5_schedule" in skills["yunpai-m5-pmc-lifecycle"]["tools"]
 
 
+def test_api_data_gate_human_override_requires_explicit_flag(tmp_path):
+    client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "override.sqlite")))
+    request = workflow_request()
+    request["bom_lines"] = []
+    created = client.post("/runs", json=request).json()
+    run_id = created["run_id"]
+    candidate = client.post(
+        f"/runs/{run_id}/resume",
+        json={"decision": "approve"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward"},
+    )
+    assert candidate.status_code == 200
+    rejected = client.post(
+        f"/runs/{run_id}/resume",
+        json={"decision": "approve"},
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "data-steward"},
+    )
+    assert rejected.status_code == 409
+    approved = client.post(
+        f"/runs/{run_id}/resume",
+        json={
+            "decision": "approve",
+            "human_override": True,
+            "override_reason": "人工确认原始资料有效",
+        },
+        headers={"X-Actor-User": "steward", "X-Actor-Roles": "admin"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["approvals"][-1]["human_override"] is True
+
+
 def test_api_uploads_xlsx_and_records_intent_route(tmp_path):
     from io import BytesIO
     from openpyxl import Workbook

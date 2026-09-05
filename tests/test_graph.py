@@ -137,6 +137,40 @@ def test_m0_commit_payload_unwraps_http_batch_response():
     assert graph._payload_for(state, "data_import_commit") == {"batch_id": "batch-http-001"}
 
 
+def test_human_override_is_carried_to_m0_commit_payload():
+    graph = YunpaiGraph()
+    state = new_state({"workflow": "m0_m5"})
+    state["outputs"] = {"data_import_run": {"batch_id": "batch-human-001"}}
+    state["approvals"] = [{
+        "actor": "steward-1",
+        "human_override": True,
+        "override_reason": "人工核验原始订单与系统限制冲突后批准",
+    }]
+    assert graph._payload_for(state, "data_import_commit") == {
+        "batch_id": "batch-human-001",
+        "human_override": True,
+        "approved_by": "steward-1",
+        "override_reason": "人工核验原始订单与系统限制冲突后批准",
+    }
+
+
+@pytest.mark.asyncio
+async def test_data_gate_human_override_is_explicitly_audited():
+    graph = YunpaiGraph()
+    request = workflow_request()
+    request["bom_lines"] = []
+    state = await graph.run(new_state(request))
+    state = await graph.resume(
+        state,
+        "approve",
+        actor="steward-1",
+        human_override=True,
+        override_reason="人工确认原始资料有效",
+    )
+    assert state["approvals"][-1]["human_override"] is True
+    assert state["approvals"][-1]["override_reason"] == "人工确认原始资料有效"
+
+
 def test_m2_payload_uses_m1_product_name_when_request_has_no_product():
     graph = YunpaiGraph()
     state = new_state({"workflow": "m0_m5", "message": "匹配订单 BOM 和 SOP"})

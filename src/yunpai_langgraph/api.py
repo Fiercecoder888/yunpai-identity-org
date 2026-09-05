@@ -269,8 +269,12 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         })
         actor, roles = _principal_actor(principal, trusted, body)
         decision = str(body.get("decision", "allow"))
+        human_override = bool(body.get("human_override", False))
+        override_reason = str(body.get("override_reason") or "")
         try:
-            graph.validate_resume_decision(state, decision, body.get("supplement"))
+            graph.validate_resume_decision(
+                state, decision, body.get("supplement"), human_override=human_override
+            )
             if trusted:
                 # 只有受信 principal 才做角色/租户 Gate；本地无认证降级路径
                 # 保留操作能力但审计标记 untrusted_body（生产强制受信）。
@@ -280,7 +284,14 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
             raise HTTPException(status, str(exc)) from exc
         try:
-            resumed = await graph.resume(state, decision, body.get("supplement"), actor=actor)
+            resumed = await graph.resume(
+                state,
+                decision,
+                body.get("supplement"),
+                actor=actor,
+                human_override=human_override,
+                override_reason=override_reason,
+            )
             if resumed.get("approvals"):
                 resumed["approvals"][-1].setdefault("principal", {
                     "trusted": trusted, "actor": actor, "roles": roles,
@@ -309,12 +320,16 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         })
         actor, roles = _principal_actor(principal, trusted, body)
         decision = str(body.get("decision", "allow"))
+        human_override = bool(body.get("human_override", False))
+        override_reason = str(body.get("override_reason") or "")
         if state.get("status") != "waiting_human" or not state.get("pending_gate"):
             raise HTTPException(409, "run is not waiting_human")
         if decision not in {"allow", "approve", "continue", "retry", "reject", "stop"}:
             raise HTTPException(409, "unsupported gate decision")
         try:
-            graph.validate_resume_decision(state, decision, body.get("supplement"))
+            graph.validate_resume_decision(
+                state, decision, body.get("supplement"), human_override=human_override
+            )
             if trusted:
                 graph.authorize_gate(state, actor=actor, roles=roles,
                                      tenant_id=principal.get("tenant_id") or None)
@@ -322,7 +337,14 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
             raise HTTPException(status, str(exc)) from exc
         return ndjson_response(
-            graph.stream_resume(state, decision, body.get("supplement"), actor=actor)
+            graph.stream_resume(
+                state,
+                decision,
+                body.get("supplement"),
+                actor=actor,
+                human_override=human_override,
+                override_reason=override_reason,
+            )
         )
 
     @app.get("/m0/readback/{batch_id}")
