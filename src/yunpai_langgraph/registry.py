@@ -375,6 +375,7 @@ def build_runtime_registry() -> ToolRegistry:
         from .m1_tooling import M1_HTTP_ADAPTER_TOOL_NAMES, bind_m1_http
         from .m1_http_adapter import module_m1_auth_headers
         from .m3_m4_tooling import EXCLUDED_M3_M4_TOOL_NAMES
+        from .workers import HANDLERS
 
         # 选择性 HTTP 模块绑定（YUNPAI_HTTP_MODULES 控制哪些模块走远程）。
         selected = {
@@ -398,6 +399,15 @@ def build_runtime_registry() -> ToolRegistry:
                 tool_names=M1_HTTP_ADAPTER_TOOL_NAMES,
                 overwrite=True,
             )
+        # build_default_registry installs the dedicated M3/M4 adapters so
+        # callers can use them without the full runtime builder.  In the
+        # runtime builder, however, YUNPAI_HTTP_MODULES is the source of truth:
+        # restore local handlers for explicitly unselected modules instead of
+        # silently leaving a pre-bound HTTP adapter in place.
+        for name, handler in HANDLERS.items():
+            spec = registry.specs.get(name)
+            if spec is not None and spec.module not in selected:
+                registry.handlers[name] = handler
         registry.environment = {"env": env, "transport": "http", "local_fixture": False}  # type: ignore[attr-defined]
     else:
         registry.environment = {"env": env, "transport": "local", "local_fixture": True}  # type: ignore[attr-defined]

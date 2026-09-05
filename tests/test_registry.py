@@ -90,3 +90,13 @@ def test_full_http_runtime_keeps_missing_receivers_unbound(monkeypatch):
     assert len(registry.handlers) == 112
     assert "receive_m3_material_demand" not in registry.handlers
     assert "receive_m4_schedule_impact_proposal" not in registry.handlers
+
+
+def test_http_module_selection_restores_local_handlers_for_unselected_modules(monkeypatch):
+    monkeypatch.setenv("YUNPAI_TOOL_TRANSPORT", "http")
+    monkeypatch.setenv("YUNPAI_HTTP_MODULES", "m0,m1,m4,m5")
+    registry = build_runtime_registry()
+    # M2/M3 are intentionally local for the 39092 W-H909 replay.
+    assert registry.handlers["run_bom_sop_workflow"].__module__.endswith("workers")
+    assert registry.handlers["run_m3_procurement_requirements"].__module__.endswith("workers")
+    assert registry.handlers["import_m4_purchase_suggestions_json"].__module__.endswith("registry")
