@@ -756,7 +756,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             )
         scenario_id = str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}")
         bundle = assemble_bundle(
-            orders=[{"order_id": str(order.get("order_id") or ""), "lines": read_lines(state) or [{"order_line_id": f"{order.get('order_id')}::L1", "product_code": order.get("product_code"), "qty": order.get("quantity", 0), "due_date": order.get("due_date"), "priority": "normal"}]}],
+            orders=[{"order_id": str(order.get("order_id") or ""), "order_no": str(order.get("order_no") or order.get("order_id") or ""), "lines": read_lines(state) or [{"order_line_id": f"{order.get('order_id')}::L1", "product_code": order.get("product_code"), "qty": order.get("quantity", 0), "uom": "PCS", "due_date": order.get("due_date"), "priority": "normal"}]}],
             routes=request_payload.get("routing_steps") or [],
             resource_snapshot=resource_snapshot,
             calendar_snapshot=calendar_snapshot,
