@@ -88,11 +88,21 @@ def read_order(state: RunState) -> dict[str, Any]:
     supplement_document = supplement.get("document") if isinstance(supplement, dict) else None
     supplement_header = supplement_document.get("header") if isinstance(supplement_document, dict) else None
     request = state.get("request", {})
-    explicit = {
-        key: request.get(key)
-        for key in ("order_id", "order_number", "product_code", "product_name", "quantity", "order_qty", "due_date", "order_date", "customer")
-        if request.get(key) not in (None, "")
-    }
+    # A replay may carry a source-backed structured document under
+    # request.document (or the legacy request.order) while M1's external
+    # parser only returns the raw document/header.  Merge that explicit,
+    # user-supplied fact without allowing empty values to overwrite M1.
+    request_document = request.get("document") or request.get("order") or {}
+    request_product = request.get("product") or {}
+    explicit: dict[str, Any] = {}
+    for key in ("order_id", "order_number", "product_code", "product_name", "quantity", "order_qty", "due_date", "order_date", "customer"):
+        value = request.get(key)
+        if value in (None, "") and isinstance(request_document, dict):
+            value = request_document.get(key)
+        if value in (None, "") and key in {"product_code", "product_name"} and isinstance(request_product, dict):
+            value = request_product.get(key)
+        if value not in (None, ""):
+            explicit[key] = value
     if isinstance(order, dict):
         if isinstance(supplement_header, dict):
             # Keep external M1 values and use only non-empty, source-backed

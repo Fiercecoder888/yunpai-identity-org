@@ -76,6 +76,27 @@ def test_m2_payload_uses_semantic_supplement_for_missing_header_product_code():
     assert payload["product_profile"]["product_code"] == "W-H909"
 
 
+def test_read_order_merges_explicit_structured_document_for_downstream_steps():
+    state = _approved_m2_state({
+        "document": {
+            "order_id": "PO-1",
+            "product_code": "W-H909",
+            "product_name": "测试产品",
+            "quantity": 4000,
+            "due_date": "2026-09-12",
+        },
+        "product": {"product_code": "W-H909", "product_name": "测试产品"},
+    })
+    state["outputs"]["ingest_document"] = {
+        "document": {"header": {"order_number": "PO-1"}, "lines": []},
+    }
+    order = orchestration_bridge.read_order(state)
+    assert order["order_id"] == "PO-1"
+    assert order["product_code"] == "W-H909"
+    assert order["quantity"] == 4000
+    assert order["due_date"] == "2026-09-12"
+
+
 def test_m2_payload_reads_approved_m0_bom_when_request_has_no_bom(monkeypatch):
     state = _approved_m2_state({"bom_lines": [], "legacy_preview": False})
     state["outputs"]["run_bom_sop_workflow"] = {}
