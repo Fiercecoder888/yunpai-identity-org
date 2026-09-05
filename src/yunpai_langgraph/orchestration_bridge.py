@@ -522,6 +522,15 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         inventory = read_inventory_facts(state)
         product_code = str(order.get("product_code") or "")
         order_id = str(order.get("order_id") or "")
+        # M1 HTTP responses may expose quantity only on extracted order lines,
+        # not on the header object consumed by read_order.  Preserve that
+        # source-backed quantity for the M3 contract instead of sending zero.
+        line_quantity = sum(
+            float(line.get("quantity") or line.get("order_qty") or 0)
+            for line in read_lines(state)
+            if isinstance(line, dict)
+        )
+        order_quantity = order.get("order_qty") or order.get("quantity") or line_quantity
         if not bom_lines:
             return blocked(state, source_module="m2", tool=tool,
                            missing_fields=["已批准 BOM 行"],
@@ -555,7 +564,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             )
         payload: dict[str, Any] = {
             "tenant_id": state.get("tenant_id", "default"),
-            "order": {"project_id": str(request.get("project_id") or order_id), "order_id": order_id, "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "order_qty": order.get("quantity", 0), "due_date": str(order.get("due_date") or "")},
+            "order": {"project_id": str(request.get("project_id") or order_id), "order_id": order_id, "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "order_qty": order_quantity, "due_date": str(order.get("due_date") or "")},
             "bom": {"bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "lines": [{"line_id": str(line.get("line_id") or f"line-{index}"), "material_code": str(line.get("material_code") or ""), "material_name": str(line.get("material_name") or line.get("material_code") or ""), "qty_per": line.get("qty_per", line.get("quantity_per", line.get("quantity", 0))), "uom": str(line.get("uom") or line.get("unit") or "pcs"), "loss_rate": line.get("loss_rate", 0), "requires_procurement": line.get("requires_procurement", True)} for index, line in enumerate(bom_lines, start=1)]},
             "inventory_snapshot": inventory,
         }

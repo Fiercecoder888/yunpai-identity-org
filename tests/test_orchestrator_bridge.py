@@ -175,6 +175,24 @@ def test_m3_prefers_enriched_inventory_snapshot_over_compact_inventory():
     assert payload["inventory_snapshot"][0]["lot_no"] == "LOT-1"
 
 
+def test_m3_uses_order_line_quantity_when_header_has_no_quantity():
+    state = _approved_m2_state({"legacy_preview": False})
+    state["outputs"]["ingest_document"] = {
+        "data": {
+            "document": {
+                "header": {"order_number": "SO-1", "product_code": "P-1"},
+                "lines": [{"model": "P-1", "quantity": 4}],
+            }
+        }
+    }
+    state["request"]["inventory_snapshot"] = [{
+        "material_code": "MAT-1", "available_qty": 10,
+        "warehouse": "WH-1", "lot_no": "LOT-1", "qc_status": "released",
+    }]
+    payload = bridge_payload(state, "run_m3_procurement_requirements")
+    assert payload["order"]["order_qty"] == 4
+
+
 def test_m3_inventory_rejects_implicit_defaults_in_production():
     # production（无 legacy_preview）缺 warehouse/lot/qc 库存事实 -> BLOCKED_INPUT，
     # 不接受隐式仓库/lot/qc 默认（断点 4）。
