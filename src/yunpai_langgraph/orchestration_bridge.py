@@ -721,9 +721,9 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             "tracking_task_id": state.get("task_id", ""),
             "idempotency_key": f"{state.get('task_id', 'task')}:m4",
             "source_module": "m3",
-            "procurement_plan_id": m3.get("procurement_plan_id"),
-            "order_id": m3.get("order_id"),
-            "source_plan_checksum": m3.get("handoff_envelope", {}).get("source_plan_checksum") if isinstance(m3.get("handoff_envelope"), dict) else None,
+            "procurement_plan_id": str(m3.get("procurement_plan_id") or ""),
+            "order_id": str(m3.get("order_id") or ""),
+            "source_plan_checksum": str((m3.get("handoff_envelope") or {}).get("source_plan_checksum") or "") if isinstance(m3.get("handoff_envelope"), dict) else "",
         }
     if tool == "ingest_m5_planning_snapshot":
         from .planning_snapshot import assemble_bundle, verify_bundle
@@ -759,7 +759,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             orders=[{"order_id": str(order.get("order_id") or ""), "lines": read_lines(state) or [{"order_line_id": f"{order.get('order_id')}::L1", "product_code": order.get("product_code"), "qty": order.get("quantity", 0), "due_date": order.get("due_date"), "priority": "normal"}]}],
             routes=request_payload.get("routing_steps") or [],
             resource_snapshot=resource_snapshot,
-            calendar_snapshot=request_payload.get("calendar_snapshot"),
+            calendar_snapshot=calendar_snapshot,
             supply_snapshot=request_payload.get("supply_snapshot") or ({"entries": request_payload.get("supply_entries") or [], "order_kitting": request_payload.get("order_kitting")} if request_payload.get("supply_entries") or request_payload.get("order_kitting") else None),
             constraint_snapshot=request_payload.get("constraint_snapshot") or ({"changeover_rules": request_payload.get("changeover_rules") or request_payload.get("setup_matrix") or {}} if request_payload.get("changeover_rules") or request_payload.get("setup_matrix") else None),
             tenant_id=state.get("tenant_id", "default"),
@@ -777,7 +777,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             "site_id": str(request.get("site_id") or "default"),
             "scenario_purpose": str(request.get("scenario_purpose") or "production"),
             "replace_existing": True,
-            "source_systems": ["orchestrator", "m1", "m2", "m3", "m4"],
+            "source_systems": ["manual"],
             "observed_at": request.get("observed_at"),
             "source_observed_at": request.get("source_observed_at") or {},
             "pmc_v2_bundle": bundle,
