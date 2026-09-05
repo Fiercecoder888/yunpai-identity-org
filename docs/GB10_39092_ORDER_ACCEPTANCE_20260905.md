@@ -2,7 +2,14 @@
 
 ## 结论
 
-代码已合并并推送到 `main`/`dev`，GB10 `39092` 已部署并可用。最新真实 W-H909 复验已通过 M1 review、M0 candidate/commit，并由订单工作流从 M0 canonical 回读并匹配 7 条审核 BOM；前端在 `?tenant_id=w909-acceptance` 显示工程 Gate。SOP/工艺约束、库存/供应/资源事实和 M5 发布仍未完成，因此当前不能宣称“订单匹配 BOM/物料/SOP 并生成 PMC”已完成。
+代码已合并并推送到 `main`/`dev`，GB10 `39092` 已部署并可用。最新真实 W-H909 复验已通过 M1 review、M0 candidate/commit，并由订单工作流从 M0 canonical 回读并匹配 7 条审核 BOM、14 道 SOP 工序；前端已显示 M3 物料计算完成、M4 供应商事实 Gate。14 道工序均缺标准工时，供应商/采购事实也未提供，因此当前不能宣称已生成可发布生产 PMC。
+
+## 最新联调增量（2026-09-05 09:00）
+
+- GB10 当前 release：`/home/wjc/yunpai-langgraph/releases/20260905090437`；`/api/health` 为 `114/112`，M0-M5 HTTP 端点已绑定，`local_fixture=false`。
+- 基础资料前端任务 `run-4f178c36913c4cdea1d0e6642aebbaa7` / `task-9bfbc407ba9e4721be76cf8ea71960c8`：真实 BOM `.xlsx` + 30MB SOP `.xls` 均 accepted；候选批准后 M0 发布 10 条 canonical（产品、BOM、7 条物料、SOP 文档）。
+- 订单前端任务 `run-12780724235c41758b532f47f9643728` / `task-82b607ba77984431b97af1897136c855`：M1 review、M0 candidate、M2 engineering、M3 均已执行；M2 从 M0 匹配 7 条 BOM 和 14 道 SOP 工序，M3 完成缺料计算，当前 M4 因缺供应商/采购事实停在 data Gate。
+- M2 明确报告 `standard_minutes_missing=14`；没有 IE 标准工时、资源/人员/工位和日历快照，M5 不能生成生产排程。前端 CUA 已捕获任务列表及 M4 data Gate（当前页 `http://100.121.179.111:39092/?tenant_id=w909-acceptance`）。
 
 ## 最新复验（2026-09-05 08:02）
 

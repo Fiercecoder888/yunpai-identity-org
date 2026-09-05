@@ -338,9 +338,21 @@ class ReviewerAgent:
                 canonical_match = result.get("canonical_bom_match")
                 if isinstance(canonical_match, dict) and canonical_match.get("status") == "matched":
                     count = canonical_match.get("line_count") or 0
+                    sop_match = result.get("canonical_sop_match")
+                    if isinstance(sop_match, dict) and sop_match.get("status") == "matched":
+                        operations = sop_match.get("operation_count") or 0
+                        missing_times = sop_match.get("standard_minutes_missing") or 0
+                        suffix = f"；已识别 {operations} 道 SOP 工序"
+                        if missing_times:
+                            suffix += f"，{missing_times} 道缺少标准工时，不能直接生成生产 PMC"
+                        return self._gate("engineering", effective_module, effective_tool, f"M0 已匹配并审核 {count} 条 BOM{suffix}；请工程确认路线与资源", ["批准 BOM/SOP", "补充工时/资源", "终止"])
                     return self._gate("engineering", effective_module, effective_tool, f"M0 已匹配并审核 {count} 条 BOM；SOP/工艺约束仍需工程确认", ["批准 BOM/SOP", "补充 SOP", "终止"])
                 return self._gate("data", effective_module, effective_tool, "M2 缺少产品/BOM 权威输入", ["补充数据", "终止"])
             if result.get("status") == "draft_created":
+                sop_match = result.get("canonical_sop_match")
+                if isinstance(sop_match, dict) and sop_match.get("status") == "matched":
+                    missing_times = sop_match.get("standard_minutes_missing") or 0
+                    return self._gate("engineering", effective_module, effective_tool, f"已识别 {sop_match.get('operation_count') or 0} 道 SOP 工序；{missing_times} 道缺少标准工时，需工程确认后再进入 PMC", ["批准 BOM/SOP", "补充工时/资源", "终止"])
                 return self._gate("engineering", effective_module, effective_tool, "BOM/SOP 草稿必须由工程人员批准", ["批准 BOM/SOP", "修改后重试", "终止"])
         if effective_tool == "run_m3_procurement_requirements" and not data.get("lines") and not data.get("shortage_lines"):
             return self._gate("data", effective_module, effective_tool, "M3 缺少可计算的 BOM 行", ["补充 BOM 后重试", "终止"])

@@ -26,7 +26,10 @@ FILE_STATUSES = (
     "deferred_to_m1",  # 大表延迟到 M1 深解析
 )
 
-MAX_FILE_BYTES = 20 * 1024 * 1024      # 单文件上限 20 MiB
+# SOP workbooks in the acceptance data include a ~30 MiB legacy .xls file.
+# Keep a bounded per-file limit while allowing that real input through the
+# explicit master-data upload path.
+MAX_FILE_BYTES = 40 * 1024 * 1024      # 单文件上限 40 MiB
 MAX_BATCH_BYTES = 200 * 1024 * 1024    # 整批上限 200 MiB
 MAX_BATCH_FILES = 2000                 # 整批文件数上限
 

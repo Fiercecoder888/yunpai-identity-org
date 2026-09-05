@@ -5,10 +5,10 @@
 
 ## 当前验收结论
 
-- 结论：代码与本地回归通过；GB10 `39092` 已切换到 `20260905080200`，W-H909 真实订单入口已验证走 `m1_m5_document_to_plan`，M1/M0 可通过人工 Gate，M0 canonical 回读已匹配产品/订单/7 条 BOM，M2 已保留 BOM 匹配并进入工程 Gate；SOP/库存/供应/资源事实和 M5 发布回读仍未通过
+- 结论：代码与本地回归通过；GB10 `39092` 已切换到 `20260905090437`，W-H909 真实订单入口已验证走 `m1_m5_document_to_plan`，M1/M0 可通过人工 Gate，M0 canonical 回读已匹配产品/订单/7 条 BOM/14 道 SOP 工序，M3 已完成缺料计算；M4 因供应商/采购事实缺失停在 data Gate，标准工时/资源/日历缺失使 M5 仍未通过
 - 验收范围：`origin/main`/`origin/dev` `4192438`、39092 health/tools、Qwen、W-H909 基础资料与订单上传、浏览器 Gate 操作/截图、M1/M0/M2 回读和剩余阻塞
-- 最后检查：2026-09-05 08:02 +08:00
-- 遗留问题：legacy `data_import_commit` 计数仍错误归类为采购；W-H909 的审核 SOP/工位/设备/标准工时、库存/供应/资源事实和 M5 发布回读仍缺失
+- 最后检查：2026-09-05 09:00 +08:00
+- 遗留问题：legacy `data_import_commit` 计数仍错误归类为采购；W-H909 的 14 道 SOP 缺标准工时，供应商/采购、人员/设备/工位/日历事实和 M5 发布回读仍缺失
 
 ## 验收标准
 
@@ -21,10 +21,10 @@
 | A-005 | 多 session 有唯一分支/worktree、路径认领和发布锁规则 | 通过 | 检查 `docs/SESSION_COLLABORATION_RULES.md`、claims 模板并运行 `--validate` | E-SESSION-001 |
 | A-006 | 每个 session 持续维护独立实时修改报告 | 通过 | 检查实时报告规则和 `reports/sessions/README.md` 模板 | E-SESSION-001 |
 | A-007 | 微信下载目录全量复核结论可追溯，且不把原始资料误报为不存在 | 通过 | 只读扫描个人/企业微信目录、`~/Downloads` 和导出目录；归档清单、表头核验；账本校验；后端/前端回归与构建 | E-0904-WECHAT-AUDIT-001 |
-| A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 部分通过（产品/订单/BOM/物料已回读，SOP 未发布；legacy import 映射待修） | 39092 health、M0 catalog overview、source SHA/审核状态和运行回读 | E-GB10-WH909-ORDER-20260905-005 |
+| A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 部分通过（产品/订单/BOM/物料/SOP 已回读；legacy import 映射待修） | 39092 health、M0 catalog overview、source SHA/审核状态和运行回读 | E-GB10-WH909-ORDER-20260905-006 |
 | A-009 | M3/M4 Tool 与 Skill 完整绑定并保持副作用 Gate | 通过（代码与本地运行态） | 完整 pytest、compileall、diff check、账本校验、9001 health/tools、HTTP mock 集成 | E-M3M4-TOOLS-001 |
 | A-010 | M1 Tool 与 Skill 完整绑定：17 个 M1 Tool 经专用 HTTP Adapter 可执行（租户头/202 轮询/权限/错误映射），Skill 声明 17 Tool 且查询 op 不打开写入 Gate，本地 fixture 不冒充完整 M1 解析 | 通过（代码与本地运行态） | 完整 pytest、M1 定向测试、compileall、git diff --check、Registry 绑定统计、HTTP mock 集成 | E-M1-TOOLS-001 |
-| A-011 | GB10 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（M1/M0 接通，M2 已匹配 BOM 后在 SOP 工程 Gate 停止） | 39092 health 114/112、真实 XLSX 上传、M1/M0 Gate、M0 overview、M2 canonical match 和浏览器截图 | E-GB10-WH909-ORDER-20260905-005 |
+| A-011 | GB10 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（M1/M0 接通，M2/M3 完成后在 M4 供应商事实 Gate 停止） | 39092 health 114/112、真实 XLSX 上传、M1/M0 Gate、M0 overview、M2/M3 回读和浏览器截图 | E-GB10-WH909-ORDER-20260905-006 |
 
 ## 证据索引
 
@@ -72,6 +72,7 @@
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
 
 - 2026-09-05 07:34-08:02：将 `210c30d` 部署到 GB10 `39092` release `20260905080200`，通过真实前端租户 URL `?tenant_id=w909-acceptance` 复核 W-H909 订单；M1 review 与 M0 candidate/commit Gate 通过，M0 catalog overview 回读产品/订单/7 条审核 BOM/物料，M2 进入“已匹配并审核 7 条 BOM；SOP/工艺约束仍需工程确认”工程 Gate；证据 `E-GB10-WH909-ORDER-20260905-005`；结论：BOM 匹配已可证明，SOP、库存/供应/资源与 M5 PMC 发布仍阻塞；确认来源：本次 GB10/API/浏览器实测。
+- 2026-09-05 08:48-09:00：将订单编排与业务资料发布改动部署到 GB10 `39092` release `20260905090437`；真实 BOM `.xlsx` 与 30MB SOP `.xls` 通过前端上传并在 candidate Gate 后发布 10 条 M0 canonical；订单 `run-12780724235c41758b532f47f9643728` 完成 M1 review、M0 candidate、M2 engineering 和 M3 缺料计算，M2 回读 7 条 BOM/14 道 SOP，因 14 道缺标准工时及 M4 缺供应商/采购事实而停止；证据 `E-GB10-WH909-ORDER-20260905-006`；确认来源：GB10 API、M0 overview 和 CUA 前端任务/Gate 快照。
 
 - 2026-09-05 05:47-06:00：将 `origin/main`/`origin/dev` `a09a299`（运行功能提交 `a9a85eb`）部署到 GB10 `39092` release `20260905071500`，上传真实 `order.xlsx` 并从浏览器任务列表打开运行；证据 `E-GB10-39092-ORDER-20260905-002`；结论：订单入口已按新前端路由选择 `m1_m5_document_to_plan`，M1 在缺产品编码/交期时进入人工 Gate；BOM 候选存在 `FC-15`/`FC-20`，但随附 SOP 为 USB-C demo，不能作为 HDMI 工艺路线，M0 canonical 与 PMC 仍未验收。
 - 2026-09-05：修复公开运行状态递归文件正文脱敏并完成全量后端/前端回归；证据 `E-GB10-PUBLIC-REDACTION-20260905`；结论：`content_b64` 不再通过嵌套输出泄露，39092 历史任务列表可加载；不改变 canonical/PMC 数据阻塞。

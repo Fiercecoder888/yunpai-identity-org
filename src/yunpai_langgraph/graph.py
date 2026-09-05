@@ -504,10 +504,33 @@ class YunpaiGraph:
         if gate["type"] == "engineering":
             generation = result.setdefault("bom_generation", {})
             generation["approval_status"] = "approved"
+            sop_generation = result.get("sop_generation")
+            if isinstance(sop_generation, dict):
+                sop_generation["approval_status"] = "approved"
             return {"applied": True, "message": "M2 BOM/SOP 已批准", "readback": None}
         if gate["type"] == "review":
             result["review_status"] = "accepted"
             return {"applied": True, "message": "M1 复核已接受", "readback": None}
+        if gate["type"] == "candidate":
+            # Candidate approval is the durable hand-off from the upload
+            # catalog to M0 canonical data.  The HTTP client is a no-op in
+            # local/unit-test configurations without M0_URL.
+            records = result.get("m0_candidate_records") if isinstance(result, dict) else None
+            if isinstance(records, list) and records:
+                from .m0_catalog import publish_records
+
+                publication = publish_records(
+                    records,
+                    tenant_id=str(state.get("tenant_id") or "default"),
+                    task_id=str(state.get("task_id") or "task"),
+                    actor=actor,
+                )
+                result["m0_catalog_publish"] = publication
+                if publication.get("status") == "failed":
+                    raise ValueError(f"M0 canonical publish failed: {publication.get('error')}")
+            else:
+                result["m0_catalog_publish"] = {"status": "needs_mapping", "published": 0, "reason": "缺少显式 product_code 或可发布候选"}
+            return {"applied": True, "message": "业务资料候选已审核并提交 M0 canonical", "readback": result.get("m0_catalog_publish")}
         if gate["type"] == "apply":
             return self._apply_m5_release(state, gate, result, data, actor=actor)
         return {"applied": True, "message": "批准已记录", "readback": None}
@@ -612,6 +635,9 @@ class YunpaiGraph:
                 "files": request.get("documents") or request.get("attachments") or [],
                 "db_path": request.get("business_catalog_db") or "runtime/yunpai-business-catalog.sqlite",
                 "mode": upload_mode,
+                "product_code": request.get("product_code") or "",
+                "product_name": request.get("product_name") or "",
+                "message": request.get("message") or request.get("task") or "",
             }
         if tool in self.skills.specs:
             skill_payload = request.get("skill_payload")

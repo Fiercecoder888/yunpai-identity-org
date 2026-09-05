@@ -107,7 +107,13 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
     mode = validate_mode(payload.get("mode") or "master_data")
     summary = UploadSummary(mode=mode)
     if root_path:
-        result = ingest_tree(root_path, db_path, batch_id=f"batch-{context.get('task_id', 'skill')}")
+        result = ingest_tree(
+            root_path,
+            db_path,
+            batch_id=f"batch-{context.get('task_id', 'skill')}",
+            parse_xlsx=True,
+            deep_limit_bytes=40_000_000,
+        )
         total = int(result.get("file_count") or 0)
         for item in result.get("errors", []):
             summary.add(to_attachment_record(
@@ -153,13 +159,31 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
                 "upload_summary": summary.as_dict(),
                 "evidence": [{"module": "orchestrator", "source_ref": "files", "evidence_ref": f"business-catalog:{context.get('task_id', 'skill')}", "detail": "无 accepted 文件，未创建候选"}],
             }
-        batch_result = ingest_tree(staging, db_path, batch_id=f"batch-{context.get('task_id', 'skill')}", parse_xlsx=True, deep_limit_bytes=12_000_000)
+        batch_result = ingest_tree(staging, db_path, batch_id=f"batch-{context.get('task_id', 'skill')}", parse_xlsx=True, deep_limit_bytes=40_000_000)
         for item in batch_result.get("errors", []):
             summary.add(to_attachment_record(
                 {"filename": str(item.get("path") or "upload")}, mode=mode,
                 status="parse_failed", reason=str(item.get("error") or "ingest error"),
             ))
     sensitivity_summary = _candidate_sensitivity_summary(db_path)
+    # Product identity must be explicit or recoverable from the request's
+    # semantic text; never bind an arbitrary workbook to a product by path.
+    import re
+
+    identity_text = " ".join(str(payload.get(key) or "") for key in ("product_code", "product_name", "message"))
+    product_match = re.search(r"\b[A-Z]{1,4}-[A-Z0-9]{2,}\b", identity_text)
+    product_code = str(payload.get("product_code") or (product_match.group(0) if product_match else "")).strip()
+    from .business_catalog import canonical_records_from_batch
+
+    product_name = str(payload.get("product_name") or payload.get("message") or "")
+    canonical_records = canonical_records_from_batch(
+        db_path,
+        batch_id=str(batch_result.get("batch_id") or ""),
+        tenant_id=str(context.get("tenant_id") or "default"),
+        product_code=product_code,
+        product_name=product_name,
+        reviewed_by=str(context.get("principal_id") or "operator"),
+    ) if product_code else []
     return {
         "skill": "business-data-identification",
         "skill_mode": mode,
@@ -168,6 +192,9 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
         "upload_summary": summary.as_dict(),
         "sensitivity_summary": sensitivity_summary,
         "batch": batch_result,
+        "product_code": product_code,
+        "m0_candidate_records": canonical_records,
+        "m0_candidate_record_count": len(canonical_records),
         "evidence": [{"module": "orchestrator", "source_ref": batch_result["root_path"], "evidence_ref": f"business-catalog:{batch_result['batch_id']}", "detail": "文件哈希、分类和字段观察已写入候选库"}],
     }
 

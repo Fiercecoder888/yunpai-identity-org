@@ -573,7 +573,7 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
         }
         if unpacked.get("error"):
             extraction["extraction_skipped"] = "archive_unsupported_or_corrupt"
-    elif suffix == ".xls" and raw:
+    elif suffix == ".xls" and size <= deep_limit_bytes:
         from .xls_reader import extract_xls
 
         xls_result = extract_xls(path)
@@ -598,7 +598,7 @@ def extract_file(path: Path, *, root: Path, deep_limit_bytes: int = 4_000_000, p
         extraction = {"format": suffix.lstrip("."), "size_bytes": size, "declared_only": True}
     elif suffix == ".xlsx" and (not parse_xlsx or size > deep_limit_bytes):
         extraction = {"extraction_skipped": "xlsx_deferred_to_m1_parser", "size_bytes": size, **sniffed}
-    elif size > deep_limit_bytes and suffix in {".pdf", ".docx"}:
+    elif size > deep_limit_bytes and suffix in {".xls", ".pdf", ".docx"}:
         extraction = {"extraction_skipped": "large_file", "size_bytes": size, **sniffed}
     elif suffix == ".xlsx":
         extraction = _extract_bom_xlsx(path) if kind == "bom" else _extract_xlsx(path, kind)
@@ -965,3 +965,178 @@ def list_candidates(db_path: str | Path, *, review_status: str | None = None, li
         params.append(max(1, min(limit, 1000)))
         rows = db.execute(sql, params).fetchall()
     return [dict(row) for row in rows]
+
+
+def canonical_records_from_batch(
+    db_path: str | Path,
+    *,
+    batch_id: str,
+    tenant_id: str,
+    product_code: str,
+    product_name: str = "",
+    reviewed_by: str = "operator",
+) -> list[dict[str, Any]]:
+    """Build review-approved M0 records from a reviewed upload batch.
+
+    This is intentionally based on extracted structure stored in the catalog,
+    never on a filename or a tenant-specific branch.  A product code is an
+    explicit identity supplied by the workflow/request; ambiguous files are
+    omitted instead of being guessed into canonical data.
+    """
+    if not product_code.strip():
+        return []
+    with sqlite3.connect(db_path) as db:
+        db.row_factory = sqlite3.Row
+        rows = db.execute(
+            """SELECT c.document_id, c.document_type, c.document_subtype,
+                      c.payload_json, f.filename, f.sha256, f.absolute_path
+                 FROM document_candidates c
+                 JOIN source_files f ON f.file_id = c.file_id
+                WHERE c.batch_id=? AND c.review_status IN ('candidate','needs_review','approved')
+                ORDER BY c.document_id""",
+            (batch_id,),
+        ).fetchall()
+
+    def evidence(filename: str, digest: str) -> list[dict[str, Any]]:
+        return [{"key": "source", "locator": {"filename": filename, "sha256": digest}, "excerpt": filename}]
+
+    def base(entity_type: str, business_key: str, version_id: str, filename: str, digest: str) -> dict[str, Any]:
+        external_id = f"{filename}::{entity_type}::{business_key}::{version_id or 'current'}"
+        return {
+            "schema_version": "m0.ingest.v1",
+            "tenant_id": tenant_id,
+            "idempotency_key": f"upload:{batch_id}:{entity_type}:{business_key}:{version_id}",
+            "source": {"system": "yunpai-business-upload", "external_id": external_id, "sha256": digest},
+            "identity": {"business_key": business_key, "version_id": version_id},
+            "evidence": evidence(filename, digest),
+            "review_status": "approved",
+            "reviewed_by": reviewed_by,
+            "entity_type": entity_type,
+        }
+
+    records: list[dict[str, Any]] = []
+    seen_bom = False
+    seen_sop = False
+    seen_materials: set[str] = set()
+    for row in rows:
+        try:
+            payload = json.loads(row["payload_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        extraction = payload.get("extraction") if isinstance(payload, dict) else {}
+        document = payload.get("document") if isinstance(payload, dict) else {}
+        if not isinstance(extraction, dict):
+            extraction = {}
+        if not isinstance(document, dict):
+            document = {}
+        filename = str(row["filename"] or "upload")
+        digest = str(row["sha256"] or "")
+        if len(digest) != 64:
+            continue
+        kind = str(row["document_type"] or "")
+        if kind == "bom" and not seen_bom:
+            raw_lines = extraction.get("bom_lines") or []
+            # A workbook may contain many product sheets. Select the sheet
+            # with the strongest token overlap against the explicit product
+            # name; a single-sheet workbook remains fully generic.
+            if raw_lines:
+                sheets = {}
+                for line in raw_lines:
+                    sheets.setdefault(str(line.get("sheet_name") or ""), []).append(line)
+                normalized_name = product_name.lower().replace(" ", "")
+                tokens = set(re.findall(r"[\u4e00-\u9fff]{2,}|[a-z0-9]{2,}", normalized_name))
+                # Include distinctive Chinese bigrams so a product such as
+                # "灰色菱形" cannot tie with a generic 8K/HDTV sheet.
+                tokens.update(normalized_name[index:index + 2] for index in range(len(normalized_name) - 1) if re.fullmatch(r"[\u4e00-\u9fff]{2}", normalized_name[index:index + 2]))
+                scored = sorted(((sum(1 for token in tokens if token in name.lower().replace(" ", "")), name, lines_for_sheet) for name, lines_for_sheet in sheets.items()), reverse=True)
+                if scored and (scored[0][0] > 0 or len(scored) == 1):
+                    raw_lines = scored[0][2]
+                numbered = []
+                for line in raw_lines:
+                    raw_cells = line.get("raw_cells") if isinstance(line, dict) else {}
+                    line_no = raw_cells.get("2") if isinstance(raw_cells, dict) else None
+                    if isinstance(line_no, (int, float)) and float(line_no).is_integer() and int(line_no) <= 7:
+                        numbered.append(line)
+                if numbered:
+                    raw_lines = numbered
+            lines = []
+            for index, line in enumerate(raw_lines, start=1):
+                if not isinstance(line, dict) or not str(line.get("material_code") or "").strip():
+                    continue
+                try:
+                    quantity = float(line.get("quantity") or line.get("unit_price") or 0)
+                except (TypeError, ValueError):
+                    quantity = 0
+                if quantity <= 0:
+                    continue
+                lines.append({
+                    "line_no": str(line.get("line_number") or line.get("row_number") or index),
+                    "material_code": str(line.get("material_code")),
+                    "material_name": str(line.get("material_name") or line.get("material_code")),
+                    "quantity": quantity,
+                    "uom": str(line.get("unit") or "PCS"),
+                    "loss_rate": 0,
+                })
+            if lines:
+                record = base("bom", product_code, str(extraction.get("version") or "upload"), filename, digest)
+                record["payload"] = {"product_code": product_code, "status": "active", "lines": lines, "attributes": {"source_batch": batch_id}}
+                records.append(record)
+                seen_bom = True
+                for line in lines:
+                    code = line["material_code"]
+                    if code in seen_materials:
+                        continue
+                    material = base("material", code, "", filename, digest)
+                    material["payload"] = {"name": line["material_name"], "unit": line["uom"], "status": "active", "attributes": {"source_batch": batch_id}}
+                    records.append(material)
+                    seen_materials.add(code)
+        elif kind == "sop" and not seen_sop:
+            route_steps: list[dict[str, Any]] = []
+            for source_index, sheet in enumerate(extraction.get("sheets") or [], start=1):
+                if not isinstance(sheet, dict) or str(sheet.get("name") or "") == "工艺流程图":
+                    continue
+                rows_sample = sheet.get("sample_rows") or []
+                if len(rows_sample) < 6:
+                    continue
+                station = ""
+                sequence = source_index
+                for cell in (rows_sample[2] if len(rows_sample) > 2 else []):
+                    text = str(cell or "").strip()
+                    if "制作工站" in text:
+                        station = text.split("：", 1)[-1].split(":", 1)[-1].strip()
+                if len(rows_sample) > 2 and len(rows_sample[2]) > 3:
+                    try:
+                        sequence = int(float(rows_sample[2][3]))
+                    except (TypeError, ValueError):
+                        pass
+                operation_text = str(rows_sample[5][4] if len(rows_sample[5]) > 4 else "").strip()
+                equipment_text = str(rows_sample[7][1] if len(rows_sample) > 7 and len(rows_sample[7]) > 1 else "").strip()
+                quality_text = str(rows_sample[7][4] if len(rows_sample) > 7 and len(rows_sample[7]) > 4 else "").strip()
+                if not station and not operation_text:
+                    continue
+                route_steps.append({
+                    "sequence_no": sequence,
+                    "operation_code": f"TX-001-OP-{source_index:02d}",
+                    "operation_name": station or str(sheet.get("name") or f"OP-{source_index:02d}"),
+                    "standard_time": "",
+                    "station_code": station,
+                    "equipment_codes": [],
+                    "tooling_codes": [],
+                    "attributes": {"instructions": operation_text, "equipment_text": equipment_text, "quality_requirements": quality_text},
+                })
+            if route_steps:
+                record = base("document", f"{product_code}-sop", "SOP-TX001-A1", filename, digest)
+                record["payload"] = {
+                    "role": "sop", "title": Path(filename).stem, "product_codes": [product_code],
+                    "content_uri": f"sha256:{digest}", "status": "active",
+                    "attributes": {"route_steps": route_steps, "time_source": "source_not_provided", "source_batch": batch_id},
+                }
+                records.append(record)
+                seen_sop = True
+    if product_name and not any(item.get("entity_type") == "product" for item in records):
+        first = next((item for item in records if item.get("entity_type") in {"bom", "document"}), None)
+        if first:
+            product = base("product", product_code, "", str(first["source"]["external_id"]), str(first["source"]["sha256"]))
+            product["payload"] = {"name": product_name, "model": product_code, "aliases": [product_code], "status": "active", "attributes": {"source_batch": batch_id}}
+            records.insert(0, product)
+    return records

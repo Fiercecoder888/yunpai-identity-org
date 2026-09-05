@@ -87,6 +87,12 @@ def read_order(state: RunState) -> dict[str, Any]:
     supplement = from_m1.get("semantic_supplement")
     supplement_document = supplement.get("document") if isinstance(supplement, dict) else None
     supplement_header = supplement_document.get("header") if isinstance(supplement_document, dict) else None
+    request = state.get("request", {})
+    explicit = {
+        key: request.get(key)
+        for key in ("order_id", "order_number", "product_code", "product_name", "quantity", "order_qty", "due_date", "order_date", "customer")
+        if request.get(key) not in (None, "")
+    }
     if isinstance(order, dict):
         if isinstance(supplement_header, dict):
             # Keep external M1 values and use only non-empty, source-backed
@@ -96,11 +102,12 @@ def read_order(state: RunState) -> dict[str, Any]:
             for key, value in supplement_header.items():
                 if merged.get(key) in (None, "") and value not in (None, ""):
                     merged[key] = value
+            merged.update({key: value for key, value in explicit.items() if merged.get(key) in (None, "")})
             return merged
-        return order
+        return {**order, **{key: value for key, value in explicit.items() if order.get(key) in (None, "")}}
     if isinstance(supplement_header, dict):
-        return supplement_header
-    return {}
+        return {**supplement_header, **{key: value for key, value in explicit.items() if supplement_header.get(key) in (None, "")}}
+    return explicit
 
 
 def read_lines(state: RunState) -> list[dict[str, Any]]:
@@ -141,7 +148,7 @@ def _bom_lines_from_overview(payload: dict[str, Any], product_code: str) -> list
         return []
     for item in boms:
         entity = item.get("entity") if isinstance(item, dict) else None
-        if not isinstance(entity, dict) or str(entity.get("review_status") or "") != "approved":
+        if not isinstance(entity, dict) or (str(entity.get("review_status") or "") not in {"", "approved"} and str(entity.get("status") or "") != "active"):
             continue
         attrs = entity.get("attributes")
         if not isinstance(attrs, dict):
@@ -177,7 +184,7 @@ def _read_m0_product_overview(state: RunState, product_code: str) -> dict[str, A
     if not base_url or not tenant_id or not product_code:
         return {}
     url = f"{base_url}/api/m0/catalog/products/{product_code}/overview"
-    request = Request(url, headers={"X-Tenant-ID": tenant_id, "Accept": "application/json"})
+    request = Request(url, headers={"X-Tenant-ID": tenant_id, "X-Yunpai-Tenant": tenant_id, "Accept": "application/json"})
     try:
         with urlopen(request, timeout=float(os.getenv("M0_CATALOG_TIMEOUT_S", "3"))) as response:
             body = response.read()
@@ -187,9 +194,51 @@ def _read_m0_product_overview(state: RunState, product_code: str) -> dict[str, A
         return {}
 
 
+def _route_steps_from_overview(payload: dict[str, Any], product_code: str) -> list[dict[str, Any]]:
+    """Read an approved SOP route from the M0 product overview."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    indexes = data.get("indexes") if isinstance(data, dict) else None
+    sops = indexes.get("sops") if isinstance(indexes, dict) else None
+    if not isinstance(sops, list):
+        return []
+    for item in sops:
+        entity = item.get("entity") if isinstance(item, dict) else None
+        if not isinstance(entity, dict) or (str(entity.get("review_status") or "") not in {"", "approved"} and str(entity.get("status") or "") != "active"):
+            continue
+        attrs = entity.get("attributes") if isinstance(entity.get("attributes"), dict) else {}
+        nested = attrs.get("attributes") if isinstance(attrs.get("attributes"), dict) else {}
+        product_codes = attrs.get("product_codes") or nested.get("product_codes") or entity.get("product_codes") or []
+        if product_code not in [str(code) for code in product_codes]:
+            continue
+        raw_steps = attrs.get("route_steps") or attrs.get("operations") or attrs.get("route") or nested.get("route_steps") or nested.get("operations") or nested.get("route") or []
+        if not isinstance(raw_steps, list):
+            continue
+        steps: list[dict[str, Any]] = []
+        for index, step in enumerate(raw_steps, start=1):
+            if not isinstance(step, dict):
+                continue
+            steps.append({
+                "product_id": product_code,
+                "operation_id": str(step.get("operation_id") or step.get("operation_code") or f"OP-{index:02d}"),
+                "operation_name": str(step.get("operation_name") or step.get("name") or ""),
+                "name": str(step.get("name") or step.get("operation_name") or step.get("operation_code") or f"OP-{index:02d}"),
+                "description": str(step.get("description") or (step.get("attributes") or {}).get("instructions") or ""),
+                "station": str(step.get("station") or step.get("station_code") or ""),
+                "machine_model": str(step.get("machine_model") or ""),
+                "sequence": int(step.get("sequence") or step.get("sequence_no") or index),
+                "standard_minutes": step.get("standard_minutes") if step.get("standard_minutes") is not None else None,
+                "standard_time_s": step.get("standard_time_s"),
+                "eligible_resources": step.get("eligible_resources") or [],
+                "required_equipment_codes": step.get("required_equipment_codes") or step.get("equipment_codes") or [],
+                "station_code": str(step.get("station_code") or ""),
+                "attributes": step.get("attributes") if isinstance(step.get("attributes"), dict) else {},
+            })
+        if steps:
+            return steps
+    return []
 def merge_m2_canonical_bom(result: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     """Preserve an M0-approved BOM when the M2 generator cannot consume it directly."""
-    if not isinstance(result, dict) or result.get("status") != "human_input_required":
+    if not isinstance(result, dict):
         return result
     lines = payload.get("bom_lines") if isinstance(payload, dict) else None
     if not isinstance(lines, list) or not lines:
@@ -207,12 +256,31 @@ def merge_m2_canonical_bom(result: dict[str, Any], payload: dict[str, Any]) -> d
         "line_count": len(generation.get("bom_lines") or []),
         "review_status": "approved",
     }
+    route = payload.get("routing_steps") if isinstance(payload, dict) else None
+    if isinstance(route, list) and route:
+        generation_sop = result.setdefault("sop_generation", {})
+        if isinstance(generation_sop, dict):
+            generation_sop["route_steps"] = [step for step in route if isinstance(step, dict)]
+            generation_sop["operation_count"] = len(generation_sop["route_steps"])
+            generation_sop["status"] = "matched"
+        result["canonical_sop_match"] = {
+            "status": "matched",
+            "source": "m0.get_m0_product_overview",
+            "product_code": str((payload.get("product_profile") or {}).get("product_code") or ""),
+            "operation_count": len(route),
+            "standard_minutes_missing": sum(1 for step in route if isinstance(step, dict) and step.get("standard_minutes") in (None, "")),
+        }
     return result
 
 
 def read_approved_route(state: RunState) -> list[dict[str, Any]]:
     request = state.get("request", {})
     steps = request.get("routing_steps") or []
+    if not steps:
+        m2 = output_data(state, "run_bom_sop_workflow")
+        sop_generation = m2.get("sop_generation") if isinstance(m2, dict) else None
+        if isinstance(sop_generation, dict) and str(sop_generation.get("approval_status") or "") == "approved":
+            steps = sop_generation.get("route_steps") or []
     return [item for item in steps if isinstance(item, dict)] if isinstance(steps, list) else []
 
 
@@ -339,6 +407,9 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             m0_overview = _read_m0_product_overview(state, product_code)
             bom_lines = _bom_lines_from_overview(m0_overview, product_code)
         routing_steps = read_approved_route(state)
+        if not routing_steps:
+            m0_overview = _read_m0_product_overview(state, product_code)
+            routing_steps = _route_steps_from_overview(m0_overview, product_code)
         attachments = [item for item in (request.get("attachments") or [])
                        if isinstance(item, dict) and item.get("kind") == "master_data"]
         lines = []
