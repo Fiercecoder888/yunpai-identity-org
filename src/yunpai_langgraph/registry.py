@@ -342,6 +342,8 @@ def _http_query_fields(tool_name: str) -> frozenset[str]:
         "approve_to_send_m3_task",
     }:
         return frozenset({"tenant_id"})
+    if tool_name == "list_m0_entities":
+        return frozenset({"entity_type", "tenant_id"})
     return frozenset()
 
 

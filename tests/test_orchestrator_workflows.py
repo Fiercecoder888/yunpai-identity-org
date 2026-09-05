@@ -132,7 +132,7 @@ def test_health_reports_per_module_spec_and_bound():
     client = TestClient(create_app(repository=InMemoryRunRepository()))
     modules = client.get("/health").json()["modules"]
     # 合并后真实绑定（m0 5, m1 17, m2 1, m3 16, m4 24, m5 18 = 81）
-    assert modules["m0"]["spec"] == 27 and modules["m0"]["bound"] == 5
+    assert modules["m0"]["spec"] == 28 and modules["m0"]["bound"] == 5
     assert modules["m1"]["spec"] == 17 and modules["m1"]["bound"] == 17
     assert modules["m5"]["spec"] == 20 and modules["m5"]["bound"] == 18
     # 主链每个 workflow 步骤工具逐模块已 bound

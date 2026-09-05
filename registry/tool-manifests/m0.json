@@ -587,6 +587,32 @@
         }
       },
       "execution": "sync"
+    },
+    {
+      "name": "list_m0_entities",
+      "description": "按 entity_type 读回 M0 canonical 已批准实体（equipment_master/station_master/worker_master/tooling_master/production_calendar 等），返回 payload_json 列表；用于 M5 资源快照组装。",
+      "http": { "method": "GET", "path": "/api/m0/catalog/entities", "timeout_s": 30 },
+      "input_schema": {
+        "type": "object",
+        "required": ["entity_type"],
+        "properties": {
+          "entity_type": { "type": "string", "description": "canonical 实体类型" },
+          "tenant_id": { "type": "string", "description": "租户，默认 default" }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "entities": { "type": "array" }
+            }
+          }
+        }
+      },
+      "execution": "sync"
     }
   ]
 }

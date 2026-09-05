@@ -10,12 +10,12 @@ from yunpai_langgraph.m3_m4_tooling import M3_ADAPTER_TOOL_NAMES, M4_ADAPTER_TOO
 from yunpai_langgraph.registry import ToolRegistry, build_default_registry, build_runtime_registry
 
 
-EXPECTED = {"m0": 27, "m1": 17, "m2": 7, "m3": 17, "m4": 26, "m5": 20}
+EXPECTED = {"m0": 28, "m1": 17, "m2": 7, "m3": 17, "m4": 26, "m5": 20}
 
 
 def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
-    assert len(registry.specs) == 114
+    assert len(registry.specs) == 115
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
     # 合并 main(M3/M4 adapter) + pmctooldev(M5 PMC v2) + M1 专用 adapter 后真实绑定：
     # m0 5 + m1 17 + m2 1 + m3 16 + m4 24 + m5 18 = 81；m3/m4 两个 receive_* 排除。
@@ -87,7 +87,7 @@ def test_catalog_reports_bound_state():
 def test_full_http_runtime_keeps_missing_receivers_unbound(monkeypatch):
     monkeypatch.setenv("YUNPAI_TOOL_TRANSPORT", "http")
     registry = build_runtime_registry()
-    assert len(registry.handlers) == 112
+    assert len(registry.handlers) == 113
     assert "receive_m3_material_demand" not in registry.handlers
     assert "receive_m4_schedule_impact_proposal" not in registry.handlers
 

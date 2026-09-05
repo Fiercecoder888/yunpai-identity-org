@@ -9,7 +9,7 @@
   },
   "manifest_source": "yunpai-orchestrator/orchestrator/module_decls/{module}.well-known/tool.json",
   "manifests": {
-    "m0": "34e454e65903502a615d0dcdbffc36ee206831e9b563c1b90d8db85f292410d9",
+    "m0": "9ddc7336f07b2ffa043f867ecd99da9f3227f869d0149a9e1d1cc6f5e7c96d19",
     "m1": "4309d2fdcd445e718dd4b1f28f15593f941cb2134ff8a21c9cd3f76cbdd96ad6",
     "m2": "c27369a34ffc29aca61a2492809fb7d0343f86512607526830528b20a5f0c704",
     "m3": "ddb21bf112f72036b4144a5f77d38771474b990dc1e31c8d01b96a856e4b78c2",

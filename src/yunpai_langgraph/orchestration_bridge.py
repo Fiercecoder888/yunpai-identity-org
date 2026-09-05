@@ -204,6 +204,98 @@ def _read_m0_product_overview(state: RunState, product_code: str) -> dict[str, A
         return {}
 
 
+def _read_m0_entities(state: RunState, entity_type: str) -> list[dict[str, Any]]:
+    """按 entity_type 读回 M0 canonical 已批准实体（payload_json 列表）。
+
+    M0 canonical 是通用 envelope；设备/工位/人员/模治具/日历分别以
+    equipment_master/station_master/worker_master/tooling_master/production_calendar
+    落库。读不到或未审批时返回空列表，调用方失败关闭。
+    """
+    base_url = str(os.getenv("M0_URL") or "").rstrip("/")
+    tenant_id = str(state.get("tenant_id") or "").strip() or "default"
+    if not base_url:
+        return []
+    url = f"{base_url}/api/m0/catalog/entities?entity_type={entity_type}&tenant_id={tenant_id}"
+    request = Request(url, headers={"X-Tenant-ID": tenant_id, "X-Yunpai-Tenant": tenant_id, "Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=float(os.getenv("M0_CATALOG_TIMEOUT_S", "3"))) as response:
+            body = response.read()
+        parsed = json.loads(body.decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError):
+        return []
+    data = parsed.get("data") if isinstance(parsed, dict) else parsed
+    entities = data.get("entities") if isinstance(data, dict) else None
+    if not isinstance(entities, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        payload = entity.get("payload_json")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:
+                continue
+        if not isinstance(payload, dict):
+            continue
+        key = entity.get("canonical_key")
+        out.append({"canonical_key": key, **payload})
+    return out
+
+
+def _resource_section(entities: list[dict[str, Any]], key_field: str) -> list[dict[str, Any]]:
+    """把 canonical 实体映射成 M5 resource_snapshot 子段（字段名与 M5 一致，仅剥离 canonical_key）。"""
+    items: list[dict[str, Any]] = []
+    for entity in entities:
+        item = {k: v for k, v in entity.items() if k != "canonical_key"}
+        if not item.get(key_field):
+            item[key_field] = str(entity.get("canonical_key") or "")
+        items.append(item)
+    return items
+
+
+def read_m5_resource_facts(state: RunState) -> dict[str, Any] | None:
+    """从 M0 canonical 读回设备/工位/人员/模治具，组装 M5 resource_snapshot。"""
+    equipment = _read_m0_entities(state, "equipment_master")
+    stations = _read_m0_entities(state, "station_master")
+    workers = _read_m0_entities(state, "worker_master")
+    tooling = _read_m0_entities(state, "tooling_master")
+    if not (equipment or stations or workers or tooling):
+        return None
+    return {
+        "snapshot_id": f"SNAP-RES-M0-{_now_task(state)}",
+        "revision": 1,
+        "equipment": _resource_section(equipment, "equipment_code"),
+        "stations": _resource_section(stations, "station_code"),
+        "persons": _resource_section(workers, "person_code"),
+        "tooling": _resource_section(tooling, "tooling_code"),
+    }
+
+
+def read_m5_calendar_facts(state: RunState) -> dict[str, Any] | None:
+    """从 M0 canonical 读回生产日历，组装 M5 calendar_snapshot。"""
+    calendars = _read_m0_entities(state, "production_calendar")
+    if not calendars:
+        return None
+    intervals: list[dict[str, Any]] = []
+    unavailability: list[dict[str, Any]] = []
+    for entity in calendars:
+        item = {k: v for k, v in entity.items() if k != "canonical_key"}
+        if isinstance(item.get("working_intervals"), list):
+            intervals.extend(item["working_intervals"])
+        if isinstance(item.get("unavailability"), list):
+            unavailability.extend(item["unavailability"])
+    if not intervals:
+        return None
+    return {
+        "snapshot_id": f"SNAP-CAL-M0-{_now_task(state)}",
+        "revision": 1,
+        "working_intervals": intervals,
+        "unavailability": unavailability,
+    }
+
+
 def _route_steps_from_overview(payload: dict[str, Any], product_code: str) -> list[dict[str, Any]]:
     """Read an approved SOP route from the M0 product overview."""
     data = payload.get("data") if isinstance(payload, dict) else None
@@ -641,10 +733,14 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         m3 = output_data(state, "run_m3_procurement_requirements")
         m4 = read_m4_supply_snapshot(state)
         request_payload = _assembly_payloads_from_state(state)
-        resource_snapshot = request_payload.get("resource_snapshot") or (
-            {"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None
+        # 优先从 M0 canonical 读回已批准资源/日历事实（真实数据经 M0 路径）；
+        # M0 不可达或未审批时回退 request 直传，最终由 validate_m5_facts 失败关闭。
+        resource_snapshot = (
+            read_m5_resource_facts(state)
+            or request_payload.get("resource_snapshot")
+            or ({"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None)
         )
-        calendar_snapshot = request_payload.get("calendar_snapshot")
+        calendar_snapshot = read_m5_calendar_facts(state) or request_payload.get("calendar_snapshot")
         fact_validation = validate_m5_facts(
             resource_snapshot=resource_snapshot,
             calendar_snapshot=calendar_snapshot,

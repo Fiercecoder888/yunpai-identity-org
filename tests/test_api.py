@@ -12,7 +12,7 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     health = client.get("/health").json()
     assert health["status"] == "ok"
     assert health["module"] == "yunpai-langgraph"
-    assert health["tools"] == 114
+    assert health["tools"] == 115
     # 合并 main(M3/M4 adapter) + pmctooldev(M5 PMC v2) + M1 专用 adapter 后真实绑定：
     # m0 5 + m1 17 + m2 1 + m3 16 + m4 24 + m5 18 = 81；m3/m4 两个 receive_* 排除。
     assert health["bound_tools"] == 81

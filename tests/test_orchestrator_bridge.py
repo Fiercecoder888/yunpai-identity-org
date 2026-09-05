@@ -294,3 +294,28 @@ def test_six_class_bundle_checksum_is_stable_and_rejects_missing_kind():
         supply_snapshot=None, constraint_snapshot=None,
     )
     assert verify_bundle(missing) != []
+
+
+def test_m5_resource_facts_read_back_from_m0_canonical(monkeypatch):
+    entities = {
+        "equipment_master": [{"canonical_key": "EQ-01", "equipment_code": "EQ-01", "equipment_type": "冲压机",
+                              "capacity_per_hour": "120", "efficiency_factor": "0.9", "status": "available", "calendar_ref": "CAL-A"}],
+        "station_master": [{"canonical_key": "ST-01", "station_code": "ST-01", "work_center_code": "WC-A",
+                            "parallel_slots": 1, "status": "available", "calendar_ref": "CAL-A"}],
+        "worker_master": [{"canonical_key": "P-01", "person_code": "P-01", "skill_codes": ["stamping"], "calendar_ref": "CAL-A"}],
+        "tooling_master": [{"canonical_key": "FIX-01", "tooling_code": "FIX-01", "tooling_type": "fixture", "calendar_ref": "CAL-A"}],
+    }
+    monkeypatch.setattr(orchestration_bridge, "_read_m0_entities", lambda _s, et: entities.get(et, []))
+    snap = orchestration_bridge.read_m5_resource_facts({"task_id": "task-1", "tenant_id": "t"})
+    assert snap is not None
+    assert snap["equipment"][0]["equipment_code"] == "EQ-01"
+    assert snap["equipment"][0]["capacity_per_hour"] == "120"
+    assert snap["stations"][0]["station_code"] == "ST-01"
+    assert snap["persons"][0]["person_code"] == "P-01"
+    assert snap["tooling"][0]["tooling_code"] == "FIX-01"
+
+
+def test_m5_resource_facts_fail_closed_when_m0_empty(monkeypatch):
+    monkeypatch.setattr(orchestration_bridge, "_read_m0_entities", lambda _s, et: [])
+    assert orchestration_bridge.read_m5_resource_facts({"task_id": "t"}) is None
+    assert orchestration_bridge.read_m5_calendar_facts({"task_id": "t"}) is None

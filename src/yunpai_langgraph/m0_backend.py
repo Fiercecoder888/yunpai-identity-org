@@ -34,6 +34,17 @@ def _normalize_record(item: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _canonical_key_of(data: dict[str, Any], fallback: str) -> str:
+    """按实体的稳定身份字段推导 canonical_key，缺省回退 candidate_id。"""
+    for field in ("canonical_key", "product_code", "order_id", "material_code",
+                  "equipment_code", "station_code", "person_code", "tooling_code",
+                  "calendar_ref", "supplier_code"):
+        value = data.get(field)
+        if value not in (None, ""):
+            return str(value)
+    return str(fallback)
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS import_batches (
   batch_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, task_id TEXT NOT NULL,
@@ -128,7 +139,7 @@ class M0Store:
             published = 0
             for candidate in candidates:
                 data = json.loads(candidate["candidate_json"])
-                key = str(data.get("canonical_key") or data.get("product_code") or data.get("order_id") or candidate["candidate_id"])
+                key = _canonical_key_of(data, candidate["candidate_id"])
                 entity_type = candidate["entity_type"]
                 entity = conn.execute(
                     "SELECT * FROM canonical_entities WHERE tenant_id=? AND entity_type=? AND canonical_key=?",
@@ -181,6 +192,35 @@ class M0Store:
             "ledger_count": int(ledger),
             "outbox_count": int(outbox),
             "entities": [dict(row) for row in entities],
+        }
+
+    def list_entities(self, entity_type: str, tenant_id: str = "default") -> dict[str, Any]:
+        """按 entity_type 读回当前 active 的 canonical 实体（供 M5 资源快照组装）。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT e.entity_id,e.entity_type,e.canonical_key,v.version,v.payload_json,v.checksum "
+                "FROM canonical_entities e JOIN canonical_entity_versions v "
+                "ON v.entity_id=e.entity_id AND v.version=e.current_version "
+                "WHERE e.entity_type=? AND e.tenant_id=? AND e.lifecycle_status='active' "
+                "ORDER BY e.canonical_key",
+                (entity_type, tenant_id),
+            ).fetchall()
+        entities: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            payload = item.get("payload_json")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except ValueError:
+                    payload = {}
+            item["payload_json"] = payload
+            entities.append(item)
+        return {
+            "entity_type": entity_type,
+            "tenant_id": tenant_id,
+            "count": len(entities),
+            "entities": entities,
         }
 
 
@@ -283,7 +323,7 @@ class PostgresM0Store:
                 for candidate_id, entity_type, data in candidates:
                     if isinstance(data, str):
                         data = json.loads(data)
-                    key = str(data.get("canonical_key") or data.get("product_code") or data.get("order_id") or candidate_id)
+                    key = _canonical_key_of(data, candidate_id)
                     cur.execute("SELECT entity_id,current_version FROM canonical_entities WHERE tenant_id=%s AND entity_type=%s AND canonical_key=%s",
                                 (batch[1], entity_type, key))
                     entity = cur.fetchone()
@@ -323,6 +363,20 @@ class PostgresM0Store:
         return {"batch_id": batch_id, "canonical_readback_available": True, "approved_candidates": len(rows),
                 "ledger_count": int(ledger), "outbox_count": int(outbox),
                 "entities": [{"entity_id": r[0], "entity_type": r[1], "canonical_key": r[2], "version": r[3], "payload_json": r[4], "checksum": r[5]} for r in rows]}
+
+    def list_entities(self, entity_type: str, tenant_id: str = "default") -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("""SELECT e.entity_id,e.entity_type,e.canonical_key,v.version,v.payload_json,v.checksum
+                    FROM canonical_entities e JOIN canonical_entity_versions v ON v.entity_id=e.entity_id AND v.version=e.current_version
+                    WHERE e.entity_type=%s AND e.tenant_id=%s AND e.lifecycle_status='active' ORDER BY e.canonical_key""",
+                    (entity_type, tenant_id))
+                rows = cur.fetchall()
+        return {"entity_type": entity_type, "tenant_id": tenant_id, "count": len(rows),
+                "entities": [{"entity_id": r[0], "entity_type": r[1], "canonical_key": r[2], "version": r[3],
+                              "payload_json": r[4] if isinstance(r[4], dict) else json.loads(r[4]) if isinstance(r[4], str) else r[4],
+                              "checksum": r[5]} for r in rows]}
 
 
 def create_app():
@@ -406,5 +460,9 @@ def create_app():
     @app.get("/api/m0/catalog/readback/{batch_id}")
     async def readback(batch_id: str):
         return {"data": store.readback(batch_id)}
+
+    @app.get("/api/m0/catalog/entities")
+    async def list_entities(entity_type: str, tenant_id: str = "default"):
+        return {"data": store.list_entities(entity_type, tenant_id)}
 
     return app

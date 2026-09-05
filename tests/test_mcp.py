@@ -11,7 +11,7 @@ from yunpai_langgraph.mcp import MCPServer
 
 def test_mcp_lists_all_114_tools_with_annotations():
     tools = MCPServer().list_tools()["tools"]
-    assert len(tools) == 114
+    assert len(tools) == 115
     item = next(tool for tool in tools if tool["name"] == "solve_scheduling")
     assert item["annotations"]["module"] == "m5"
     assert "inputSchema" in item
