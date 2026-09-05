@@ -301,7 +301,15 @@ class YunpaiGraph:
             state["status"] = "failed"
         elif not verdict["approved"]:
             record["status"] = "blocked"
-            state["pending_gate"] = {**verdict["gate"], "step_index": index, "opened_at": _now()}
+            gate = dict(verdict["gate"])
+            result = state["current_result"]
+            if result.get("code") == "BLOCKED_INPUT" or result.get("success") is False:
+                result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                gate.setdefault("code", result.get("code") or "BLOCKED_INPUT")
+                gate.setdefault("missing_fields", list(result.get("missing_fields") or result_data.get("missing_fields") or []))
+                gate.setdefault("recovery", result_data.get("recovery") or "")
+                gate.setdefault("ui_action", "request_data")
+            state["pending_gate"] = {**gate, "step_index": index, "opened_at": _now()}
             state["status"] = "waiting_human"
             state["trace"].append({"event": "gate.opened", "tool": step["tool"], "step_index": index, "at": _now()})
         else:
