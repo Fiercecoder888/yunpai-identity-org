@@ -60,11 +60,12 @@ def build_records(fixture: dict) -> list[dict]:
         mid = str(m.get("machine_id") or "")
         if not mid:
             continue
+        equipment_name = str(m.get("equipment_name") or "machine")
         records.append({
             "filename": "Machine.xlsx", "entity_type": "equipment_master",
             "equipment_code": mid,
-            "equipment_type": str(m.get("equipment_name") or "machine"),
-            "capability_codes": [],
+            "equipment_type": equipment_name,
+            "capability_codes": [equipment_name],
             "capacity_per_hour": str(int(rate_by_machine.get(mid, 100.0))),
             "efficiency_factor": "1.0",
             "status": _status(m.get("available_status")),
@@ -113,7 +114,7 @@ def build_records(fixture: dict) -> list[dict]:
             "filename": "Tooling.xlsx", "entity_type": "tooling_master",
             "tooling_code": tid,
             "tooling_type": str(t.get("tooling_type") or "fixture"),
-            "capability_codes": [],
+            "capability_codes": [str(t.get("tooling_type") or "fixture")],
             "compatible_product_codes": [str(t["compatible_product_id"])] if t.get("compatible_product_id") else [],
             "quantity_available": 1,
             "status": _status(t.get("available_status")),
@@ -125,16 +126,23 @@ def build_records(fixture: dict) -> list[dict]:
     wc_rows = _rows(fixture, "WorkerCalendar")
     if wc_rows:
         first = wc_rows[0]
-        day = str(first.get("effective_from") or "2026-07-03")
+        start_day = str(first.get("effective_from") or "2026-07-03")
         intervals = []
-        if first.get("shift_start_1") and first.get("shift_end_1"):
-            intervals.append({"calendar_ref": FACTORY_CALENDAR, "shift_code": "DAY",
-                              "start_at": f"{day}T{first['shift_start_1']}:00+08:00",
-                              "end_at": f"{day}T{first['shift_end_1']}:00+08:00"})
-        if first.get("shift_start_2") and first.get("shift_end_2"):
-            intervals.append({"calendar_ref": FACTORY_CALENDAR, "shift_code": "DAY2",
-                              "start_at": f"{day}T{first['shift_start_2']}:00+08:00",
-                              "end_at": f"{day}T{first['shift_end_2']}:00+08:00"})
+        from datetime import datetime as _dt, timedelta as _td
+        cur = _dt.strptime(start_day, "%Y-%m-%d")
+        end = cur + _td(days=29)  # 30 天窗口，保证 34 工序 × 800 PCS 的排程容量
+        # 生成多天班次（effective_from..effective_to，含两端），保证足够排程窗口
+        while cur <= end:
+            d = cur.strftime("%Y-%m-%d")
+            if first.get("shift_start_1") and first.get("shift_end_1"):
+                intervals.append({"calendar_ref": FACTORY_CALENDAR, "shift_code": "DAY",
+                                  "start_at": f"{d}T{first['shift_start_1']}:00+08:00",
+                                  "end_at": f"{d}T{first['shift_end_1']}:00+08:00"})
+            if first.get("shift_start_2") and first.get("shift_end_2"):
+                intervals.append({"calendar_ref": FACTORY_CALENDAR, "shift_code": "DAY2",
+                                  "start_at": f"{d}T{first['shift_start_2']}:00+08:00",
+                                  "end_at": f"{d}T{first['shift_end_2']}:00+08:00"})
+            cur += _td(days=1)
         records.append({
             "filename": "WorkerCalendar.xlsx", "entity_type": "production_calendar",
             "calendar_ref": FACTORY_CALENDAR,
