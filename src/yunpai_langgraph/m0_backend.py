@@ -6,12 +6,11 @@
 它不读取或迁移 39085/MinerU 数据。
 """
 
-from __future__ import annotations
-
 import hashlib
 import json
 import os
 import sqlite3
+import base64
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,19 @@ from uuid import uuid4
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_record(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(item)
+    encoded = normalized.get("content_b64")
+    if isinstance(encoded, str):
+        try:
+            decoded = json.loads(base64.b64decode(encoded).decode("utf-8"))
+            if isinstance(decoded, dict):
+                normalized = {**decoded, **normalized}
+        except (ValueError, UnicodeDecodeError):
+            pass
+    return normalized
 
 
 SCHEMA = """
@@ -87,6 +99,7 @@ class M0Store:
             conn.execute("INSERT INTO import_batches VALUES (?, ?, ?, ?, ?, ?)",
                          (batch_id, tenant_id, task_id, "awaiting_review", now, now))
             for item in records:
+                item = _normalize_record(item)
                 filename = str(item.get("filename") or "document.json")
                 payload = item.get("records", item)
                 raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -98,7 +111,13 @@ class M0Store:
                 conn.execute("INSERT INTO import_candidates VALUES (?, ?, ?, ?, ?, ?, ?)",
                              (candidate_id, batch_id, document_id, str(item.get("entity_type") or "order"),
                               json.dumps(item, ensure_ascii=False), "candidate", now))
-        return {"batch_id": batch_id, "status": "awaiting_review", "candidate_count": len(records)}
+        return {
+            "batch_id": batch_id,
+            "status": "awaiting_review",
+            "candidate_count": len(records),
+            "m0_candidate_records": records,
+            "candidates": records,
+        }
 
     def publish(self, batch_id: str, *, actor: str, reason: str = "", human_override: bool = False) -> dict[str, Any]:
         with self._connect() as conn:
@@ -165,11 +184,153 @@ class M0Store:
         }
 
 
+class PostgresM0Store:
+    """PostgreSQL implementation using the same 39092-only table contract."""
+
+    def __init__(self, dsn: str):
+        try:
+            import psycopg2
+        except ImportError as exc:
+            raise RuntimeError("PostgreSQL backend requires psycopg2") from exc
+        self._psycopg2 = psycopg2
+        self.dsn = dsn
+        self.path = "postgresql://yunpai_39092_m0@127.0.0.1/yunpai_39092_m0"
+        self._init()
+
+    def _connect(self):
+        return self._psycopg2.connect(self.dsn)
+
+    def _init(self):
+        schema = SCHEMA.replace("TEXT PRIMARY KEY", "TEXT PRIMARY KEY").replace(
+            "TEXT NOT NULL", "TEXT NOT NULL"
+        ).replace("INTEGER", "INTEGER")
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("CREATE SCHEMA IF NOT EXISTS yunpai_39092_m0")
+                cur.execute("SET search_path TO yunpai_39092_m0")
+                # Keep the deployed schema text-safe and independent from old M0.
+                cur.execute("""CREATE TABLE IF NOT EXISTS import_batches (
+                    batch_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, task_id TEXT NOT NULL,
+                    status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL)""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS source_documents (
+                    document_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES import_batches(batch_id),
+                    filename TEXT NOT NULL, sha256 TEXT NOT NULL, content_json JSONB NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL)""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS import_candidates (
+                    candidate_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES import_batches(batch_id),
+                    document_id TEXT NOT NULL REFERENCES source_documents(document_id),
+                    entity_type TEXT NOT NULL, candidate_json JSONB NOT NULL, status TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL)""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS approval_records (
+                    approval_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES import_batches(batch_id),
+                    candidate_id TEXT, actor TEXT NOT NULL, decision TEXT NOT NULL,
+                    approval_mode TEXT NOT NULL, reason TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS canonical_entities (
+                    entity_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, entity_type TEXT NOT NULL,
+                    canonical_key TEXT NOT NULL, current_version INTEGER NOT NULL,
+                    lifecycle_status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
+                    UNIQUE(tenant_id, entity_type, canonical_key))""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS canonical_entity_versions (
+                    entity_id TEXT NOT NULL REFERENCES canonical_entities(entity_id), version INTEGER NOT NULL,
+                    payload_json JSONB NOT NULL, checksum TEXT NOT NULL, source_batch_id TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(entity_id, version))""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS canonical_ledger (
+                    ledger_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, entity_id TEXT NOT NULL,
+                    version INTEGER NOT NULL, action TEXT NOT NULL, actor TEXT NOT NULL,
+                    approval_mode TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)""")
+                cur.execute("""CREATE TABLE IF NOT EXISTS canonical_outbox (
+                    outbox_id TEXT PRIMARY KEY, ledger_id TEXT NOT NULL, event_type TEXT NOT NULL,
+                    payload_json JSONB NOT NULL, status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)""")
+
+    def ingest(self, records: list[dict[str, Any]], *, tenant_id: str, task_id: str) -> dict[str, Any]:
+        batch_id, now = uuid4().hex[:16], _now()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("INSERT INTO import_batches VALUES (%s,%s,%s,%s,%s,%s)",
+                            (batch_id, tenant_id, task_id, "awaiting_review", now, now))
+                for item in records:
+                    item = _normalize_record(item)
+                    filename = str(item.get("filename") or "document.json")
+                    payload = item.get("records", item)
+                    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+                    document_id, candidate_id = uuid4().hex, uuid4().hex
+                    sha256 = hashlib.sha256(raw.encode()).hexdigest()
+                    cur.execute("INSERT INTO source_documents VALUES (%s,%s,%s,%s,%s::jsonb,%s)",
+                                (document_id, batch_id, filename, sha256, raw, now))
+                    cur.execute("INSERT INTO import_candidates VALUES (%s,%s,%s,%s,%s::jsonb,%s,%s)",
+                                (candidate_id, batch_id, document_id, str(item.get("entity_type") or "order"),
+                                 json.dumps(item, ensure_ascii=False), "candidate", now))
+        return {
+            "batch_id": batch_id,
+            "status": "awaiting_review",
+            "candidate_count": len(records),
+            "m0_candidate_records": records,
+            "candidates": records,
+        }
+
+    def publish(self, batch_id: str, *, actor: str, reason: str = "", human_override: bool = False) -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("SELECT * FROM import_batches WHERE batch_id=%s", (batch_id,))
+                batch = cur.fetchone()
+                if not batch:
+                    return {"status": "not_found", "batch_id": batch_id}
+                cur.execute("SELECT candidate_id,entity_type,candidate_json FROM import_candidates WHERE batch_id=%s", (batch_id,))
+                candidates = cur.fetchall()
+                published = 0
+                for candidate_id, entity_type, data in candidates:
+                    if isinstance(data, str):
+                        data = json.loads(data)
+                    key = str(data.get("canonical_key") or data.get("product_code") or data.get("order_id") or candidate_id)
+                    cur.execute("SELECT entity_id,current_version FROM canonical_entities WHERE tenant_id=%s AND entity_type=%s AND canonical_key=%s",
+                                (batch[1], entity_type, key))
+                    entity = cur.fetchone()
+                    entity_id, version = (entity[0], int(entity[1]) + 1) if entity else (uuid4().hex, 1)
+                    checksum = hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+                    if entity:
+                        cur.execute("UPDATE canonical_entities SET current_version=%s,updated_at=%s WHERE entity_id=%s", (version, _now(), entity_id))
+                    else:
+                        cur.execute("INSERT INTO canonical_entities VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                                    (entity_id, batch[1], entity_type, key, version, "active", _now(), _now()))
+                    cur.execute("INSERT INTO canonical_entity_versions VALUES (%s,%s,%s::jsonb,%s,%s,%s)",
+                                (entity_id, version, json.dumps(data, ensure_ascii=False), checksum, batch_id, _now()))
+                    mode = "human_override" if human_override else "standard"
+                    cur.execute("INSERT INTO approval_records VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                                (uuid4().hex, batch_id, candidate_id, actor, "approve", mode, reason, _now()))
+                    ledger_id = uuid4().hex
+                    cur.execute("INSERT INTO canonical_ledger VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                                (ledger_id, batch_id, entity_id, version, "publish", actor, mode, _now()))
+                    cur.execute("INSERT INTO canonical_outbox VALUES (%s,%s,%s,%s::jsonb,%s,%s)",
+                                (uuid4().hex, ledger_id, "canonical.entity.published",
+                                 json.dumps({"entity_id": entity_id, "version": version}), "pending", _now()))
+                    cur.execute("UPDATE import_candidates SET status='published' WHERE candidate_id=%s", (candidate_id,))
+                    published += 1
+                cur.execute("UPDATE import_batches SET status='published',updated_at=%s WHERE batch_id=%s", (_now(), batch_id))
+        return self.readback(batch_id) | {"status": "published", "published": published}
+
+    def readback(self, batch_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("""SELECT e.entity_id,e.entity_type,e.canonical_key,v.version,v.payload_json,v.checksum
+                    FROM canonical_entities e JOIN canonical_entity_versions v ON v.entity_id=e.entity_id AND v.version=e.current_version
+                    JOIN canonical_ledger l ON l.entity_id=e.entity_id AND l.version=v.version WHERE l.batch_id=%s""", (batch_id,))
+                rows = cur.fetchall()
+                cur.execute("SELECT COUNT(*) FROM canonical_ledger WHERE batch_id=%s", (batch_id,)); ledger = cur.fetchone()[0]
+                cur.execute("SELECT COUNT(*) FROM canonical_outbox WHERE ledger_id IN (SELECT ledger_id FROM canonical_ledger WHERE batch_id=%s)", (batch_id,)); outbox = cur.fetchone()[0]
+        return {"batch_id": batch_id, "canonical_readback_available": True, "approved_candidates": len(rows),
+                "ledger_count": int(ledger), "outbox_count": int(outbox),
+                "entities": [{"entity_id": r[0], "entity_type": r[1], "canonical_key": r[2], "version": r[3], "payload_json": r[4], "checksum": r[5]} for r in rows]}
+
+
 def create_app():
-    from fastapi import FastAPI, Header
+    from fastapi import FastAPI, Header, Request
 
     app = FastAPI(title="Yunpai 39092 M0 Data Backend", version="1.0.0")
-    store = M0Store(os.getenv("YUNPAI_M0_DB", "runtime/yunpai-39092-m0.sqlite"))
+    postgres_dsn = os.getenv("YUNPAI_39092_M0_POSTGRES_DSN")
+    store = PostgresM0Store(postgres_dsn) if postgres_dsn else M0Store(os.getenv("YUNPAI_M0_DB", "runtime/yunpai-39092-m0.sqlite"))
 
     @app.get("/health")
     async def health():
@@ -179,6 +340,56 @@ def create_app():
     async def validate(body: dict[str, Any]):
         records = body.get("records") if isinstance(body.get("records"), list) else []
         return {"publishable": bool(records), "candidate_count": len(records)}
+
+    @app.post("/api/m0/import/upload")
+    async def import_upload(request: Request):
+        raw_body = await request.body()
+        form = await request.form()
+        print("39092-m0 upload", request.headers.get("content-type"), len(raw_body), len(form), flush=True)
+        files = [
+            value for _, value in form.multi_items()
+            if hasattr(value, "read") and hasattr(value, "filename")
+        ]
+        records = []
+        for item in files:
+            raw = await item.read()
+            records.append({
+                "filename": item.filename or "document.bin",
+                "entity_type": "order",
+                "content_b64": base64.b64encode(raw).decode("ascii"),
+            })
+        if not records:
+            # Compatibility path for HTTP clients that serialize the upload
+            # envelope as JSON instead of multipart.
+            try:
+                body = json.loads(raw_body.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                body = {}
+            for item in body.get("files", []) if isinstance(body, dict) else []:
+                if isinstance(item, dict) and isinstance(item.get("content_b64"), str):
+                    records.append({
+                        "filename": str(item.get("filename") or "document.bin"),
+                        "entity_type": "order",
+                        "content_b64": item["content_b64"],
+                    })
+        tenant_id = request.headers.get("x-yunpai-tenant-id", "default")
+        task_id = request.headers.get("x-yunpai-task-id", "39092")
+        return store.ingest(records, tenant_id=tenant_id, task_id=task_id)
+
+    @app.post("/api/m0/import/batch/{batch_id}/commit")
+    async def import_commit(batch_id: str, body: dict[str, Any] | None = None,
+                            x_yunpai_principal: str | None = Header(None)):
+        body = body or {}
+        return store.publish(
+            batch_id,
+            actor=str(body.get("approved_by") or x_yunpai_principal or "operator"),
+            reason=str(body.get("override_reason") or ""),
+            human_override=bool(body.get("human_override", False)),
+        )
+
+    @app.get("/api/m0/import/batch/{batch_id}")
+    async def import_status(batch_id: str):
+        return store.readback(batch_id)
 
     @app.post("/api/m0/catalog/ingest/publish")
     async def publish(body: dict[str, Any], x_yunpai_principal: str | None = Header(None)):

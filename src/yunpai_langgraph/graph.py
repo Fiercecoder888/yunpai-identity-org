@@ -682,7 +682,7 @@ class YunpaiGraph:
             return explicit
         if tool == "data_import_run":
             files = []
-            documents = request.get("documents", [])
+            documents = request.get("documents") or request.get("files", [])
             if not documents:
                 documents = [
                     item for item in request.get("attachments", [])

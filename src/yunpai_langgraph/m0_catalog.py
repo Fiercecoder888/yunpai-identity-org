@@ -6,6 +6,7 @@ import json
 import os
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import quote
 from typing import Any
 
 
@@ -31,6 +32,7 @@ def publish_records(
         return {"status": "skipped", "published": 0, "reason": "M0_URL is not configured"}
     body = json.dumps({
         "records": records,
+        "task_id": task_id,
         "approval": {
             "mode": "human_override" if human_override else "standard",
             "approved_by": actor,
@@ -46,7 +48,6 @@ def publish_records(
         "X-Yunpai-Principal": actor,
         "X-Yunpai-Roles": "data-steward,m0-reviewer,admin",
         "X-Yunpai-Approval-Mode": "human_override" if human_override else "standard",
-        "X-Yunpai-Override-Reason": override_reason,
     }
     result: dict[str, Any] = {}
     try:
