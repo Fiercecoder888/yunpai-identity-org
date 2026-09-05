@@ -44,9 +44,21 @@ def _approved_m2_state(request_overrides=None):
 
 def test_m2_payload_consumes_approved_m1_order():
     state = _approved_m2_state()
+    state["request"]["routing_steps"] = [
+        {
+            "sequence": 1,
+            "operation_id": "OP-1",
+            "operation_name": "测试工序",
+            "product_id": "P-1",
+            "processing_minutes": 1,
+            "eligible_resources": [{"resource_id": "EQ-1"}],
+        }
+    ]
     payload = bridge_payload(state, "run_bom_sop_workflow")
     assert payload["product_profile"]["product_code"] == "P-1"
     assert payload["_source"]["ref"] == "ingest_document"
+    assert payload["routing_steps"][0]["name"] == "测试工序"
+    assert payload["routing_steps"][0]["standard_time"] == 60
 
 
 def test_m2_payload_uses_semantic_supplement_for_missing_header_product_code():
@@ -62,6 +74,27 @@ def test_m2_payload_uses_semantic_supplement_for_missing_header_product_code():
     }
     payload = bridge_payload(state, "run_bom_sop_workflow")
     assert payload["product_profile"]["product_code"] == "W-H909"
+
+
+def test_read_order_merges_explicit_structured_document_for_downstream_steps():
+    state = _approved_m2_state({
+        "document": {
+            "order_id": "PO-1",
+            "product_code": "W-H909",
+            "product_name": "测试产品",
+            "quantity": 4000,
+            "due_date": "2026-09-12",
+        },
+        "product": {"product_code": "W-H909", "product_name": "测试产品"},
+    })
+    state["outputs"]["ingest_document"] = {
+        "document": {"header": {"order_number": "PO-1"}, "lines": []},
+    }
+    order = orchestration_bridge.read_order(state)
+    assert order["order_id"] == "PO-1"
+    assert order["product_code"] == "W-H909"
+    assert order["quantity"] == 4000
+    assert order["due_date"] == "2026-09-12"
 
 
 def test_m2_payload_reads_approved_m0_bom_when_request_has_no_bom(monkeypatch):
@@ -121,6 +154,45 @@ def test_m3_without_approved_bom_returns_blocked_input():
     assert result["data"]["required_tool"] == "run_bom_sop_workflow"
 
 
+def test_m3_prefers_enriched_inventory_snapshot_over_compact_inventory():
+    state = _approved_m2_state({"legacy_preview": False})
+    state["request"]["inventory"] = [{"material_code": "MAT-1", "available_qty": 10}]
+    state["request"]["inventory_snapshot"] = [{
+        "material_code": "MAT-1",
+        "available_qty": 10,
+        "warehouse": "WH-1",
+        "lot_no": "LOT-1",
+        "qc_status": "released",
+    }]
+    state["outputs"]["run_bom_sop_workflow"] = {
+        "data": {"bom_generation": {
+            "approval_status": "approved",
+            "bom_lines": [{"material_code": "MAT-1", "quantity_per": 1}],
+        }}
+    }
+    payload = bridge_payload(state, "run_m3_procurement_requirements")
+    assert payload["inventory_snapshot"][0]["warehouse"] == "WH-1"
+    assert payload["inventory_snapshot"][0]["lot_no"] == "LOT-1"
+
+
+def test_m3_uses_order_line_quantity_when_header_has_no_quantity():
+    state = _approved_m2_state({"legacy_preview": False})
+    state["outputs"]["ingest_document"] = {
+        "data": {
+            "document": {
+                "header": {"order_number": "SO-1", "product_code": "P-1"},
+                "lines": [{"model": "P-1", "quantity": 4}],
+            }
+        }
+    }
+    state["request"]["inventory_snapshot"] = [{
+        "material_code": "MAT-1", "available_qty": 10,
+        "warehouse": "WH-1", "lot_no": "LOT-1", "qc_status": "released",
+    }]
+    payload = bridge_payload(state, "run_m3_procurement_requirements")
+    assert payload["order"]["order_qty"] == 4
+
+
 def test_m3_inventory_rejects_implicit_defaults_in_production():
     # production（无 legacy_preview）缺 warehouse/lot/qc 库存事实 -> BLOCKED_INPUT，
     # 不接受隐式仓库/lot/qc 默认（断点 4）。
@@ -164,6 +236,22 @@ def test_m4_with_supplier_facts_builds_suggestions():
     payload = bridge_payload(state, "import_m4_purchase_suggestions_json")
     assert payload["suggestions"][0]["supplier_name"] == "SUP-1"
     assert payload["tracking_task_id"] == state["task_id"]
+
+
+def test_m4_no_shortage_is_valid_empty_handoff():
+    state = _approved_m2_state({"legacy_preview": False})
+    state["outputs"]["run_m3_procurement_requirements"] = {
+        "data": {
+            "shortage_lines": [],
+            "due_date": "2026-09-12",
+            "project_id": "P-1",
+            "order_id": "SO-4",
+            "procurement_plan_id": "plan-4",
+        },
+    }
+    payload = bridge_payload(state, "import_m4_purchase_suggestions_json")
+    assert payload["suggestions"] == []
+    assert payload["order_id"] == "SO-4"
 
 
 def test_snapshot_headers_and_checksum_are_deterministic():

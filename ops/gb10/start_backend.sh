@@ -9,16 +9,24 @@ export YUNPAI_M5_DB="${YUNPAI_M5_DB:-$ROOT/runtime/yunpai-m5.sqlite}"
 export YUNPAI_TOOL_TRANSPORT="${YUNPAI_TOOL_TRANSPORT:-http}"
 export QWEN_ROUTER_ENABLED="${QWEN_ROUTER_ENABLED:-true}"
 GB10_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m0,m1,m2,m3,m4,m5}"
+# M2 is a required engineering capability for the 39092 order path. Preserve
+# every caller-selected module and endpoint; only add M2 when it was omitted.
+case ",${GB10_HTTP_MODULES}," in
+  *,m2,*) ;;
+  *) GB10_HTTP_MODULES="${GB10_HTTP_MODULES},m2" ;;
+esac
 GB10_M0_URL="${M0_URL:-http://127.0.0.1:49503}"
 GB10_M1_URL="${M1_URL:-http://127.0.0.1:50180}"
 GB10_M2_URL="${M2_URL:-http://127.0.0.1:8765}"
 GB10_M3_URL="${M3_URL:-http://127.0.0.1:49108}"
 GB10_M4_URL="${M4_URL:-http://127.0.0.1:49114}"
 GB10_M5_URL="${M5_URL:-http://127.0.0.1:49115}"
-if [[ -z "${QWEN_API_KEY:-}" && -r /home/soft/yunpai/dev-39085/config/deploy.env ]]; then
+GB10_DEPLOY_ENV="${YUNPAI_DEPLOY_ENV_FILE:-/home/soft/yunpai/prod-39092/config/deploy.env}"
+if [[ -z "${QWEN_API_KEY:-}" && -r "$GB10_DEPLOY_ENV" ]]; then
   set -a
-  # Reuse the GB10-managed orchestration credential without copying secrets.
-  source /home/soft/yunpai/dev-39085/config/deploy.env
+  # Reuse the explicitly selected GB10 deployment credential without copying
+  # secrets into the release.  The caller must select the matching stack.
+  source "$GB10_DEPLOY_ENV"
   set +a
   export QWEN_API_KEY="${ORCH_LLM_API_KEY:-}"
   export QWEN_BASE_URL="${QWEN_BASE_URL:-${ORCH_LLM_BASE_URL:-http://127.0.0.1:18085/v1}}"
@@ -26,6 +34,12 @@ if [[ -z "${QWEN_API_KEY:-}" && -r /home/soft/yunpai/dev-39085/config/deploy.env
 else
   export QWEN_BASE_URL="${QWEN_BASE_URL:-http://127.0.0.1:18085/v1}"
   export QWEN_MODEL="${QWEN_MODEL:-qwen3.6-35b-a3b-fp8-gpu0-200k}"
+fi
+
+# M4's material-supply API uses a service JWT rather than the generic module
+# headers.  Keep the token in the selected deployment environment only.
+if [[ -z "${M4_AUTHORIZATION:-}" && -n "${M4_SUPPLY_TOKEN:-}" ]]; then
+  export M4_AUTHORIZATION="Bearer ${M4_SUPPLY_TOKEN}"
 fi
 
 # deploy.env may contain legacy module endpoints; restore the values captured

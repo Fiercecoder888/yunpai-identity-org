@@ -88,11 +88,21 @@ def read_order(state: RunState) -> dict[str, Any]:
     supplement_document = supplement.get("document") if isinstance(supplement, dict) else None
     supplement_header = supplement_document.get("header") if isinstance(supplement_document, dict) else None
     request = state.get("request", {})
-    explicit = {
-        key: request.get(key)
-        for key in ("order_id", "order_number", "product_code", "product_name", "quantity", "order_qty", "due_date", "order_date", "customer")
-        if request.get(key) not in (None, "")
-    }
+    # A replay may carry a source-backed structured document under
+    # request.document (or the legacy request.order) while M1's external
+    # parser only returns the raw document/header.  Merge that explicit,
+    # user-supplied fact without allowing empty values to overwrite M1.
+    request_document = request.get("document") or request.get("order") or {}
+    request_product = request.get("product") or {}
+    explicit: dict[str, Any] = {}
+    for key in ("order_id", "order_number", "product_code", "product_name", "quantity", "order_qty", "due_date", "order_date", "customer"):
+        value = request.get(key)
+        if value in (None, "") and isinstance(request_document, dict):
+            value = request_document.get(key)
+        if value in (None, "") and key in {"product_code", "product_name"} and isinstance(request_product, dict):
+            value = request_product.get(key)
+        if value not in (None, ""):
+            explicit[key] = value
     if isinstance(order, dict):
         if isinstance(supplement_header, dict):
             # Keep external M1 values and use only non-empty, source-backed
@@ -257,6 +267,19 @@ def merge_m2_canonical_bom(result: dict[str, Any], payload: dict[str, Any]) -> d
         "review_status": "approved",
     }
     route = payload.get("routing_steps") if isinstance(payload, dict) else None
+    from .m2_fact_validation import validate_engineering_facts
+    generation_sop = result.get("sop_generation") if isinstance(result.get("sop_generation"), dict) else {}
+    result["engineering_fact_validation"] = validate_engineering_facts(
+        product_code=(payload.get("product_profile") or {}).get("product_code"),
+        bom_lines=generation.get("bom_lines") or [],
+        bom_version=generation.get("bom_version"),
+        bom_effective_from=generation.get("effective_from"),
+        bom_effective_to=generation.get("effective_to"),
+        route_steps=route if isinstance(route, list) else generation_sop.get("route_steps") or [],
+        sop_version=generation_sop.get("sop_version"),
+        sop_effective_from=generation_sop.get("effective_from"),
+        sop_effective_to=generation_sop.get("effective_to"),
+    )
     if isinstance(route, list) and route:
         generation_sop = result.setdefault("sop_generation", {})
         if isinstance(generation_sop, dict):
@@ -284,11 +307,48 @@ def read_approved_route(state: RunState) -> list[dict[str, Any]]:
     return [item for item in steps if isinstance(item, dict)] if isinstance(steps, list) else []
 
 
+def _normalize_m2_route_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Adapt the shared route shape to the M2 HTTP contract.
+
+    The workflow request uses the M5-facing ``operation_id`` /
+    ``processing_minutes`` names, while M2 requires ``name`` and
+    ``standard_time`` (seconds).  Keep the original fields for downstream
+    evidence and add the M2 aliases deterministically.
+    """
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(steps, start=1):
+        if not isinstance(item, dict):
+            continue
+        value = dict(item)
+        name = str(item.get("name") or item.get("operation_name") or item.get("operation_id") or f"OP-{index}")
+        if item.get("standard_time") not in (None, ""):
+            seconds = float(item["standard_time"])
+        elif item.get("standard_time_s") not in (None, ""):
+            seconds = float(item["standard_time_s"])
+        elif item.get("standard_minutes") not in (None, ""):
+            seconds = float(item["standard_minutes"]) * 60
+        else:
+            seconds = float(item.get("processing_minutes") or 0) * 60
+        value.setdefault("name", name)
+        value.setdefault("description", str(item.get("description") or item.get("operation_name") or name))
+        value.setdefault("station", str(item.get("station") or item.get("station_code") or ""))
+        value["standard_time"] = seconds
+        value["standard_time_s"] = seconds
+        if item.get("standard_minutes") in (None, ""):
+            value["standard_minutes"] = seconds / 60
+        normalized.append(value)
+    return normalized
+
+
 def read_inventory_facts(state: RunState) -> list[dict[str, Any]]:
     """库存只允许来自显式事实快照：M3 回读快照或 request.inventory 显式条目
     （warehouse/lot/qc/observed_at 均不能由桥接补默认）。"""
     request = state.get("request", {})
-    inventory = request.get("inventory") or request.get("inventory_snapshot") or []
+    # An enriched inventory snapshot is the authoritative M3 input.  Prefer
+    # it over the compact order-level inventory list; otherwise a stale
+    # material_code/available_qty preview masks warehouse, lot and QC facts
+    # that the six-class bundle requires.
+    inventory = request.get("inventory_snapshot") or request.get("inventory") or []
     if not isinstance(inventory, list):
         return []
     items = [item for item in inventory if isinstance(item, dict)]
@@ -344,7 +404,13 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             (item for item in attachments if isinstance(item, dict) and item.get("kind") == "order"),
             None,
         )
-        file_value = order_attachment if isinstance(order_attachment, dict) else None
+        file_value = (
+            order_attachment
+            if isinstance(order_attachment, dict)
+            and isinstance(order_attachment.get("content_b64"), str)
+            and order_attachment.get("content_b64")
+            else None
+        )
         if not file_value and request.get("document"):
             file_value = {
                 "filename": "order.json",
@@ -410,6 +476,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         if not routing_steps:
             m0_overview = _read_m0_product_overview(state, product_code)
             routing_steps = _route_steps_from_overview(m0_overview, product_code)
+        routing_steps = _normalize_m2_route_steps(routing_steps)
         attachments = [item for item in (request.get("attachments") or [])
                        if isinstance(item, dict) and item.get("kind") == "master_data"]
         lines = []
@@ -455,6 +522,15 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         inventory = read_inventory_facts(state)
         product_code = str(order.get("product_code") or "")
         order_id = str(order.get("order_id") or "")
+        # M1 HTTP responses may expose quantity only on extracted order lines,
+        # not on the header object consumed by read_order.  Preserve that
+        # source-backed quantity for the M3 contract instead of sending zero.
+        line_quantity = sum(
+            float(line.get("quantity") or line.get("order_qty") or 0)
+            for line in read_lines(state)
+            if isinstance(line, dict)
+        )
+        order_quantity = order.get("order_qty") or order.get("quantity") or line_quantity
         if not bom_lines:
             return blocked(state, source_module="m2", tool=tool,
                            missing_fields=["已批准 BOM 行"],
@@ -468,9 +544,27 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                                missing_fields=["inventory_snapshot(含 warehouse/lot/qc)"],
                                required_tool="get_material_readiness_snapshot",
                                recovery="缺少权威库存快照；请提供 M3 库存事实后重试")
+        from .m3_m4_fact_validation import validate_inventory_facts
+        inventory_validation = validate_inventory_facts(
+            inventory,
+            [str(line.get("material_code") or "") for line in bom_lines if isinstance(line, dict)],
+            strict=not bool(request.get("legacy_preview")),
+        )
+        if inventory_validation["status"] != "ready" and not bool(request.get("legacy_preview")):
+            validation_fields = [
+                item.get("field", "inventory_fact")
+                for item in inventory_validation["missing_fields"] + inventory_validation["validation_issues"]
+                if isinstance(item, dict)
+            ]
+            return blocked(
+                state, source_module="m3", tool=tool,
+                missing_fields=validation_fields,
+                required_tool="get_material_readiness_snapshot",
+                recovery="请补齐每个物料的仓库、批次、质检状态、数量和快照时间",
+            )
         payload: dict[str, Any] = {
             "tenant_id": state.get("tenant_id", "default"),
-            "order": {"project_id": str(request.get("project_id") or order_id), "order_id": order_id, "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "order_qty": order.get("quantity", 0), "due_date": str(order.get("due_date") or "")},
+            "order": {"project_id": str(request.get("project_id") or order_id), "order_id": order_id, "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "order_qty": order_quantity, "due_date": str(order.get("due_date") or "")},
             "bom": {"bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "lines": [{"line_id": str(line.get("line_id") or f"line-{index}"), "material_code": str(line.get("material_code") or ""), "material_name": str(line.get("material_name") or line.get("material_code") or ""), "qty_per": line.get("qty_per", line.get("quantity_per", line.get("quantity", 0))), "uom": str(line.get("uom") or line.get("unit") or "pcs"), "loss_rate": line.get("loss_rate", 0), "requires_procurement": line.get("requires_procurement", True)} for index, line in enumerate(bom_lines, start=1)]},
             "inventory_snapshot": inventory,
         }
@@ -481,11 +575,34 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         if not isinstance(shortage_lines, list):
             shortage_lines = []
         if not shortage_lines:
-            return blocked(state, source_module="m3", tool=tool,
-                           missing_fields=["run_m3_procurement_requirements.shortage_lines"],
-                           required_tool="run_m3_procurement_requirements",
-                           recovery="齐套无缺口则无需采购；若缺口存在请先完成 M3 计算")
+            # A no-shortage M3 result is a valid procurement handoff: M4 must
+            # persist an empty suggestion batch/supply snapshot so M5 can
+            # consume the explicit "ready" state.  Missing M3 output remains
+            # blocked below via the normal payload checks.
+            if not m3:
+                return blocked(state, source_module="m3", tool=tool,
+                               missing_fields=["run_m3_procurement_requirements"],
+                               required_tool="run_m3_procurement_requirements",
+                               recovery="请先完成 M3 齐套计算后再进入 M4")
         supplier_facts = read_supplier_facts(state)
+        from .m3_m4_fact_validation import validate_supplier_facts
+        supplier_validation = validate_supplier_facts(
+            supplier_facts,
+            [str(line.get("material_code") or "") for line in shortage_lines if isinstance(line, dict)],
+        )
+        if supplier_validation["status"] != "ready" and not bool(request.get("legacy_preview")):
+            validation_fields = [
+                item.get("field", "supplier_fact")
+                for item in supplier_validation["missing_fields"] + supplier_validation["validation_issues"]
+                if isinstance(item, dict)
+            ]
+            validation_fields.append("supplier_by_material(权威供应商主数据)")
+            return blocked(
+                state, source_module="m4", tool=tool,
+                missing_fields=validation_fields,
+                required_tool="list_m4_suppliers",
+                recovery="请补齐每个缺料物料的权威供应商映射后重试",
+            )
         suggestions = []
         for line in shortage_lines:
             if not isinstance(line, dict):
@@ -518,16 +635,34 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         }
     if tool == "ingest_m5_planning_snapshot":
         from .planning_snapshot import assemble_bundle, verify_bundle
+        from .m5_fact_validation import validate_m5_facts
 
         order = read_order(state)
         m3 = output_data(state, "run_m3_procurement_requirements")
         m4 = read_m4_supply_snapshot(state)
         request_payload = _assembly_payloads_from_state(state)
+        resource_snapshot = request_payload.get("resource_snapshot") or (
+            {"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None
+        )
+        calendar_snapshot = request_payload.get("calendar_snapshot")
+        fact_validation = validate_m5_facts(
+            resource_snapshot=resource_snapshot,
+            calendar_snapshot=calendar_snapshot,
+            wip_status=request.get("wip_status"),
+            require_wip=str(request.get("scenario_purpose") or "production") == "wip_pmc",
+        )
+        if fact_validation["status"] != "ready":
+            return blocked(
+                state, source_module="m5", tool=tool,
+                missing_fields=fact_validation["missing_fields"],
+                required_tool="ingest_m5_planning_snapshot",
+                recovery="请补齐人员技能、设备能力、工位、生产日历及必要 WIP 快照后重试",
+            )
         scenario_id = str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}")
         bundle = assemble_bundle(
             orders=[{"order_id": str(order.get("order_id") or ""), "lines": read_lines(state) or [{"order_line_id": f"{order.get('order_id')}::L1", "product_code": order.get("product_code"), "qty": order.get("quantity", 0), "due_date": order.get("due_date"), "priority": "normal"}]}],
             routes=request_payload.get("routing_steps") or [],
-            resource_snapshot=request_payload.get("resource_snapshot") or ({"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None),
+            resource_snapshot=resource_snapshot,
             calendar_snapshot=request_payload.get("calendar_snapshot"),
             supply_snapshot=request_payload.get("supply_snapshot") or ({"entries": request_payload.get("supply_entries") or [], "order_kitting": request_payload.get("order_kitting")} if request_payload.get("supply_entries") or request_payload.get("order_kitting") else None),
             constraint_snapshot=request_payload.get("constraint_snapshot") or ({"changeover_rules": request_payload.get("changeover_rules") or request_payload.get("setup_matrix") or {}} if request_payload.get("changeover_rules") or request_payload.get("setup_matrix") else None),

@@ -35,7 +35,35 @@ except ImportError:  # pragma: no cover - only used in dependency-free smoke env
             error = next(self.iter_errors(instance), None)
             if error: raise error
 
-from .contracts import ToolHandler, ToolSpec
+from .contracts import ToolHandler, ToolSpec, normalize_contract_result
+
+
+def _contract_defaults(module: str, name: str, item: dict[str, Any]) -> dict[str, Any]:
+    """Provide safe contract metadata for older manifests during migration."""
+    capability_by_module = {
+        "m0": "canonical_write",
+        "m1": "document_parse",
+        "m2": "bom_sop_validate",
+        "m3": "mrp_calculate",
+        "m4": "procurement_prepare",
+        "m5": "schedule_validate",
+    }
+    gate_by_module = {
+        "m0": "candidate", "m1": "data", "m2": "engineering",
+        "m3": "data", "m4": "procurement", "m5": "schedule",
+    }
+    side_effect = str(item.get("side_effect") or (
+        "external_write" if any(token in name for token in ("approve", "commit", "dispatch", "write", "send", "publish"))
+        else "none"
+    ))
+    return {
+        "capability": str(item.get("capability") or capability_by_module.get(module, "unknown")),
+        "side_effect": side_effect,
+        "review_gate": str(item.get("review_gate") or ("none" if side_effect == "none" else gate_by_module.get(module, "data"))),
+        "failure_codes": tuple(str(code) for code in item.get("failure_codes", [])),
+        "recovery_actions": tuple(str(action) for action in item.get("recovery_actions", [])),
+        "downstream_fields": tuple(str(field) for field in item.get("downstream_fields", [])),
+    }
 
 
 class ToolHTTPError(RuntimeError):
@@ -58,7 +86,14 @@ class ToolRegistry:
     def register(self, spec: ToolSpec, handler: ToolHandler | None = None) -> None:
         if spec.name in self.specs:
             raise ValueError(f"duplicate tool: {spec.name}")
-        Draft202012Validator.check_schema(spec.input_schema)
+        try:
+            Draft202012Validator.check_schema(spec.input_schema)
+        except Exception as exc:
+            raise ValueError(f"invalid input schema for {spec.name}: {exc}") from exc
+        try:
+            Draft202012Validator.check_schema(spec.output_schema)
+        except Exception as exc:
+            raise ValueError(f"invalid output schema for {spec.name}: {exc}") from exc
         self.specs[spec.name] = spec
         if handler:
             self.handlers[spec.name] = handler
@@ -71,6 +106,7 @@ class ToolRegistry:
             data = json.loads(path.read_text(encoding="utf-8"))
             for item in data.get("tools", []):
                 http = item.get("http", {})
+                metadata = _contract_defaults(data["module"], item["name"], item)
                 self.register(ToolSpec(
                     name=item["name"], module=data["module"], description=item["description"],
                     input_schema=item.get("input_schema", {"type": "object"}),
@@ -80,6 +116,7 @@ class ToolRegistry:
                     timeout_s=float(http.get("timeout_s", 60)), tool_type=item.get("type", "tool"),
                     required_headers=tuple(http.get("required_headers", [])),
                     agent_endpoints=item.get("agent_endpoints", {}), tags=tuple(item.get("tags", [])),
+                    **metadata,
                 ))
 
     def tools_for(self, module: str) -> list[ToolSpec]:
@@ -97,7 +134,7 @@ class ToolRegistry:
             raise RuntimeError(f"tool {name} has no local handler; configure HTTP adapter")
         result = await handler(payload, context)
         Draft202012Validator(spec.output_schema).validate(result)
-        return result
+        return normalize_contract_result(result, source=f"tool:{spec.name}", invoked_tools=[spec.name])
 
     def bind_http(
         self,
@@ -368,6 +405,7 @@ def build_runtime_registry() -> ToolRegistry:
         from .m1_tooling import M1_HTTP_ADAPTER_TOOL_NAMES, bind_m1_http
         from .m1_http_adapter import module_m1_auth_headers
         from .m3_m4_tooling import EXCLUDED_M3_M4_TOOL_NAMES
+        from .workers import HANDLERS
 
         # 选择性 HTTP 模块绑定（YUNPAI_HTTP_MODULES 控制哪些模块走远程）。
         selected = {
@@ -391,6 +429,15 @@ def build_runtime_registry() -> ToolRegistry:
                 tool_names=M1_HTTP_ADAPTER_TOOL_NAMES,
                 overwrite=True,
             )
+        # build_default_registry installs the dedicated M3/M4 adapters so
+        # callers can use them without the full runtime builder.  In the
+        # runtime builder, however, YUNPAI_HTTP_MODULES is the source of truth:
+        # restore local handlers for explicitly unselected modules instead of
+        # silently leaving a pre-bound HTTP adapter in place.
+        for name, handler in HANDLERS.items():
+            spec = registry.specs.get(name)
+            if spec is not None and spec.module not in selected:
+                registry.handlers[name] = handler
         registry.environment = {"env": env, "transport": "http", "local_fixture": False}  # type: ignore[attr-defined]
     else:
         registry.environment = {"env": env, "transport": "local", "local_fixture": True}  # type: ignore[attr-defined]

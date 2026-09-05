@@ -373,6 +373,8 @@ async def m1_parse(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, An
 
 
 async def m2_bom(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    from .m2_fact_validation import validate_engineering_facts
+
     profile = payload["product_profile"]
     lines = payload.get("bom_lines") or []
     parse_issues: list[dict[str, Any]] = []
@@ -390,13 +392,28 @@ async def m2_bom(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]
         }
     duplicate_codes = sorted({code for code in (str(line.get("material_code") or "") for line in lines) if code and sum(1 for item in lines if str(item.get("material_code") or "") == code) > 1})
     matching = {"status": "matched", "score": 1.0, "matched_by": ["product_code", "material_code"], "ambiguous_candidates": 0, "unmatched_fields": []}
+    fact_validation = validate_engineering_facts(
+        product_code=profile.get("product_code"),
+        bom_lines=lines,
+        bom_version=payload.get("bom_version") or "draft-1",
+        bom_effective_from=payload.get("bom_effective_from"),
+        bom_effective_to=payload.get("bom_effective_to"),
+        route_steps=routing_steps,
+        sop_version=payload.get("sop_version"),
+        sop_effective_from=payload.get("sop_effective_from"),
+        sop_effective_to=payload.get("sop_effective_to"),
+    )
     return {
         "status": "draft_created", "run_id": f"m2-{ctx['task_id'][-10:]}",
         "workflow_sequence": ["parse_sources", "history_search", "match_bom_sop", "bom_generate", "sop_generate"],
         "bom_generation": {"product_code": profile["product_code"], "bom_version": "draft-1", "bom_lines": lines, "assumptions": [], "duplicate_material_codes": duplicate_codes, "evidence": [_evidence("m2", "bom_lines", "受控 BOM 输入")]},
         "sop_generation": {"status": "draft", "operation_count": len(routing_steps or lines), "source_files": payload.get("sop_files") or []},
+        "engineering_fact_validation": fact_validation,
         "matching": matching,
-        "open_customer_questions": [], "artifacts": {},
+        "open_customer_questions": [
+            {"field": item["field"], "question": f"请补充工程事实：{item['field']}"}
+            for item in fact_validation["missing_fields"]
+        ], "artifacts": {},
         "evidence": [_evidence("m2", "workflow", "BOM/SOP draft")],
     }
 

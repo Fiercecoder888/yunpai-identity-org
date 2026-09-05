@@ -16,6 +16,7 @@ from .m3_m4_tooling import (
     M4_SKILL_OPERATION_MAP,
     unique_tools,
 )
+from .contracts import normalize_contract_result
 
 
 SkillHandler = Callable[[dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -61,6 +62,7 @@ class SkillRegistry:
         spec = self.specs[name]
         result = await spec.handler(payload, context)
         if isinstance(result, dict):
+            result = normalize_contract_result(result, source=f"skill:{name}", invoked_tools=result.get("invoked_tools", []))
             result = {
                 **result,
                 "skill": name,
@@ -195,6 +197,16 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
         "product_code": product_code,
         "m0_candidate_records": canonical_records,
         "m0_candidate_record_count": len(canonical_records),
+        "available_next_actions": [
+            "review_candidates",
+            "publish_canonical",
+            "run_m1",
+        ],
+        "next_actions": [
+            "review_candidates",
+            "publish_canonical",
+            "run_m1",
+        ],
         "evidence": [{"module": "orchestrator", "source_ref": batch_result["root_path"], "evidence_ref": f"business-catalog:{batch_result['batch_id']}", "detail": "文件哈希、分类和字段观察已写入候选库"}],
     }
 
@@ -245,7 +257,7 @@ async def _dispatch_registered_tool(
         output = dict(result)
     else:
         output = {"result": result}
-    output.update({"skill": skill_name, "skill_operation": operation, "invoked_tool": tool})
+    output.update({"skill": skill_name, "skill_operation": operation, "invoked_tool": tool, "invoked_tools": [tool]})
     return output
 
 

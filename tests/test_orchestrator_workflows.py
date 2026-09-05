@@ -64,6 +64,26 @@ async def test_planner_selects_explicit_document_to_plan_workflow():
     ]
 
 
+def test_explicit_workflow_wins_over_master_data_attachment_skill():
+    registry = build_default_registry()
+    planner = PlannerAgent()
+    decision = planner.plan(
+        {
+            "workflow": "m1_m5_document_to_plan",
+            "message": "用订单、BOM、SOP资料跑完 M1 到 M5",
+            "attachments": [
+                {"kind": "order", "filename": "order.xlsx", "content_b64": "eA=="},
+                {"kind": "master_data", "filename": "bom.xlsx", "content_b64": "eA=="},
+                {"kind": "master_data", "filename": "sop.docx", "content_b64": "eA=="},
+            ],
+        },
+        registry,
+    )
+    assert decision["route"] == "workflow"
+    assert decision["workflow_id"] == "m1_m5_document_to_plan"
+    assert decision["steps"][0]["tool"] == "ingest_document"
+
+
 @pytest.mark.asyncio
 async def test_planner_selects_explicit_canonical_to_m5_workflow():
     registry = build_default_registry()
@@ -78,8 +98,8 @@ def test_planner_rejects_unknown_workflow_id_via_explicit_field():
     registry = build_default_registry()
     planner = PlannerAgent(skills=None)
     decision = planner.plan({"message": "x", "workflow": "does-not-exist"}, registry)
-    # 未知 workflow 不触发受控链：落到 free/chat 而非伪造的 workflow。
-    assert decision["route"] in {"free", "chat"}
+    assert decision["route"] == "chat"
+    assert decision["error"]["code"] == "UNKNOWN_WORKFLOW"
 
 
 def test_workflow_capability_gap_lists_missing_module_tool():
