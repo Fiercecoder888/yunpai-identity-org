@@ -44,9 +44,21 @@ def _approved_m2_state(request_overrides=None):
 
 def test_m2_payload_consumes_approved_m1_order():
     state = _approved_m2_state()
+    state["request"]["routing_steps"] = [
+        {
+            "sequence": 1,
+            "operation_id": "OP-1",
+            "operation_name": "测试工序",
+            "product_id": "P-1",
+            "processing_minutes": 1,
+            "eligible_resources": [{"resource_id": "EQ-1"}],
+        }
+    ]
     payload = bridge_payload(state, "run_bom_sop_workflow")
     assert payload["product_profile"]["product_code"] == "P-1"
     assert payload["_source"]["ref"] == "ingest_document"
+    assert payload["routing_steps"][0]["name"] == "测试工序"
+    assert payload["routing_steps"][0]["standard_time"] == 60
 
 
 def test_m2_payload_uses_semantic_supplement_for_missing_header_product_code():

@@ -297,6 +297,39 @@ def read_approved_route(state: RunState) -> list[dict[str, Any]]:
     return [item for item in steps if isinstance(item, dict)] if isinstance(steps, list) else []
 
 
+def _normalize_m2_route_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Adapt the shared route shape to the M2 HTTP contract.
+
+    The workflow request uses the M5-facing ``operation_id`` /
+    ``processing_minutes`` names, while M2 requires ``name`` and
+    ``standard_time`` (seconds).  Keep the original fields for downstream
+    evidence and add the M2 aliases deterministically.
+    """
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(steps, start=1):
+        if not isinstance(item, dict):
+            continue
+        value = dict(item)
+        name = str(item.get("name") or item.get("operation_name") or item.get("operation_id") or f"OP-{index}")
+        if item.get("standard_time") not in (None, ""):
+            seconds = float(item["standard_time"])
+        elif item.get("standard_time_s") not in (None, ""):
+            seconds = float(item["standard_time_s"])
+        elif item.get("standard_minutes") not in (None, ""):
+            seconds = float(item["standard_minutes"]) * 60
+        else:
+            seconds = float(item.get("processing_minutes") or 0) * 60
+        value.setdefault("name", name)
+        value.setdefault("description", str(item.get("description") or item.get("operation_name") or name))
+        value.setdefault("station", str(item.get("station") or item.get("station_code") or ""))
+        value["standard_time"] = seconds
+        value["standard_time_s"] = seconds
+        if item.get("standard_minutes") in (None, ""):
+            value["standard_minutes"] = seconds / 60
+        normalized.append(value)
+    return normalized
+
+
 def read_inventory_facts(state: RunState) -> list[dict[str, Any]]:
     """库存只允许来自显式事实快照：M3 回读快照或 request.inventory 显式条目
     （warehouse/lot/qc/observed_at 均不能由桥接补默认）。"""
@@ -423,6 +456,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         if not routing_steps:
             m0_overview = _read_m0_product_overview(state, product_code)
             routing_steps = _route_steps_from_overview(m0_overview, product_code)
+        routing_steps = _normalize_m2_route_steps(routing_steps)
         attachments = [item for item in (request.get("attachments") or [])
                        if isinstance(item, dict) and item.get("kind") == "master_data"]
         lines = []
