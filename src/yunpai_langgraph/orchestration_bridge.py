@@ -257,6 +257,19 @@ def merge_m2_canonical_bom(result: dict[str, Any], payload: dict[str, Any]) -> d
         "review_status": "approved",
     }
     route = payload.get("routing_steps") if isinstance(payload, dict) else None
+    from .m2_fact_validation import validate_engineering_facts
+    generation_sop = result.get("sop_generation") if isinstance(result.get("sop_generation"), dict) else {}
+    result["engineering_fact_validation"] = validate_engineering_facts(
+        product_code=(payload.get("product_profile") or {}).get("product_code"),
+        bom_lines=generation.get("bom_lines") or [],
+        bom_version=generation.get("bom_version"),
+        bom_effective_from=generation.get("effective_from"),
+        bom_effective_to=generation.get("effective_to"),
+        route_steps=route if isinstance(route, list) else generation_sop.get("route_steps") or [],
+        sop_version=generation_sop.get("sop_version"),
+        sop_effective_from=generation_sop.get("effective_from"),
+        sop_effective_to=generation_sop.get("effective_to"),
+    )
     if isinstance(route, list) and route:
         generation_sop = result.setdefault("sop_generation", {})
         if isinstance(generation_sop, dict):
