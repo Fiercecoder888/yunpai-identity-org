@@ -100,3 +100,13 @@ def test_http_module_selection_restores_local_handlers_for_unselected_modules(mo
     assert registry.handlers["run_bom_sop_workflow"].__module__.endswith("workers")
     assert registry.handlers["run_m3_procurement_requirements"].__module__.endswith("workers")
     assert registry.handlers["import_m4_purchase_suggestions_json"].__module__.endswith("registry")
+
+
+def test_http_runtime_can_keep_m4_business_tools_local(monkeypatch):
+    monkeypatch.setenv("YUNPAI_TOOL_TRANSPORT", "http")
+    monkeypatch.setenv("YUNPAI_HTTP_MODULES", "m0,m1,m2,m3,m4,m5")
+    monkeypatch.setenv("YUNPAI_LOCAL_M4", "true")
+    registry = build_runtime_registry()
+    handler = registry.handlers["import_m4_purchase_suggestions_json"]
+    assert handler.__module__.endswith("workers")
+    assert registry.environment["local_modules"] == ["m4"]

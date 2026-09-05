@@ -7,6 +7,10 @@ export PYTHONPATH="$ROOT/src"
 export YUNPAI_RUN_DB="${YUNPAI_RUN_DB:-$ROOT/runtime/yunpai-runs.sqlite}"
 export YUNPAI_M5_DB="${YUNPAI_M5_DB:-$ROOT/runtime/yunpai-m5.sqlite}"
 export YUNPAI_TOOL_TRANSPORT="${YUNPAI_TOOL_TRANSPORT:-http}"
+# M4 procurement logic is owned by the 39092 ToolRegistry.  Keep the
+# transport HTTP for the other modules, but do not bind M4 to a foreign
+# container/service that requires an unrelated token.
+export YUNPAI_LOCAL_M4="${YUNPAI_LOCAL_M4:-true}"
 export QWEN_ROUTER_ENABLED="${QWEN_ROUTER_ENABLED:-true}"
 GB10_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m0,m1,m2,m3,m4,m5}"
 # M2 is a required engineering capability for the 39092 order path. Preserve
