@@ -9,6 +9,12 @@ export YUNPAI_M5_DB="${YUNPAI_M5_DB:-$ROOT/runtime/yunpai-m5.sqlite}"
 export YUNPAI_TOOL_TRANSPORT="${YUNPAI_TOOL_TRANSPORT:-http}"
 export QWEN_ROUTER_ENABLED="${QWEN_ROUTER_ENABLED:-true}"
 GB10_HTTP_MODULES="${YUNPAI_HTTP_MODULES:-m0,m1,m2,m3,m4,m5}"
+# M2 is a required engineering capability for the 39092 order path. Preserve
+# every caller-selected module and endpoint; only add M2 when it was omitted.
+case ",${GB10_HTTP_MODULES}," in
+  *,m2,*) ;;
+  *) GB10_HTTP_MODULES="${GB10_HTTP_MODULES},m2" ;;
+esac
 GB10_M0_URL="${M0_URL:-http://127.0.0.1:49503}"
 GB10_M1_URL="${M1_URL:-http://127.0.0.1:50180}"
 GB10_M2_URL="${M2_URL:-http://127.0.0.1:8765}"
