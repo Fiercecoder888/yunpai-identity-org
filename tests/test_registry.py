@@ -54,6 +54,13 @@ def test_duplicate_tool_fails_fast():
         registry.register(spec)
 
 
+def test_invalid_output_schema_fails_fast():
+    registry = ToolRegistry()
+    spec = ToolSpec("x", "m0", "x", {"type": "object"}, {"type": "not-a-json-schema-type"})
+    with pytest.raises(ValueError):
+        registry.register(spec)
+
+
 def test_manifest_contract_has_complete_http_metadata():
     registry = ToolRegistry()
     registry.load_manifests("registry/tool-manifests")

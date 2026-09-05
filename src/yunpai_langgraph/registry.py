@@ -58,7 +58,14 @@ class ToolRegistry:
     def register(self, spec: ToolSpec, handler: ToolHandler | None = None) -> None:
         if spec.name in self.specs:
             raise ValueError(f"duplicate tool: {spec.name}")
-        Draft202012Validator.check_schema(spec.input_schema)
+        try:
+            Draft202012Validator.check_schema(spec.input_schema)
+        except Exception as exc:
+            raise ValueError(f"invalid input schema for {spec.name}: {exc}") from exc
+        try:
+            Draft202012Validator.check_schema(spec.output_schema)
+        except Exception as exc:
+            raise ValueError(f"invalid output schema for {spec.name}: {exc}") from exc
         self.specs[spec.name] = spec
         if handler:
             self.handlers[spec.name] = handler
