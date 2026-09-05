@@ -9,10 +9,10 @@
 | P-001 | 已完成 | zhb / 集成负责人 | 协作规则落地、实时 session 报告模板、校验通过并推送 dev | E-SESSION-001 | 2026-09-03 |
 | P-002 | 已完成 | zhb / 集成负责人 | 前后端已验收提交集成，关键视口/点击/滚动验收有证据并推送 dev | E-INTEGRATION-003 | 2026-09-03 |
 | P-003 | 已完成 | zhb / 集成负责人 | 微信及企业微信下载目录、`~/Downloads`、导出目录和业务压缩包完成只读全量核验，结果写入审计文档和 0903 数据需求修订 | E-0904-WECHAT-AUDIT-001 | 2026-09-04 |
-| P-004 | 部分完成，canonical 发布仍阻塞 | zhb / 集成负责人 | 逐类核对 M0 -> GB10 39092 的来源 SHA、候选审核、canonical 表和写入回读；具备 M0 受控写入条件后补传并逐笔复核 | E-GB10-39092-ORDER-20260905-002 | 2026-09-05 |
+| P-004 | 部分完成，W-H909 产品/订单/BOM/物料已回读，legacy 映射仍阻塞 | zhb / 集成负责人 | 逐类核对 M0 -> GB10 39092 的来源 SHA、候选审核、canonical 表和写入回读；补齐 SOP 等实体并修正 legacy import 映射 | E-GB10-WH909-ORDER-20260905-005 | 2026-09-05 |
 | P-005 | 已规划 | zhb / DeepSeek Harness | 按任务书完成上传识别、M0 canonical、下游 M1-M5/PMC 实施；从最新 main 同步 dev，在 GB10 测试，通过后推送并发起合并 | E-PLAN-DEEPSEEK-HARNESS-001 | 2026-09-04 |
 | P-006 | 已完成 | Codex / M1 接包开发者 | 独立 M1 Tool/Skill 任务包包含基线、17 个工具/Skill 差距、逐项源码映射、净化源码、实施合同及分层验收要求；包完整性和项目回归通过 | E-HANDOFF-M1-001 | 2026-09-04 |
-| P-007 | 代码集成完成，GB10 真实联调部分通过 | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate；39092 已验证 M1/M0 HTTP 可达，新订单入口走桥接 workflow，真实订单仍在 M1/M2 数据 Gate 阻塞 | E-GB10-39092-ORDER-20260905-002 | 2026-09-05 |
+| P-007 | 代码集成完成，GB10 真实联调已到 M2 工程 Gate | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate；39092 已验证 M1/M0 HTTP、M0 canonical BOM 回读和 M2 BOM 匹配，真实订单仍在 SOP/工艺 Gate 阻塞 | E-GB10-WH909-ORDER-20260905-005 | 2026-09-05 |
 | P-008 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过（从 origin/main 并入 dev 时登记，原并行分支编号 P-006 与 M1 handoff 撞号） | E-M3M4-TOOLS-001 | 2026-09-04 |
 | P-009 | 已完成（代码验收） | DeepSeek Harness / s-m1-tools-20260904 | M1 17 个 Tool 全部绑定（专用 HTTP Adapter）与 Skill 全操作映射落地，117 项测试通过（从 M1 分支并入 dev 时登记，原并行分支编号 P-007 与 orchestration 规划撞号） | E-M1-TOOLS-001 | 2026-09-04 |
 
@@ -26,6 +26,7 @@
 | GB10 审批身份/角色与真实订单样本未人工指定 | 已实现受信 principal/角色 Gate 与真实 M5 release 落库代码，但不能用 fake principal 或未知订单冒充生产验收 | 人工确认：M0 candidate/M1 review/engineering/procurement/M5 apply 审批人角色与脱敏真实订单；配置 X-Yunpai-Principal 注入 | 新增，未解除 |
 | GB10 M1 产品编码/交期缺失 | M1 已解析出真实订单号和两行数量，但产品编码为“无”、交期为空，进入 review Gate；不能安全生成 M0 order 或 MRP | 由数据责任人确认 `FC-15`/`FC-20` 映射及交期，并以人工复核补充后重试 | 新增，未解除 |
 | GB10 M2 SOP 与订单不匹配 | 随附 SOP 是 `DEMO-USBC-001` USB-C 包装示例，与 HDMI 订单不属于同一产品；不能拿它生成 HDMI 工序 PMC | 提供 HDMI 产品对应的已审核 SOP/工艺路线、工位/设备和标准工时 | 新增，未解除 |
+| M0 legacy import 映射错误 | `data_import_commit` 的 `master_counts` 仍把订单/BOM 行归为旧采购分类，不能作为 canonical 发布证明 | 将订单/基础资料工作流切换到 typed catalog ingest/publish，并以 overview 回读校验产品、订单、BOM、物料和 SOP | 新增，部分绕过（catalog API 已验证） |
 
 ## 下一步
 

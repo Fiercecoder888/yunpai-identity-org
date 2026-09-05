@@ -2,7 +2,17 @@
 
 ## 结论
 
-代码已合并并推送到 `main`/`dev`，GB10 `39092` 已部署并可用。旧的真实前端订单运行已验证到 M2；新入口复跑确认订单附件走治理后的 M1→M0→M2→M3→M4→M5 桥接计划，并在 M1 缺字段 Gate 正确暂停。由于缺少可确认的产品主数据、BOM 权威版本和 SOP 工艺约束，当前不能宣称“订单匹配 BOM/物料/SOP 并生成 PMC”已完成。
+代码已合并并推送到 `main`/`dev`，GB10 `39092` 已部署并可用。最新真实 W-H909 复验已通过 M1 review、M0 candidate/commit，并由订单工作流从 M0 canonical 回读并匹配 7 条审核 BOM；前端在 `?tenant_id=w909-acceptance` 显示工程 Gate。SOP/工艺约束、库存/供应/资源事实和 M5 发布仍未完成，因此当前不能宣称“订单匹配 BOM/物料/SOP 并生成 PMC”已完成。
+
+## 最新复验（2026-09-05 08:02）
+
+- 代码：`origin/main` = `origin/dev` = `210c30d`；关键提交为 `edeae4a`（M0 canonical BOM 回读）、`1708e59`（GB10 端点不被 deploy.env 覆盖）、`84adae3`（M2 保留 canonical BOM 匹配结果）、`210c30d`（前端租户查询参数）。
+- GB10：当前 `/home/wjc/yunpai-langgraph/current -> releases/20260905080200`；`/api/health` 为 `tools=114`、`bound_tools=112`、M0/M1/M2/M3/M4/M5 HTTP 已绑定，`local_fixture=false`。
+- 真实文件：`桐曦PO-20260812-00008-HD备货订单-0831验收通过.xlsx`，SHA-256 `4abf98e6221064198ebfc8596858650a466e37c32750ed2f2e4fb4a7f090066c`。
+- 运行：`run-1f2546309cf9438f8daf4e0427e80e2b`，任务 `task-e0e883cc95914587a15b21e9fbc3f01c`。浏览器页面 `http://100.121.179.111:39092/?tenant_id=w909-acceptance` 已捕获任务列表和最终 M2 Gate 页面状态。
+- M1：识别 `PO-20260812-001`、W-H909、`1M`、`4000 PCS`；外部顶层产品编码为空时由 `semantic_supplement` 提供候选并保留人工审核。
+- M0：批次 `c46a67bda2d7` 的 legacy `master_counts` 仍将订单/BOM 映射为旧采购分类；同时通过 M0 catalog canonical 回读匹配到产品 W-H909、订单和 7 条审核 BOM/物料记录。该差异说明 legacy `data_import_commit` 映射仍需治理，不能把 legacy counts 当作 canonical 发布证据。
+- M2：结果含 `canonical_bom_match.status=matched`、`product_code=W-H909`、`line_count=7`、`review_status=approved`；前端 Gate 文案为“`M0 已匹配并审核 7 条 BOM；SOP/工艺约束仍需工程确认`”。
 
 ## 版本与部署
 

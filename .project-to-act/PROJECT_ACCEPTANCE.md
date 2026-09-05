@@ -5,10 +5,10 @@
 
 ## 当前验收结论
 
-- 结论：代码与本地回归通过；GB10 `39092` 已切换到 `20260905071500`，W-H909 真实订单入口已验证走 `m1_m5_document_to_plan`，M1/M0 可通过人工 Gate，M2 因 M1 顶层 `header.product_code` 缺失而 fail-closed，M0 canonical 回读仍为 0，M5 发布回读未通过
+- 结论：代码与本地回归通过；GB10 `39092` 已切换到 `20260905080200`，W-H909 真实订单入口已验证走 `m1_m5_document_to_plan`，M1/M0 可通过人工 Gate，M0 canonical 回读已匹配产品/订单/7 条 BOM，M2 已保留 BOM 匹配并进入工程 Gate；SOP/库存/供应/资源事实和 M5 发布回读仍未通过
 - 验收范围：`origin/main`/`origin/dev` `4192438`、39092 health/tools、Qwen、W-H909 基础资料与订单上传、浏览器 Gate 操作/截图、M1/M0/M2 回读和剩余阻塞
-- 最后检查：2026-09-05 06:00 +08:00
-- 遗留问题：M0 canonical 主数据仍为 0；订单随附 SOP 为 USB-C demo，与 HDMI 订单不匹配；产品编码、库存/供应/资源事实和 M5 发布回读仍缺失
+- 最后检查：2026-09-05 08:02 +08:00
+- 遗留问题：legacy `data_import_commit` 计数仍错误归类为采购；W-H909 的审核 SOP/工位/设备/标准工时、库存/供应/资源事实和 M5 发布回读仍缺失
 
 ## 验收标准
 
@@ -21,10 +21,10 @@
 | A-005 | 多 session 有唯一分支/worktree、路径认领和发布锁规则 | 通过 | 检查 `docs/SESSION_COLLABORATION_RULES.md`、claims 模板并运行 `--validate` | E-SESSION-001 |
 | A-006 | 每个 session 持续维护独立实时修改报告 | 通过 | 检查实时报告规则和 `reports/sessions/README.md` 模板 | E-SESSION-001 |
 | A-007 | 微信下载目录全量复核结论可追溯，且不把原始资料误报为不存在 | 通过 | 只读扫描个人/企业微信目录、`~/Downloads` 和导出目录；归档清单、表头核验；账本校验；后端/前端回归与构建 | E-0904-WECHAT-AUDIT-001 |
-| A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 未通过（主数据未发布） | 39092 health、M0 批次回读、source SHA/候选状态和 canonical counts | E-GB10-39092-ORDER-20260905-002 |
+| A-008 | M0 -> GB10 39092 各类资料已正确落入 canonical 数据库 | 部分通过（产品/订单/BOM/物料已回读，SOP 未发布；legacy import 映射待修） | 39092 health、M0 catalog overview、source SHA/审核状态和运行回读 | E-GB10-WH909-ORDER-20260905-005 |
 | A-009 | M3/M4 Tool 与 Skill 完整绑定并保持副作用 Gate | 通过（代码与本地运行态） | 完整 pytest、compileall、diff check、账本校验、9001 health/tools、HTTP mock 集成 | E-M3M4-TOOLS-001 |
 | A-010 | M1 Tool 与 Skill 完整绑定：17 个 M1 Tool 经专用 HTTP Adapter 可执行（租户头/202 轮询/权限/错误映射），Skill 声明 17 Tool 且查询 op 不打开写入 Gate，本地 fixture 不冒充完整 M1 解析 | 通过（代码与本地运行态） | 完整 pytest、M1 定向测试、compileall、git diff --check、Registry 绑定统计、HTTP mock 集成 | E-M1-TOOLS-001 |
-| A-011 | GB10 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（39092 M1/M0 接通，M2 阻塞） | 39092 health 114/112、真实 XLSX 上传、M1 review、M0 批次回读、M2 Gate 和浏览器截图 | E-GB10-39092-ORDER-20260905-002 |
+| A-011 | GB10 release 可通过真实订单进入 M1/M0，并在缺权威输入时 fail-closed | 部分通过（M1/M0 接通，M2 已匹配 BOM 后在 SOP 工程 Gate 停止） | 39092 health 114/112、真实 XLSX 上传、M1/M0 Gate、M0 overview、M2 canonical match 和浏览器截图 | E-GB10-WH909-ORDER-20260905-005 |
 
 ## 证据索引
 
@@ -48,6 +48,7 @@
 | E-GIT-MERGE-AUDIT-20260905 | 2026-09-05 | `git merge-base --is-ancestor`、`git cherry -v`、分支/worktree 和远端 refs 核对；对 DeepSeek M1/M2、PMC、M1 Skill 及本地未提交源码逐项审查 | `origin/dev`=`origin/main`=`4192438`；DeepSeek M1/M2 提交 `6045624` 及 M1 Skill/PMC 功能等价补丁均已在主线；未合入项仅为重复补丁或文档 | 当前主线无待合入的订单运行时代码；共享 `pmctooldev` 的 `agentApi.ts` `limit=100` 已存在于主线 | `/private/tmp/yunpai-order-report-20260905` 审计命令输出、Git refs | 2026-09-12 |
 | E-GB10-WH909-ORDER-20260905-003 | 2026-09-05 06:24-06:36 +08:00 | 39092 前端上传 W-H909 基础资料并点击候选接收；再上传真实 `PO-20260812-001 / W-H909` 订单，浏览器依次接收 M1 review、M0 candidate，并在 M2 Gate 补充来源 BOM 编码/物料行；保存运行 API 与浏览器截图状态 | M1 识别订单号/型号/规格/数量成功；M0 commit `success=true` 但 canonical 回读 `approved_candidates=0`、订单/BOM/物料/文档 counts 为 0；M2 仍 `BLOCKED_INPUT` 缺少 `m1 订单 header.product_code` | 39092 `/health` `114/112`；基础资料 run `run-c37163744b2a421bac6814ac545d9235`/task `task-ed16ca6a9e49454f8d6280d58e4b98e5`；订单 run `run-f32f83fda5174d4d8b0a144cf706900a`/task `task-d8becc2c9a2f43929b61314ca05082ca`；订单 SHA `4abf98e6221064198ebfc8596858650a466e37c32750ed2f2e4fb4a7f090066c`；M0 batch `314d50d37da7` | `/private/tmp/w909-base-upload.json`、`/tmp/w909-order-run-after-supp.json`、`docs/GB10_39092_ORDER_ACCEPTANCE_20260905.md`、39092 浏览器截图 | 2026-09-12 |
 | E-GB10-WH909-ORDER-20260905-004 | 2026-09-05 06:55-07:05 +08:00 | 发布 `c89df91` 到 GB10 `39092` release `20260905114500`；前端真实订单重放，依次捕获 M1 review、M0 candidate、M0 commit data Gate 截图 | M1 返回 8 行及 `PO-20260812-001`，外部顶层产品编码为空时由 `semantic_supplement` 回填 `W-H909` 并保留人工 Gate；M0 batch `batch-c48baa942195` 为 sandbox 候选，因 1 条候选未裁决而 `BLOCKED_INPUT/PENDING_REVIEW`，未发布 canonical；M2-M5 未启动 | `/health` `114/87`、M1 `17/17`、M2 `7/7`；run `run-e61cceeddb88498283ff2be8ffb25d31`/task `task-8c3c4183968b4c9f9189c48baa942195`；订单 SHA `4abf98e6221064198ebfc8596858650a466e37c32750ed2f2e4fb4a7f090066c` | `/tmp/w909-order-run-c89.json`、`docs/GB10_39092_ORDER_ACCEPTANCE_20260905.md`、39092 浏览器截图 | 2026-09-12 |
+| E-GB10-WH909-ORDER-20260905-005 | 2026-09-05 07:34-08:02 +08:00 | `origin/main`/`origin/dev` 推送 `210c30d`；GB10 切换 release `20260905080200`；health、真实 XLSX 上传、M1/M0 Gate、M0 catalog overview、M2 回读和前端 `?tenant_id=w909-acceptance` 任务列表/Gate | 后端 `332 passed, 2 skipped`；前端 `6 passed`、build 通过；health `114/112`、`local_fixture=false`；run `run-1f2546309cf9438f8daf4e0427e80e2b` / task `task-e0e883cc95914587a15b21e9fbc3f01c`；M0 canonical 匹配 W-H909、订单、7 条审核 BOM/物料；M2 `canonical_bom_match=matched`，前端 Gate 明确 SOP/工艺约束仍待工程确认 | `/tmp/w909-final2-m2.json`、`docs/GB10_39092_ORDER_ACCEPTANCE_20260905.md`、39092 浏览器 CUA 页面快照/截图状态 | 2026-09-12 |
 | E-REGRESSION-002 | 2026-09-03 18:09 | `npm run typecheck`; `npm run build`; `npm test -- --run --maxWorkers=1 --no-file-parallelism`; root `pytest -q` | 前三项 0；root pytest 1（47 passed, 1 EOL hash mismatch） | `dev` / `24da1d70`；Git blob manifest hash 与 provenance 一致 | 前端回归通过；根测试唯一失败为 Windows `core.autocrlf` 工作树换行误报，非代码/运行时错误 | `reports/sessions/s-integration-final-20260903.md`、`reports/s-progress-restore-20260903/REPORT.md` | 2026-12-31 |
 | E-INTEGRATION-002 | 2026-09-03 18:10 | Git merge/cherry-pick；线上浏览器控制 API 点击、布局、独立滚动；`/api/health`；静态资源请求 | Git/浏览器/HTTP 均成功；控制台 error/warning 0 | `dev` / `24da1d70`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c`；release `20260903173855` | 后端与右栏提交完整集成；上传菜单、右栏满高/滚动、移动抽屉和问答关键路径符合预期 | `reports/s-progress-restore-20260903/REPORT.md`、`browser-evidence.json`、七张截图、线上 URL | 2026-12-31 |
 | E-INTEGRATION-003 | 2026-09-03 18:20 | 两次 `git push neworigin dev`；`git ls-remote --heads neworigin dev`；项目管理 `--validate`；最终线上状态复核 | 全部退出 0；远端 `dev=ee8541cc`；账本 `valid=true` | `dev` / `ee8541cc`（交付基线 `d48ce911`）；release `20260903173855`；CSS `f22e390038ea87ff4710bb3235db106d0f9d8e3513bfcf3a4782ffd2a3a18a8c` | 集成提交和独立 session 报告已推送；旧 claim/DEPLOY_LOCK 已释放；线上关键路径保持通过 | `reports/sessions/s-integration-final-20260903.md`、`.project-to-act/`、`reports/s-progress-restore-20260903/`、远端分支 | 2026-12-31 |
@@ -69,6 +70,8 @@
 ## 验收记录
 
 按时间倒序追加：日期、检查范围、证据 ID、结果、遗留问题和结论。失败、跳过与过期证据也必须如实记录。
+
+- 2026-09-05 07:34-08:02：将 `210c30d` 部署到 GB10 `39092` release `20260905080200`，通过真实前端租户 URL `?tenant_id=w909-acceptance` 复核 W-H909 订单；M1 review 与 M0 candidate/commit Gate 通过，M0 catalog overview 回读产品/订单/7 条审核 BOM/物料，M2 进入“已匹配并审核 7 条 BOM；SOP/工艺约束仍需工程确认”工程 Gate；证据 `E-GB10-WH909-ORDER-20260905-005`；结论：BOM 匹配已可证明，SOP、库存/供应/资源与 M5 PMC 发布仍阻塞；确认来源：本次 GB10/API/浏览器实测。
 
 - 2026-09-05 05:47-06:00：将 `origin/main`/`origin/dev` `a09a299`（运行功能提交 `a9a85eb`）部署到 GB10 `39092` release `20260905071500`，上传真实 `order.xlsx` 并从浏览器任务列表打开运行；证据 `E-GB10-39092-ORDER-20260905-002`；结论：订单入口已按新前端路由选择 `m1_m5_document_to_plan`，M1 在缺产品编码/交期时进入人工 Gate；BOM 候选存在 `FC-15`/`FC-20`，但随附 SOP 为 USB-C demo，不能作为 HDMI 工艺路线，M0 canonical 与 PMC 仍未验收。
 - 2026-09-05：修复公开运行状态递归文件正文脱敏并完成全量后端/前端回归；证据 `E-GB10-PUBLIC-REDACTION-20260905`；结论：`content_b64` 不再通过嵌套输出泄露，39092 历史任务列表可加载；不改变 canonical/PMC 数据阻塞。
