@@ -41,6 +41,13 @@
 - 前端 `documents` 附件数组每项必须带 `kind: "order"`（后端 `bridge_payload` 按 `item.kind=="order"` 取订单附件）；其余字段为 `filename/content_type/content_b64`。
 - 前端包缺 `dev/chatHistoryMiddleware`（仅 MSW demo 模式调用，real 模式不调用）；本地构建用 no-op 桩占位，勿视为前端团队源码的一部分。
 
+### 订单主链 Gate/补充契约（已实测验证）
+
+- 各 Gate 的 resume 决策：`review/candidate/engineering/apply` 用 **`approve`**；`data` 用 **`retry` + supplement**；`procurement` 用 **`retry` + `supplier_by_material`**。把 `engineering` 误当 `retry` 会导致 M2 步骤反复 supersede、卡死在 engineering gate。
+- **M2 `run_bom_sop_workflow` 分两段 gate**：先 `data`（缺 `m1 订单 header.product_code`，需 retry 补 `product_code + bom_lines + routing_steps`），匹配到 BOM/SOP 后再开 `engineering`（"已匹配 N 条 BOM / 已识别 M 道 SOP，请工程确认路线与资源"，approve 即可）。
+- **M3 `run_m3_procurement_requirements` 要求 `inventory[*].received_at` 必填**；缺该字段 M3 服务返回 `REQUEST_VALIDATION_ERROR`。补充 inventory 时必须带 `material_code/warehouse/lot_no/available_qty/locked_qty/qc_status/received_at`。
+- 实测闭环：真实 CSV 订单 + `documents[{kind:"order"}]` + 补充 BOM/SOP/inventory/supplier 后，M1→M0→M2→M3→M4→M5 端到端 `released + feasible`（34 工序）。
+
 ## 协作与项目账本
 
 - `.project-to-act/` 是项目唯一事实源；涉及范围、进度、版本、测试或验收状态的变化，按其中规则同步。
