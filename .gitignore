@@ -14,6 +14,15 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/tsconfig.tsbuildinfo
 
+# yunpaizhisuan-FE integration package (frontend source developed separately)
+frontend-yunpaizhisuan/node_modules/
+frontend-yunpaizhisuan/playwright-report/
+frontend-yunpaizhisuan/test-results/
+frontend-yunpaizhisuan/tsconfig.tsbuildinfo
+
+# local backend runtime (never commit local DBs)
+runtime-local/
+
 # Python and editor caches
 **/__pycache__/
 *.py[cod]

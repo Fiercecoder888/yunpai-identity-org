@@ -33,6 +33,14 @@
 - Agent/Graph、Gate、持久化和 API 变更：运行完整后端测试，核对 `RunState`、`task_id`、`pending_gate`、审批和 trace。
 - 依赖外部 M0-M5 服务的功能：不得把本地 fixture 或未绑定工具的失败结果描述为生产已验收；需明确记录 HTTP 联调状态。
 
+## 前端对接契约（yunpaizhisuan-FE）
+
+- 企业版前端 `yunpaizhisuan-FE`（React19+Vite+antd，本地解压在 `frontend-yunpaizhisuan/`）与仓库内旧 `frontend/`（`yunpai-agent-workspace`）是**两套**，勿混淆。前端由他人单独开发，本仓库只做对接。
+- **原始文件上传必须发 `workflow: "m1_m5_document_to_plan"`，不是 `"m0_m5"`**。`m0_m5`（order_to_schedule）是"订单已入库后直接排程"，其 M1 步骤读 `request.document`（单数）且跑在 M0 之后；`m1_m5_document_to_plan` 才是"原始文件→M1 解析→复核→M0→M5"入口。前端写错 workflow 会导致 M1 `ingest_document` 415。
+- 前端 local 模式（`VITE_LOCAL_LANGGRAPH=true`）走 `POST /runs/stream` 与 `POST /runs/{id}/resume/stream`，事件协议为 NDJSON（`run_start/assistant_delta/step_start/step_result/gate_opened/run_error/run_done`），与后端 `graph.stream` 一一对应。
+- 前端 `documents` 附件数组每项必须带 `kind: "order"`（后端 `bridge_payload` 按 `item.kind=="order"` 取订单附件）；其余字段为 `filename/content_type/content_b64`。
+- 前端包缺 `dev/chatHistoryMiddleware`（仅 MSW demo 模式调用，real 模式不调用）；本地构建用 no-op 桩占位，勿视为前端团队源码的一部分。
+
 ## 协作与项目账本
 
 - `.project-to-act/` 是项目唯一事实源；涉及范围、进度、版本、测试或验收状态的变化，按其中规则同步。
