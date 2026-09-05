@@ -132,3 +132,22 @@ def test_field_evidence_carries_sheet_row_column_and_parser_version():
     document = parse_order_sheets("order.xlsx", _save(workbook))
     evidence = document["field_evidence"]
     assert any(item["semantic_type"] == "quantity" and item["sheet"] == "Sheet" and item["row"] == 2 and item["parser_version"] == "order.parser.v2" for item in evidence)
+
+
+def test_pack_quantity_and_carton_count_must_reconcile():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["型号", "数量", "每箱数量", "箱数"])
+    sheet.append(["W-H909", 4000, 500, 8])
+    document = parse_order_sheets("order.xlsx", _save(workbook))
+    assert document["lines"][0]["carton_count"] == 8.0
+    assert not any(issue["code"] == "PACK_CARTON_MISMATCH" for issue in document["validation_issues"])
+
+
+def test_pack_quantity_mismatch_is_a_reviewable_issue():
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["型号", "数量", "每箱数量"])
+    sheet.append(["W-H909", 4001, 500])
+    document = parse_order_sheets("order.xlsx", _save(workbook))
+    assert any(issue["code"] == "PACK_QUANTITY_MISMATCH" for issue in document["validation_issues"])

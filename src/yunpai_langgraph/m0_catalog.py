@@ -60,6 +60,28 @@ def publish_records(
                 result = parsed.get("data") if isinstance(parsed.get("data"), dict) else parsed
             if endpoint.endswith("/validate") and isinstance(result, dict) and result.get("publishable") is False:
                 return {"status": "rejected", "published": 0, "validation": result}
-        return {"status": "published", "published": len(records), "result": result}
+        # A successful HTTP response is not proof that canonical facts were
+        # persisted.  The dedicated 39092 backend returns these counters from
+        # its transaction/readback boundary; reject ambiguous responses so a
+        # candidate Gate cannot be marked complete while PostgreSQL is empty.
+        required_counts = ("approved_candidates", "ledger_count", "outbox_count")
+        if not isinstance(result, dict) or any(key not in result for key in required_counts):
+            return {
+                "status": "failed",
+                "published": 0,
+                "error": "canonical_readback_unverified",
+                "result": result,
+            }
+        counts = {key: int(result.get(key) or 0) for key in required_counts}
+        if counts["approved_candidates"] < len(records) or counts["ledger_count"] < len(records) or counts["outbox_count"] < len(records):
+            return {
+                "status": "failed",
+                "published": 0,
+                "error": "canonical_readback_incomplete",
+                "expected": len(records),
+                "counts": counts,
+                "result": result,
+            }
+        return {"status": "published", "published": len(records), "counts": counts, "result": result}
     except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
         return {"status": "failed", "published": 0, "error": str(exc), "record_count": len(records)}

@@ -40,6 +40,7 @@ FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "unit_price": ("单价", "销售价", "售价", "含税单价", "不含税单价", "price", "unit price"),
     "amount": ("金额", "总金额", "含税金额", "总价", "amount", "total", "合计金额"),
     "pack_quantity": ("装箱数量", "每箱数量", "箱装数量", "包装数量"),
+    "carton_count": ("箱数", "装箱数", "纸箱数", "carton count", "carton_count"),
     "packaging": ("包装", "包装要求", "包装方式", "彩盒", "packing"),
     "remark": ("备注", "说明", "备注说明", "remark", "remark_note", "note", "备注栏"),
 }
@@ -317,6 +318,7 @@ def parse_order_sheets(filename: str, raw: bytes, *, max_sheets: int = 16) -> di
                 unit_price = normalize_number(raw_cells.get("unit_price"), issues=validation_issues, field="unit_price", sheet=sheet.title, row=row, col=mapping.get("unit_price", 0))
                 amount = normalize_number(raw_cells.get("amount"), issues=validation_issues, field="amount", sheet=sheet.title, row=row, col=mapping.get("amount", 0))
                 pack_quantity = normalize_number(raw_cells.get("pack_quantity"), issues=validation_issues, field="pack_quantity", sheet=sheet.title, row=row, col=mapping.get("pack_quantity", 0))
+                carton_count = normalize_number(raw_cells.get("carton_count"), issues=validation_issues, field="carton_count", sheet=sheet.title, row=row, col=mapping.get("carton_count", 0))
                 has_identity = bool(raw_code or raw_name or raw_spec)
                 # 只把有真实身份和/或数量金额证据的行当成明细：纯文本/备注/说明行
                 # （含合并单元格的长文本）不得变成 0 数量订单行。
@@ -338,6 +340,30 @@ def parse_order_sheets(filename: str, raw: bytes, *, max_sheets: int = 16) -> di
                 line["unit_price"] = unit_price
                 line["amount"] = amount
                 line["pack_quantity"] = pack_quantity
+                line["carton_count"] = carton_count
+                if quantity is not None and pack_quantity is not None:
+                    if pack_quantity <= 0:
+                        validation_issues.append({
+                            "code": "INVALID_PACK_QUANTITY", "field": "pack_quantity",
+                            "sheet": sheet.title, "row": row, "column": mapping.get("pack_quantity", 0),
+                            "raw_value": raw_cells.get("pack_quantity"),
+                            "message": "每箱数量必须大于 0",
+                        })
+                    elif carton_count is not None:
+                        if carton_count <= 0 or quantity != pack_quantity * carton_count:
+                            validation_issues.append({
+                                "code": "PACK_CARTON_MISMATCH", "field": "pack_quantity/carton_count",
+                                "sheet": sheet.title, "row": row, "column": mapping.get("pack_quantity", 0),
+                                "raw_value": {"quantity": quantity, "pack_quantity": pack_quantity, "carton_count": carton_count},
+                                "message": "订单数量必须等于每箱数量 × 箱数",
+                            })
+                    elif quantity % pack_quantity != 0:
+                        validation_issues.append({
+                            "code": "PACK_QUANTITY_MISMATCH", "field": "quantity/pack_quantity",
+                            "sheet": sheet.title, "row": row, "column": mapping.get("pack_quantity", 0),
+                            "raw_value": {"quantity": quantity, "pack_quantity": pack_quantity},
+                            "message": "订单数量不能被每箱数量整除，需人工确认装箱规则",
+                        })
                 if line.get("product_code") is None and raw_name is not None and raw_spec is None:
                     # 无编码时用真实名称兜底身份展示（仍标记 product_code 缺失）。
                     line["product_code_display"] = raw_name
