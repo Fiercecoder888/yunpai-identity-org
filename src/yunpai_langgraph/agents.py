@@ -65,6 +65,21 @@ class PlannerAgent:
         """Ask Qwen for an intent/route proposal, then validate it against local contracts."""
         fallback = self._deterministic_plan(request, registry, self.skills)
         model_result = await self.router.classify(request, registry)
+        explicit_workflow = str(request.get("workflow") or "").strip()
+        # An explicit workflow selection is authoritative. Attachments with
+        # kind=master_data must not divert an end-to-end run to the business
+        # data identification Skill.
+        if explicit_workflow in KNOWN_WORKFLOWS:
+            return {
+                **fallback,
+                "intent": {"name": "workflow", "confidence": 1.0, "source": "explicit"},
+                "route_decision": {
+                    "source": "explicit",
+                    "model_status": model_result.get("status"),
+                    "model_error": model_result.get("error"),
+                },
+                "model": model_result.get("model", {}),
+            }
         if self._business_skill_requested(request):
             decision = model_result.get("decision") if model_result.get("ok") else None
             return {
@@ -148,13 +163,6 @@ class PlannerAgent:
 
     def _deterministic_plan(self, request: dict[str, Any], registry: ToolRegistry, skills: SkillRegistry | None = None) -> dict[str, Any]:
         text = str(request.get("message") or request.get("task") or "").lower()
-        if self._business_skill_requested(request) and skills and BUSINESS_DATA_SKILL in skills.specs:
-            return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": BUSINESS_DATA_SKILL, "kind": "skill", "mode": "free"}], "reason": "识别为业务资料识别与候选入库请求"}
-        requested_skill = request.get("skill")
-        if requested_skill:
-            if not skills or requested_skill not in skills.specs:
-                raise ValueError(f"未注册 Skill: {requested_skill}")
-            return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": str(requested_skill), "kind": "skill", "mode": "free"}], "reason": f"显式选择已注册 Skill: {requested_skill}"}
         # 显式受控 workflow 优先于文本语义猜测（例如 "canonical" 文本
         # 不应被误路由到 m0 Skill），保证 m1_m5_document_to_plan /
         # canonical_to_m5 能被可靠选择。
@@ -163,6 +171,13 @@ class PlannerAgent:
             workflow = load_workflow(explicit_workflow)
             steps = [{**step, "mode": "workflow"} for step in workflow["steps"]]
             return {"route": "workflow", "steps": steps, "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": f"显式选择受控 workflow: {explicit_workflow}"}
+        if self._business_skill_requested(request) and skills and BUSINESS_DATA_SKILL in skills.specs:
+            return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": BUSINESS_DATA_SKILL, "kind": "skill", "mode": "free"}], "reason": "识别为业务资料识别与候选入库请求"}
+        requested_skill = request.get("skill")
+        if requested_skill:
+            if not skills or requested_skill not in skills.specs:
+                raise ValueError(f"未注册 Skill: {requested_skill}")
+            return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": str(requested_skill), "kind": "skill", "mode": "free"}], "reason": f"显式选择已注册 Skill: {requested_skill}"}
         if skills:
             upload_mode = str(request.get("upload_mode") or request.get("business_data_mode") or "")
             if upload_mode in {"master_data", "directory"} and BUSINESS_DATA_SKILL in skills.specs:

@@ -64,6 +64,26 @@ async def test_planner_selects_explicit_document_to_plan_workflow():
     ]
 
 
+def test_explicit_workflow_wins_over_master_data_attachment_skill():
+    registry = build_default_registry()
+    planner = PlannerAgent()
+    decision = planner.plan(
+        {
+            "workflow": "m1_m5_document_to_plan",
+            "message": "用订单、BOM、SOP资料跑完 M1 到 M5",
+            "attachments": [
+                {"kind": "order", "filename": "order.xlsx", "content_b64": "eA=="},
+                {"kind": "master_data", "filename": "bom.xlsx", "content_b64": "eA=="},
+                {"kind": "master_data", "filename": "sop.docx", "content_b64": "eA=="},
+            ],
+        },
+        registry,
+    )
+    assert decision["route"] == "workflow"
+    assert decision["workflow_id"] == "m1_m5_document_to_plan"
+    assert decision["steps"][0]["tool"] == "ingest_document"
+
+
 @pytest.mark.asyncio
 async def test_planner_selects_explicit_canonical_to_m5_workflow():
     registry = build_default_registry()
