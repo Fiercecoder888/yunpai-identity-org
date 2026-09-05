@@ -22,11 +22,24 @@ class ToolSpec:
     tool_type: str = "tool"
     agent_endpoints: dict[str, Any] = field(default_factory=dict)
     tags: tuple[str, ...] = field(default_factory=tuple)
+    capability: str = ""
+    side_effect: str = "none"
+    review_gate: str = ""
+    failure_codes: tuple[str, ...] = field(default_factory=tuple)
+    recovery_actions: tuple[str, ...] = field(default_factory=tuple)
+    downstream_fields: tuple[str, ...] = field(default_factory=tuple)
 
     def as_mcp_tool(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": f"[{self.module}] {self.description}",
             "inputSchema": self.input_schema,
-            "annotations": {"module": self.module, "execution": self.execution, "type": self.tool_type},
+            "annotations": {
+                "module": self.module, "execution": self.execution, "type": self.tool_type,
+                "capability": self.capability, "side_effect": self.side_effect,
+                "review_gate": self.review_gate,
+                "failure_codes": list(self.failure_codes),
+                "recovery_actions": list(self.recovery_actions),
+                "downstream_fields": list(self.downstream_fields),
+            },
         }

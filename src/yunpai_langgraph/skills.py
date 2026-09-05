@@ -195,6 +195,11 @@ async def identify_business_data(payload: dict[str, Any], context: dict[str, Any
         "product_code": product_code,
         "m0_candidate_records": canonical_records,
         "m0_candidate_record_count": len(canonical_records),
+        "available_next_actions": [
+            "review_candidates",
+            "publish_canonical",
+            "run_m1",
+        ],
         "evidence": [{"module": "orchestrator", "source_ref": batch_result["root_path"], "evidence_ref": f"business-catalog:{batch_result['batch_id']}", "detail": "文件哈希、分类和字段观察已写入候选库"}],
     }
 

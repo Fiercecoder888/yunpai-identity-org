@@ -98,8 +98,8 @@ def test_planner_rejects_unknown_workflow_id_via_explicit_field():
     registry = build_default_registry()
     planner = PlannerAgent(skills=None)
     decision = planner.plan({"message": "x", "workflow": "does-not-exist"}, registry)
-    # 未知 workflow 不触发受控链：落到 free/chat 而非伪造的 workflow。
-    assert decision["route"] in {"free", "chat"}
+    assert decision["route"] == "chat"
+    assert decision["error"]["code"] == "UNKNOWN_WORKFLOW"
 
 
 def test_workflow_capability_gap_lists_missing_module_tool():

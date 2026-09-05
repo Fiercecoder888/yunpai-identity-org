@@ -199,6 +199,22 @@ def test_m4_with_supplier_facts_builds_suggestions():
     assert payload["tracking_task_id"] == state["task_id"]
 
 
+def test_m4_no_shortage_is_valid_empty_handoff():
+    state = _approved_m2_state({"legacy_preview": False})
+    state["outputs"]["run_m3_procurement_requirements"] = {
+        "data": {
+            "shortage_lines": [],
+            "due_date": "2026-09-12",
+            "project_id": "P-1",
+            "order_id": "SO-4",
+            "procurement_plan_id": "plan-4",
+        },
+    }
+    payload = bridge_payload(state, "import_m4_purchase_suggestions_json")
+    assert payload["suggestions"] == []
+    assert payload["order_id"] == "SO-4"
+
+
 def test_snapshot_headers_and_checksum_are_deterministic():
     header = snapshot_header(kind="order_snapshots", snapshot_id="SNAP-ORD-1",
                              source_system="orchestrator", source_ref="m1:task",

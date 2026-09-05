@@ -145,6 +145,12 @@ class YunpaiGraph:
             state["intent"] = decision.get("intent", {})
             state["route_decision"] = decision.get("route_decision", {})
             state["model"] = decision.get("model", {})
+            if decision.get("error"):
+                state["status"] = "failed"
+                state["errors"] = [decision["error"]]
+                state["response"] = str(decision.get("response") or decision["error"].get("code"))
+                state["trace"].append({"event": "planner.rejected", "code": decision["error"].get("code"), "at": _now()})
+                return self._save(state)
             if state.get("route") == "chat":
                 state["response"] = str(decision.get("response") or "")
             state["trace"].append({"event": "react.thought", "agent": "planner", "reason": decision["reason"], "at": _now()})

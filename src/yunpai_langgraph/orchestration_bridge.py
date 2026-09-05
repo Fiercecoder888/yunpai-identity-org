@@ -556,10 +556,15 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         if not isinstance(shortage_lines, list):
             shortage_lines = []
         if not shortage_lines:
-            return blocked(state, source_module="m3", tool=tool,
-                           missing_fields=["run_m3_procurement_requirements.shortage_lines"],
-                           required_tool="run_m3_procurement_requirements",
-                           recovery="齐套无缺口则无需采购；若缺口存在请先完成 M3 计算")
+            # A no-shortage M3 result is a valid procurement handoff: M4 must
+            # persist an empty suggestion batch/supply snapshot so M5 can
+            # consume the explicit "ready" state.  Missing M3 output remains
+            # blocked below via the normal payload checks.
+            if not m3:
+                return blocked(state, source_module="m3", tool=tool,
+                               missing_fields=["run_m3_procurement_requirements"],
+                               required_tool="run_m3_procurement_requirements",
+                               recovery="请先完成 M3 齐套计算后再进入 M4")
         supplier_facts = read_supplier_facts(state)
         from .m3_m4_fact_validation import validate_supplier_facts
         supplier_validation = validate_supplier_facts(

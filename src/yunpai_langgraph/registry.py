@@ -87,6 +87,12 @@ class ToolRegistry:
                     timeout_s=float(http.get("timeout_s", 60)), tool_type=item.get("type", "tool"),
                     required_headers=tuple(http.get("required_headers", [])),
                     agent_endpoints=item.get("agent_endpoints", {}), tags=tuple(item.get("tags", [])),
+                    capability=str(item.get("capability") or ""),
+                    side_effect=str(item.get("side_effect") or "none"),
+                    review_gate=str(item.get("review_gate") or ""),
+                    failure_codes=tuple(str(code) for code in item.get("failure_codes", [])),
+                    recovery_actions=tuple(str(action) for action in item.get("recovery_actions", [])),
+                    downstream_fields=tuple(str(field) for field in item.get("downstream_fields", [])),
                 ))
 
     def tools_for(self, module: str) -> list[ToolSpec]:

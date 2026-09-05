@@ -80,14 +80,6 @@ class PlannerAgent:
                 },
                 "model": model_result.get("model", {}),
             }
-        if self._business_skill_requested(request):
-            decision = model_result.get("decision") if model_result.get("ok") else None
-            return {
-                **fallback,
-                "intent": {"name": (decision or {}).get("intent", "业务资料识别与落库"), "confidence": (decision or {}).get("confidence", 1.0), "source": "qwen_skill_override" if decision else "deterministic_skill"},
-                "route_decision": {"source": "qwen_skill_override" if decision else "deterministic_skill", "model_status": model_result.get("status"), "model_proposal": decision, "skill": BUSINESS_DATA_SKILL},
-                "model": model_result.get("model", {}),
-            }
         explicit = bool(request.get("workflow") or request.get("tool") or isinstance(request.get("tools"), list))
         decision = model_result.get("decision") if model_result.get("ok") else None
         if explicit or not isinstance(decision, dict):
@@ -167,21 +159,26 @@ class PlannerAgent:
         # 不应被误路由到 m0 Skill），保证 m1_m5_document_to_plan /
         # canonical_to_m5 能被可靠选择。
         explicit_workflow = str(request.get("workflow") or "").strip()
+        if request.get("workflow") and explicit_workflow not in KNOWN_WORKFLOWS:
+            return {
+                "route": "chat",
+                "steps": [],
+                "reason": f"UNKNOWN_WORKFLOW: {explicit_workflow}",
+                "error": {"code": "UNKNOWN_WORKFLOW", "workflow": explicit_workflow},
+                "response": f"未注册的 workflow：{explicit_workflow}。请提供已注册的流程标识。",
+            }
         if explicit_workflow in KNOWN_WORKFLOWS:
             workflow = load_workflow(explicit_workflow)
             steps = [{**step, "mode": "workflow"} for step in workflow["steps"]]
             return {"route": "workflow", "steps": steps, "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": f"显式选择受控 workflow: {explicit_workflow}"}
-        if self._business_skill_requested(request) and skills and BUSINESS_DATA_SKILL in skills.specs:
-            return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": BUSINESS_DATA_SKILL, "kind": "skill", "mode": "free"}], "reason": "识别为业务资料识别与候选入库请求"}
         requested_skill = request.get("skill")
         if requested_skill:
             if not skills or requested_skill not in skills.specs:
                 raise ValueError(f"未注册 Skill: {requested_skill}")
             return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": str(requested_skill), "kind": "skill", "mode": "free"}], "reason": f"显式选择已注册 Skill: {requested_skill}"}
+        if self._business_skill_requested(request) and skills and BUSINESS_DATA_SKILL in skills.specs:
+            return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": BUSINESS_DATA_SKILL, "kind": "skill", "mode": "free"}], "reason": "用户明确要求识别业务资料，选择资料识别 Skill"}
         if skills:
-            upload_mode = str(request.get("upload_mode") or request.get("business_data_mode") or "")
-            if upload_mode in {"master_data", "directory"} and BUSINESS_DATA_SKILL in skills.specs:
-                return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": BUSINESS_DATA_SKILL, "kind": "skill", "mode": "free"}], "reason": f"显式上传模式 {upload_mode} 绑定业务资料识别 Skill"}
             for keywords, skill_name in INTENT_TO_SKILL:
                 if skill_name in skills.specs and any(keyword in text for keyword in keywords):
                     return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": skill_name, "kind": "skill", "mode": "free"}], "reason": f"语义匹配高阶 Skill: {skill_name}"}
@@ -190,10 +187,6 @@ class PlannerAgent:
             workflow = load_workflow("m0_m5")
             steps = [{**step, "mode": "workflow"} for step in workflow["steps"]]
             return {"route": "workflow", "steps": steps, "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": "识别为 M0→M5 受控业务目标"}
-        upload_mode = str(request.get("upload_mode") or request.get("business_data_mode") or "")
-        if upload_mode == "order" and "ingest_document" in registry.specs:
-            return {"route": "free", "steps": [{"id": "free-0", "module": registry.specs["ingest_document"].module, "tool": "ingest_document", "mode": "free", "http_method": registry.specs["ingest_document"].method}], "reason": "显式上传模式 order 绑定订单解析工具"}
-
         requested_tools: list[str] = []
         if isinstance(request.get("tools"), list):
             requested_tools.extend(str(item) for item in request["tools"])
@@ -236,21 +229,7 @@ class PlannerAgent:
     @staticmethod
     def _business_skill_requested(request: dict[str, Any]) -> bool:
         text = str(request.get("message") or request.get("task") or "").lower()
-        if bool(request.get("business_data_root") or request.get("root_path") or request.get("business_data_mode")):
-            return True
-        # 基础资料/业务资料上传显式绑定 business-data-identification，不依赖文案猜测。
-        upload_mode = str(request.get("upload_mode") or "")
-        upload_items = list(request.get("documents", [])) + list(request.get("attachments", []))
-        has_upload = any(isinstance(item, dict) and item.get("content_b64") for item in upload_items)
-        has_order_kind = any(isinstance(item, dict) and item.get("kind") in {"order", "directory"} for item in upload_items)
-        has_master_data_kind = any(isinstance(item, dict) and item.get("kind") == "master_data" for item in upload_items)
-        if upload_mode in {"master_data", "directory"}:
-            return True
-        if has_master_data_kind:
-            return True
-        if has_upload and not has_order_kind and any(keyword in text for keyword in ("基础资料", "业务资料", "业务数据", "资料识别", "识别并落库", "文件落库", "主数据", "设备资料", "人员资料", "库存资料", "供应商资料")):
-            return True
-        return any(keyword in text for keyword in ("业务资料", "业务数据", "资料识别", "识别并落库", "文件落库"))
+        return any(keyword in text for keyword in ("基础资料", "业务资料", "业务数据", "资料识别", "识别并落库", "文件落库"))
 
 
 class WorkerAgent:

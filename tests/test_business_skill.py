@@ -21,14 +21,22 @@ def test_planner_selects_business_data_skill_for_upload_intent():
     assert decision["steps"][0]["kind"] == "skill"
 
 
-def test_master_data_attachment_binds_identification_skill_without_keyword():
+def test_master_data_attachment_does_not_force_identification_skill_without_intent():
     planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
     decision = planner.plan({
-        "message": "请导入并审核这些文件",
+        "message": "请看看这些文件",
         "attachments": [{"kind": "master_data", "filename": "设备台账.xlsx", "content_b64": "AA=="}],
     }, build_default_registry())
-    assert decision["route"] == "free"
-    assert decision["steps"][0]["tool"] == "business-data-identification"
+    assert decision["route"] in {"chat", "free"}
+    assert all(step["tool"] != "business-data-identification" for step in decision["steps"])
+
+
+def test_unknown_workflow_is_structured_and_does_not_downgrade():
+    planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
+    decision = planner.plan({"workflow": "not_registered", "message": "执行流程"}, build_default_registry())
+    assert decision["error"]["code"] == "UNKNOWN_WORKFLOW"
+    assert decision["route"] == "chat"
+    assert decision["steps"] == []
 
 
 def test_order_attachment_does_not_bind_identification_skill_by_kind():
@@ -153,6 +161,9 @@ async def test_business_data_skill_runs_after_planner_and_opens_review_gate(tmp_
     assert state["status"] == "waiting_human"
     assert state["plan"][0]["tool"] == "business-data-identification"
     assert state["outputs"]["business-data-identification"]["status"] == "candidate_created"
+    assert state["outputs"]["business-data-identification"]["available_next_actions"] == [
+        "review_candidates", "publish_canonical", "run_m1",
+    ]
     assert state["pending_gate"]["type"] == "candidate"
     assert any(event.get("event") == "agent.intent" for event in state["trace"])
     assert any(event.get("event") == "agent.route" and "business-data-identification" in event.get("selected_tools", []) for event in state["trace"])

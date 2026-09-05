@@ -135,7 +135,7 @@ def test_no_false_production_claim_from_local_fixture(tmp_path):
 
 
 def test_planner_routes_master_data_upload_without_filename_hacks():
-    """盲测路由：master_data 附件（任意文件名）绑定业务资料 Skill，不写文件名特例。"""
+    """盲测路由：master_data 附件（任意文件名）不凭 kind 强制升级为 Skill。"""
     planner = PlannerAgent(QwenRouter(QwenConfig(enabled=False)), build_default_skill_registry())
     for filename in ("任意-文档-v3.xlsx", "TMP-export-20260901.xlsx", "未命名.xlsx"):
         decision = planner.plan({
@@ -143,7 +143,7 @@ def test_planner_routes_master_data_upload_without_filename_hacks():
             "attachments": [{"kind": "master_data", "filename": filename, "content_b64": "QUJD"}],
         }, build_default_registry())
         assert decision["route"] == "free"
-        assert decision["steps"][0]["tool"] == "business-data-identification"
+        assert decision["steps"][0]["tool"] == "data_import_run"
 
 
 def test_same_input_reproducible_skill_catalog_and_routing():
@@ -365,7 +365,7 @@ def test_every_kind_classified_with_subtype_and_skill(tmp_path):
             failures.append(f"{kind}: 无 field_observations")
             stats.append(f"{kind}: FAIL(field_observations)")
             continue
-        # Skill 路由：master_data 附件 -> business-data-identification
+        # 附件 kind 不再强制绑定 Skill；未明确资料识别意图时走最小导入工具。
         import base64 as _b64
 
         decision = planner.plan({
@@ -373,8 +373,8 @@ def test_every_kind_classified_with_subtype_and_skill(tmp_path):
             "attachments": [{"kind": "master_data", "filename": f"{kind}.xlsx", "content_b64": _b64.b64encode(_xlsx_bytes(spec["positive"])).decode()}],
         }, registry)
         actual_skill = decision["steps"][0]["tool"] if decision.get("steps") else None
-        if actual_skill != EXPECTED_SKILL:
-            failures.append(f"{kind}: Skill 路由={actual_skill} 期望 {EXPECTED_SKILL}")
+        if actual_skill != "data_import_run":
+            failures.append(f"{kind}: 默认路由={actual_skill} 期望 data_import_run")
             stats.append(f"{kind}: FAIL(skill)")
             continue
         # 反例：不得误报为该 kind
