@@ -24,7 +24,9 @@ async def test_http_binding_propagates_task_and_tenant(monkeypatch):
     registry = build_default_registry()
     registry.bind_http({"m4": "http://m4.test"})
     result = await registry.call("list_m4_tracking", {}, {"task_id": "TASK-1", "tenant_id": "TENANT-1"})
-    assert result == {"items": []}
+    assert result["items"] == []
+    assert result["status"] == "success"
+    assert result["execution_mode"] == "goal"
     assert captured["url"].startswith("http://m4.test/")
     assert captured["headers"]["X-Yunpai-Task-ID"] == "TASK-1"
     assert captured["headers"]["X-Yunpai-Tenant-ID"] == "TENANT-1"
