@@ -48,6 +48,8 @@ def _state():
                                "required_equipment_codes": ["EQ-1"], "required_person_codes": ["P-1"],
                                "required_station_codes": ["ST-1"]}],
             "route_approval_ref": "APPROVED-SIM-001",
+            "route_code": "R-P1",
+            "route_version": "v1",
             "supply_entries": [{"order_line_id": "SO-1::L1", "readiness": "READY",
                                 "requirement_ref": "MAT-1", "inventory_snapshot_ref": "INV-1"}],
             "setup_matrix": {"OP-1": {"OP-1": 0}},
@@ -110,3 +112,57 @@ def test_bridge_fails_closed_when_m0_has_no_resource_facts(monkeypatch):
     assert payload["code"] == "BLOCKED_INPUT"
     missing = payload["data"]["missing_fields"]
     assert any("resource_snapshot" in field or "calendar_snapshot" in field for field in missing)
+
+
+@pytest.mark.asyncio
+async def test_full_m0_to_m5_graph_completes_with_m0_resources(tmp_path, monkeypatch):
+    """完整 M0→M5 链路：资源事实经 M0 canonical 读回后，solve_scheduling 产出计划。"""
+    from yunpai_langgraph.graph import YunpaiGraph
+    from yunpai_langgraph.models import new_state
+
+    monkeypatch.setenv("YUNPAI_M5_DB", str(tmp_path / "m5.sqlite"))
+
+    store = M0Store(tmp_path / "m0.sqlite")
+    batch = store.ingest(RESOURCE_RECORDS, tenant_id="tenant-39092", task_id="t")
+    store.publish(batch["batch_id"], actor="reviewer", reason="审批资源")
+
+    def _read(state, entity_type):
+        out = []
+        for entity in store.list_entities(entity_type, tenant_id=state.get("tenant_id", "default"))["entities"]:
+            out.append({"canonical_key": entity.get("canonical_key"), **(entity.get("payload_json") or {})})
+        return out
+
+    monkeypatch.setattr(orchestration_bridge, "_read_m0_entities", _read)
+
+    request = {
+        "workflow": "m1_m5_document_to_plan",
+        "message": "从订单文件生成排程",
+        "document": {"_encoded": base64.b64encode(json.dumps(
+            {"order_id": "SO-1", "product_code": "P-1", "quantity": 2, "due_date": "2026-09-10"}).encode()).decode(),
+            "order_id": "SO-1", "product_code": "P-1", "quantity": 2, "due_date": "2026-09-10"},
+        "bom_lines": [{"material_code": "MAT-1", "quantity_per": 3}],
+        "inventory": [{"material_code": "MAT-1", "warehouse": "WH-1", "lot_no": "LOT-1",
+                       "available_qty": 6, "locked_qty": 0, "qc_status": "released", "received_at": "2026-09-01"}],
+        "routing_steps": [{"operation_id": "OP-1", "sequence": 1, "standard_minutes": 5,
+                           "required_equipment_codes": ["EQ-1"], "required_person_codes": ["P-1"],
+                           "required_station_codes": ["ST-1"]}],
+        "supplier_by_material": {"MAT-1": "SUP-1"},
+        "route_approval_ref": "APPROVED-SIM-001", "route_code": "R-P1", "route_version": "v1",
+        "scenario_purpose": "production",
+        "supply_entries": [{"order_line_id": "SO-1::L1", "readiness": "READY",
+                            "requirement_ref": "MAT-1", "inventory_snapshot_ref": "INV-1"}],
+        "setup_matrix": {"OP-1": {"OP-1": 0}},
+    }
+    graph = YunpaiGraph()
+    state = await graph.run(new_state(request, tenant_id="tenant-39092"))
+    while state["status"] == "waiting_human":
+        gate_type = state["pending_gate"]["type"]
+        if gate_type == "procurement":
+            state = await graph.resume(state, "retry", {"supplier_by_material": {"MAT-1": "SUP-1"}}, actor="buyer")
+        else:
+            state = await graph.resume(state, "approve", actor="reviewer")
+
+    assert state["status"] == "completed", f"pending_gate={state.get('pending_gate')} errors={state.get('errors')}"
+    solve = state["outputs"]["solve_scheduling"]
+    assert solve["data"]["lifecycle_status"] == "released"
+    assert solve["data"]["schedule"]["metrics"]["operation_count"] >= 1

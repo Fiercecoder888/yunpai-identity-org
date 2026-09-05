@@ -244,13 +244,25 @@ def _read_m0_entities(state: RunState, entity_type: str) -> list[dict[str, Any]]
     return out
 
 
+def _normalize_status(value: Any) -> str:
+    """把 M0 主数据的人读状态归一化成 M5 resource_snapshot 的枚举。"""
+    text = str(value or "").upper()
+    return {
+        "AVAILABLE": "ACTIVE", "ACTIVE": "ACTIVE", "IDLE": "ACTIVE",
+        "MAINTENANCE": "MAINTENANCE", "DOWN": "INACTIVE", "DISABLED": "INACTIVE",
+        "INACTIVE": "INACTIVE",
+    }.get(text, "ACTIVE")
+
+
 def _resource_section(entities: list[dict[str, Any]], key_field: str) -> list[dict[str, Any]]:
-    """把 canonical 实体映射成 M5 resource_snapshot 子段（字段名与 M5 一致，仅剥离 canonical_key）。"""
+    """把 canonical 实体映射成 M5 resource_snapshot 子段（字段名与 M5 一致，仅剥离 canonical_key 并归一化 status）。"""
     items: list[dict[str, Any]] = []
     for entity in entities:
         item = {k: v for k, v in entity.items() if k != "canonical_key"}
         if not item.get(key_field):
             item[key_field] = str(entity.get("canonical_key") or "")
+        if "status" in item:
+            item["status"] = _normalize_status(item["status"])
         items.append(item)
     return items
 
@@ -294,6 +306,90 @@ def read_m5_calendar_facts(state: RunState) -> dict[str, Any] | None:
         "working_intervals": intervals,
         "unavailability": unavailability,
     }
+
+
+def _assemble_m5_bundle(state: RunState) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """组装 M5 六类 snapshot bundle（用求解器 canonical 的 build_bundle）。
+
+    成功返回 (bundle, scenario_id)；缺资源/日历或组装失败返回 (None, blocked)。
+    """
+    from .pmc_v2_adapter import build_bundle
+    from .pmc_v2_snapshots import PmcError, finalize_snapshot
+    from .m5_fact_validation import validate_m5_facts
+
+    order = read_order(state)
+    request = state.get("request", {})
+    request_payload = _assembly_payloads_from_state(state)
+    resource_snapshot = (
+        read_m5_resource_facts(state)
+        or request_payload.get("resource_snapshot")
+        or ({"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None)
+    )
+    calendar_snapshot = read_m5_calendar_facts(state) or request_payload.get("calendar_snapshot")
+    fact_validation = validate_m5_facts(
+        resource_snapshot=resource_snapshot,
+        calendar_snapshot=calendar_snapshot,
+        wip_status=request.get("wip_status"),
+        require_wip=str(request.get("scenario_purpose") or "production") == "wip_pmc",
+    )
+    if fact_validation["status"] != "ready":
+        return None, blocked(
+            state, source_module="m5", tool="ingest_m5_planning_snapshot",
+            missing_fields=fact_validation["missing_fields"],
+            required_tool="ingest_m5_planning_snapshot",
+            recovery="请补齐人员技能、设备能力、工位、生产日历及必要 WIP 快照后重试",
+        )
+    product_code = str(order.get("product_code") or "")
+    lines = read_lines(state) or [{
+        "order_line_id": f"{order.get('order_id')}::L1", "product_code": product_code,
+        "qty": order.get("quantity", 0), "uom": "PCS",
+        "due_date": order.get("due_date"), "priority": "normal",
+    }]
+    orders: list[dict[str, Any]] = []
+    for line in lines:
+        orders.append({
+            "order_id": str(order.get("order_id") or ""),
+            "order_no": str(order.get("order_no") or order.get("order_id") or ""),
+            "order_line_id": str(line.get("order_line_id") or f"{order.get('order_id')}::L1"),
+            "product_code": str(line.get("product_code") or product_code or ""),
+            "quantity": line.get("qty") or line.get("quantity") or order.get("quantity") or 0,
+            "uom": str(line.get("uom") or "PCS"),
+            "due_time": line.get("due_date") or order.get("due_date") or "",
+            "priority": str(line.get("priority") or "normal"),
+        })
+    routing_steps: list[dict[str, Any]] = []
+    for step in request_payload.get("routing_steps") or []:
+        if not isinstance(step, dict):
+            continue
+        step = dict(step)
+        step.setdefault("product_id", product_code)
+        step.setdefault("product_code", product_code)
+        routing_steps.append(step)
+    if isinstance(resource_snapshot, dict) and not resource_snapshot.get("checksum"):
+        resource_snapshot = finalize_snapshot(resource_snapshot)
+    bundle_payload = {
+        "orders": orders,
+        "routing_steps": routing_steps,
+        "resource_snapshot": resource_snapshot,
+        "calendar_windows": (calendar_snapshot or {}).get("working_intervals") or [],
+        "supply_entries": request_payload.get("supply_entries") or [],
+        "setup_matrix": request_payload.get("setup_matrix") or request_payload.get("changeover_rules") or {},
+        "scenario_purpose": str(request.get("scenario_purpose") or "production"),
+        "route_approval_ref": request.get("route_approval_ref") or "",
+        "route_code": request.get("route_code") or "",
+        "route_version": request.get("route_version") or "",
+    }
+    try:
+        bundle = build_bundle(bundle_payload)
+    except PmcError as exc:
+        return None, blocked(
+            state, source_module="m5", tool="ingest_m5_planning_snapshot",
+            missing_fields=[str(getattr(exc, "message", exc))],
+            required_tool="ingest_m5_planning_snapshot",
+            recovery="六类 snapshot 组装失败；请补齐已批准 route/资源/日历/供应事实后重试",
+        )
+    scenario_id = str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}")
+    return bundle, scenario_id
 
 
 def _route_steps_from_overview(payload: dict[str, Any], product_code: str) -> list[dict[str, Any]]:
@@ -726,51 +822,10 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             "source_plan_checksum": str((m3.get("handoff_envelope") or {}).get("source_plan_checksum") or "") if isinstance(m3.get("handoff_envelope"), dict) else "",
         }
     if tool == "ingest_m5_planning_snapshot":
-        from .planning_snapshot import assemble_bundle, verify_bundle
-        from .m5_fact_validation import validate_m5_facts
-
-        order = read_order(state)
-        m3 = output_data(state, "run_m3_procurement_requirements")
-        m4 = read_m4_supply_snapshot(state)
-        request_payload = _assembly_payloads_from_state(state)
-        # 优先从 M0 canonical 读回已批准资源/日历事实（真实数据经 M0 路径）；
-        # M0 不可达或未审批时回退 request 直传，最终由 validate_m5_facts 失败关闭。
-        resource_snapshot = (
-            read_m5_resource_facts(state)
-            or request_payload.get("resource_snapshot")
-            or ({"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None)
-        )
-        calendar_snapshot = read_m5_calendar_facts(state) or request_payload.get("calendar_snapshot")
-        fact_validation = validate_m5_facts(
-            resource_snapshot=resource_snapshot,
-            calendar_snapshot=calendar_snapshot,
-            wip_status=request.get("wip_status"),
-            require_wip=str(request.get("scenario_purpose") or "production") == "wip_pmc",
-        )
-        if fact_validation["status"] != "ready":
-            return blocked(
-                state, source_module="m5", tool=tool,
-                missing_fields=fact_validation["missing_fields"],
-                required_tool="ingest_m5_planning_snapshot",
-                recovery="请补齐人员技能、设备能力、工位、生产日历及必要 WIP 快照后重试",
-            )
-        scenario_id = str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}")
-        bundle = assemble_bundle(
-            orders=[{"order_id": str(order.get("order_id") or ""), "order_no": str(order.get("order_no") or order.get("order_id") or ""), "lines": read_lines(state) or [{"order_line_id": f"{order.get('order_id')}::L1", "product_code": order.get("product_code"), "qty": order.get("quantity", 0), "uom": "PCS", "due_date": order.get("due_date"), "priority": "normal"}]}],
-            routes=request_payload.get("routing_steps") or [],
-            resource_snapshot=resource_snapshot,
-            calendar_snapshot=calendar_snapshot,
-            supply_snapshot=request_payload.get("supply_snapshot") or ({"entries": request_payload.get("supply_entries") or [], "order_kitting": request_payload.get("order_kitting")} if request_payload.get("supply_entries") or request_payload.get("order_kitting") else None),
-            constraint_snapshot=request_payload.get("constraint_snapshot") or ({"changeover_rules": request_payload.get("changeover_rules") or request_payload.get("setup_matrix") or {}} if request_payload.get("changeover_rules") or request_payload.get("setup_matrix") else None),
-            tenant_id=state.get("tenant_id", "default"),
-            site_id=str(request.get("site_id") or "default"),
-        )
-        missing = verify_bundle(bundle)
-        if missing:
-            return blocked(state, source_module="orchestrator", tool=tool,
-                           missing_fields=missing,
-                           required_tool="ingest_m5_planning_snapshot",
-                           recovery="缺少权威 snapshot；请提供已批准 route/资源/日历/供应事实后重试")
+        bundle, scenario_id = _assemble_m5_bundle(state)
+        if bundle is None:
+            return scenario_id  # blocked dict
+        request = state.get("request", {})
         return {
             "scenario_id": scenario_id,
             "tenant_id": state.get("tenant_id", "default"),
@@ -784,8 +839,6 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             "idempotency_key": f"{state.get('task_id', 'task')}:m5-snapshot",
         }
     if tool == "solve_scheduling":
-        from .planning_snapshot import SNAPSHOT_KINDS
-
         snapshots = output_data(state, "ingest_m5_planning_snapshot")
         # M5 求解必须以已持久化的 snapshot 回读为准；若 snapshot 步骤被跳过
         # （未绑定/失败），不重建事实。
@@ -812,13 +865,47 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         else:
             orders = [{"order_id": str(order.get("order_id") or ""), "product_id": order.get("product_code") or "", "quantity": order.get("quantity", 0), "due_time": str(order.get("due_date") or ""), "priority": request.get("priority", "normal"), "status": "firm"}]
         scenario_id = str(request.get("scenario_id") or f"scenario-{order.get('order_id', '')}")
+        # 重新组装 pmc_v2_bundle（与 ingest 同源），交给 solve 的 v2 求解器；
+        # 同时提供扁平 routing_steps/resources 以满足 solve 工具合同（仅作 schema 占位）。
+        bundle, _ = _assemble_m5_bundle(state)
+        if bundle is None:
+            return blocked(state, source_module="m5", tool=tool,
+                           missing_fields=["六类 snapshot 组装失败"], required_tool="ingest_m5_planning_snapshot")
+        request_payload = _assembly_payloads_from_state(state)
+        product_code = str(order.get("product_code") or "")
+        routing_steps = []
+        for step in request_payload.get("routing_steps") or []:
+            if not isinstance(step, dict):
+                continue
+            op_id = str(step.get("operation_id") or step.get("op_code") or "")
+            codes = [str(c) for c in (step.get("required_equipment_codes") or step.get("required_station_codes") or step.get("required_person_codes") or []) if c]
+            eligible_resources = step.get("eligible_resources")
+            if not eligible_resources:
+                eligible_resources = [{"resource_id": code, "processing_minutes": int(step.get("standard_minutes") or 1)} for code in codes]
+            routing_steps.append({
+                "product_id": str(step.get("product_id") or step.get("product_code") or product_code),
+                "operation_id": op_id,
+                "operation_name": str(step.get("operation_name") or step.get("name") or op_id),
+                "sequence": step.get("sequence") or 1,
+                "eligible_resources": eligible_resources,
+            })
+        resources = []
+        for section, key in (("equipment", "equipment_code"), ("stations", "station_code"),
+                             ("persons", "person_code"), ("tooling", "tooling_code")):
+            for item in (read_m5_resource_facts(state) or {}).get(section, []):
+                code = item.get(key)
+                if code:
+                    resources.append({"resource_id": str(code), "name": str(code), "status": "available"})
         return {
             "idempotency_key": f"{state.get('task_id', 'task')}:m5",
             "scenario_id": scenario_id,
             "scenario_purpose": str(request.get("scenario_purpose") or "production"),
-            "planning_start": request.get("planning_start"),
+            "planning_start": request.get("planning_start") or str(order.get("due_date") or ""),
             "orders": orders,
-            "source_systems": ["orchestrator", "m1", "m2", "m3", "m4", "m5"],
+            "routing_steps": routing_steps,
+            "resources": resources,
+            "pmc_v2_bundle": bundle,
+            "source_systems": ["manual"],
             "source_observed_at": request.get("source_observed_at") or {},
             "tracking_task_id": state.get("task_id", ""),
         }
