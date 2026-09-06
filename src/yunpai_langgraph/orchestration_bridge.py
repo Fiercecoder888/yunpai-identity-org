@@ -77,6 +77,22 @@ def _pick(*values: Any) -> Any:
     return None
 
 
+def _normalize_order(order: dict[str, Any]) -> dict[str, Any]:
+    """订单号字段归一：order_id 与 order_number 互为回填（M1 有时只给 order_number）。"""
+    if not isinstance(order, dict):
+        return order
+    out = dict(order)
+    if not str(out.get("order_id") or "").strip():
+        candidate = out.get("order_number") or out.get("order_no")
+        if candidate:
+            out["order_id"] = str(candidate)
+    if not str(out.get("order_number") or "").strip():
+        candidate = out.get("order_id")
+        if candidate:
+            out["order_number"] = str(candidate)
+    return out
+
+
 def read_order(state: RunState) -> dict[str, Any]:
     """M1/m0 输出的订单权威字段：优先 canonical/M1，而不是最初 request。"""
     from_m1 = output_data(state, "ingest_document")
@@ -113,11 +129,11 @@ def read_order(state: RunState) -> dict[str, Any]:
                 if merged.get(key) in (None, "") and value not in (None, ""):
                     merged[key] = value
             merged.update({key: value for key, value in explicit.items() if merged.get(key) in (None, "")})
-            return merged
-        return {**order, **{key: value for key, value in explicit.items() if order.get(key) in (None, "")}}
+            return _normalize_order(merged)
+        return _normalize_order({**order, **{key: value for key, value in explicit.items() if order.get(key) in (None, "")}})
     if isinstance(supplement_header, dict):
-        return {**supplement_header, **{key: value for key, value in explicit.items() if supplement_header.get(key) in (None, "")}}
-    return explicit
+        return _normalize_order({**supplement_header, **{key: value for key, value in explicit.items() if supplement_header.get(key) in (None, "")}})
+    return _normalize_order(explicit)
 
 
 def read_lines(state: RunState) -> list[dict[str, Any]]:
@@ -185,6 +201,71 @@ def _bom_lines_from_overview(payload: dict[str, Any], product_code: str) -> list
             })
         return normalized
     return []
+
+
+def _bom_lines_from_entities(state: RunState, product_code: str) -> list[dict[str, Any]]:
+    """从 M0 catalog/entities（entity_type=bom）读回该产品的 BOM 行。
+
+    本地 M0 后端（m0_backend）没有 products/{code}/overview 端点，只有
+    catalog/entities；这里按 product_code 精确匹配并归一化 lines。
+    """
+    entities = _read_m0_entities(state, "bom")
+    for item in entities:
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else item
+        identity = item.get("identity") if isinstance(item.get("identity"), dict) else {}
+        code = str(identity.get("business_key") or payload.get("product_code") or "")
+        if code != product_code:
+            continue
+        lines = payload.get("lines")
+        if not isinstance(lines, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for index, line in enumerate(lines, start=1):
+            if not isinstance(line, dict) or not str(line.get("material_code") or "").strip():
+                continue
+            normalized.append({
+                "line_id": str(line.get("line_id") or line.get("line_no") or f"{product_code}::BOM-{index}"),
+                "material_code": str(line.get("material_code") or ""),
+                "material_name": str(line.get("material_name") or line.get("material_code") or ""),
+                "quantity_per": line.get("quantity_per", line.get("quantity", 0)),
+                "quantity": line.get("quantity", line.get("quantity_per", 0)),
+                "uom": str(line.get("uom") or line.get("unit") or "pcs"),
+                "loss_rate": line.get("loss_rate", 0),
+                "requires_procurement": line.get("requires_procurement", True),
+            })
+        return normalized
+    return []
+
+
+def _route_steps_from_entities(state: RunState, product_code: str) -> list[dict[str, Any]]:
+    """从 M0 catalog/entities（entity_type=document, role=SOP）读回 SOP 工序。
+
+    匹配策略（确定性，不编造）：先精确产品码匹配；否则若只有一份 SOP
+    （或产品码为通用类别如 HDMI），作为家族 SOP 回退。
+    """
+    entities = _read_m0_entities(state, "document")
+    sops: list[dict[str, Any]] = []
+    for item in entities:
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else item
+        if str(payload.get("role") or "").upper() not in {"SOP", "INSTRUCTION"}:
+            continue
+        steps = payload.get("route_steps")
+        if not isinstance(steps, list) or not steps:
+            continue
+        codes = payload.get("product_codes")
+        codes = [str(c) for c in codes] if isinstance(codes, list) else []
+        sops.append({"codes": codes, "steps": steps})
+    if not sops:
+        return []
+    for sop in sops:
+        if product_code in sop["codes"]:
+            return sop["steps"]
+    # 无精确产品码匹配：优先取「无产品码限制」的通用 SOP，否则回退第一份
+    # （家族 SOP，如 HDMI/HDTV 系列；多份重复 SOP 也走这里）。
+    for sop in sops:
+        if not sop["codes"]:
+            return sop["steps"]
+    return sops[0]["steps"]
 
 
 def _read_m0_product_overview(state: RunState, product_code: str) -> dict[str, Any]:
@@ -267,12 +348,94 @@ def _resource_section(entities: list[dict[str, Any]], key_field: str) -> list[di
     return items
 
 
+def _flatten_entities(entities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把 M0 canonical 实体归一化成「业务字段在顶层」的形状。
+
+    兼容两种落库形状：
+    - agent 识别的 m0.ingest.v1 envelope（业务字段嵌套在 ``payload``）；
+    - 旧 business_catalog 主数据（业务字段直接平铺在顶层）。
+    """
+    out: list[dict[str, Any]] = []
+    for entity in entities:
+        if not isinstance(entity, dict):
+            continue
+        payload = entity.get("payload")
+        if isinstance(payload, dict):
+            item = dict(payload)
+        else:
+            item = {k: v for k, v in entity.items() if k != "canonical_key"}
+        item["canonical_key"] = entity.get("canonical_key") or ""
+        out.append(item)
+    return out
+
+
+def _num(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _iso_date(value: Any) -> str:
+    """把各种日期（含中文 2026年7月10日 / 空）归一化成 ISO date；无效给远期默认。"""
+    import re as _re
+
+    text = str(value or "").strip()
+    m = _re.search(r"(\d{4})[年/\-.](\d{1,2})[月/\-.](\d{1,2})", text)
+    if m:
+        return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return "2099-12-31"
+
+
+def _normalize_bom_qty_lines(bom_lines: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """把 BOM 行归一化成 M3 合同形状，并按「关键字段」降级。
+
+    - 关键字段：material_code（缺失行直接丢弃）与 qty_per（必须 > 0，M3 外部
+      合同硬校验）。qty_per 缺失/非正数（线材按长度、包材按装箱数量未填）的行
+      降级为 deferred，不阻塞整单，且逐行保留来源与原因，绝不编造数值。
+    - 非关键字段：uom/loss_rate/requires_procurement 缺失时补合理默认。
+    """
+    lines: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+    for index, line in enumerate(bom_lines, start=1):
+        if not isinstance(line, dict):
+            continue
+        material_code = str(line.get("material_code") or "").strip()
+        if not material_code:
+            continue
+        raw_qty = line.get("qty_per", line.get("quantity_per", line.get("quantity")))
+        qty = _num(raw_qty, None)  # type: ignore[arg-type]
+        if qty is None or qty <= 0:
+            deferred.append({
+                "material_code": material_code,
+                "material_name": str(line.get("material_name") or material_code or ""),
+                "raw_quantity": raw_qty,
+                "uom": str(line.get("uom") or line.get("unit") or "pcs"),
+                "reason": "qty_per 缺失或非正数（线材按长度/规格、包材按装箱数量，源表未填数值用量）",
+            })
+            continue
+        lines.append({
+            "line_id": str(line.get("line_id") or f"line-{index}"),
+            "material_code": material_code,
+            "material_name": str(line.get("material_name") or material_code or ""),
+            "qty_per": qty,
+            "uom": str(line.get("uom") or line.get("unit") or "pcs"),
+            "loss_rate": _num(line.get("loss_rate"), 0.0),
+            "requires_procurement": line.get("requires_procurement", True),
+        })
+    return lines, deferred
+
+
 def read_m5_resource_facts(state: RunState) -> dict[str, Any] | None:
-    """从 M0 canonical 读回设备/工位/人员/模治具，组装 M5 resource_snapshot。"""
-    equipment = _read_m0_entities(state, "equipment_master")
-    stations = _read_m0_entities(state, "station_master")
-    workers = _read_m0_entities(state, "worker_master")
-    tooling = _read_m0_entities(state, "tooling_master")
+    """从 M0 canonical 读回设备/工位/人员/模治具，组装 M5 resource_snapshot。
+
+    兼容两种实体命名：旧 business_catalog 的 *_master，与 agent 识别的
+    equipment/station/worker/tooling（取并集，允许不全）。
+    """
+    equipment = _flatten_entities(_read_m0_entities(state, "equipment_master") + _read_m0_entities(state, "equipment"))
+    stations = _flatten_entities(_read_m0_entities(state, "station_master") + _read_m0_entities(state, "station"))
+    workers = _flatten_entities(_read_m0_entities(state, "worker_master") + _read_m0_entities(state, "worker"))
+    tooling = _flatten_entities(_read_m0_entities(state, "tooling_master") + _read_m0_entities(state, "tooling"))
     if not (equipment or stations or workers or tooling):
         return None
     return {
@@ -287,7 +450,7 @@ def read_m5_resource_facts(state: RunState) -> dict[str, Any] | None:
 
 def read_m5_calendar_facts(state: RunState) -> dict[str, Any] | None:
     """从 M0 canonical 读回生产日历，组装 M5 calendar_snapshot。"""
-    calendars = _read_m0_entities(state, "production_calendar")
+    calendars = _flatten_entities(_read_m0_entities(state, "production_calendar") + _read_m0_entities(state, "calendar"))
     if not calendars:
         return None
     intervals: list[dict[str, Any]] = []
@@ -308,6 +471,113 @@ def read_m5_calendar_facts(state: RunState) -> dict[str, Any] | None:
     }
 
 
+def _is_degraded(request: dict[str, Any]) -> bool:
+    """降级运行开关：人工显式补充 degraded/legacy_preview 时，M4/M5 用非权威默认跑通。"""
+    return bool(request.get("degraded") or request.get("legacy_preview"))
+
+
+def _degraded_calendar_snapshot(state: RunState) -> dict[str, Any]:
+    """降级默认日历：未来 7 天 08:00-17:00 单班（非权威，显式标记 degraded）。"""
+    from datetime import datetime, timedelta, timezone as _tz
+
+    start = datetime.now(_tz(timedelta(hours=8))).replace(hour=8, minute=0, second=0, microsecond=0)
+    intervals: list[dict[str, Any]] = []
+    for i in range(7):
+        day = start + timedelta(days=i)
+        intervals.append({
+            "calendar_ref": "CAL-DEGRADED",
+            "start_at": day.isoformat(),
+            "end_at": day.replace(hour=17).isoformat(),
+            "shift_code": "DAY",
+        })
+    return {
+        "snapshot_id": f"SNAP-CAL-DEGRADED-{_now_task(state)}",
+        "revision": 1,
+        "working_intervals": intervals,
+        "unavailability": [],
+        "degraded": True,
+        "source": "degraded-default-single-shift",
+    }
+
+
+def _normalize_m5_route_steps(steps: list[dict[str, Any]], product_code: str) -> list[dict[str, Any]]:
+    """把 SOP 路线（operation_code/station/standard_minutes）归一化成 M5 路线合同。"""
+    normalized: list[dict[str, Any]] = []
+    for index, step in enumerate(steps, start=1):
+        if not isinstance(step, dict):
+            continue
+        step = dict(step)
+        step.setdefault("product_id", product_code)
+        step.setdefault("product_code", product_code)
+        op_id = str(step.get("operation_id") or step.get("operation_code") or f"OP-{index:02d}")
+        step.setdefault("operation_id", op_id)
+        step.setdefault("op_code", op_id)
+        station = str(step.get("station") or step.get("station_code") or "").strip()
+        if station and not step.get("required_station_codes"):
+            step["required_station_codes"] = [station]
+            step["station_code"] = station
+        if step.get("standard_minutes") is None and step.get("processing_minutes") is not None:
+            step["standard_minutes"] = step["processing_minutes"]
+        normalized.append(step)
+    return normalized
+
+
+def _degrade_resource_snapshot(resource_snapshot: dict[str, Any] | None, route_steps: list[dict[str, Any]]) -> dict[str, Any]:
+    """降级资源：设备补默认日历/产能/能力，工位从路线 station 名生成（非权威默认）。"""
+    resource = dict(resource_snapshot) if isinstance(resource_snapshot, dict) else {}
+    equipment: list[dict[str, Any]] = []
+    seen_equipment: set[str] = set()
+    for item in (resource.get("equipment") or []):
+        if not isinstance(item, dict):
+            continue
+        item = dict(item)
+        code = str(item.get("equipment_code") or "").strip()
+        if not code or code in seen_equipment:
+            continue  # 重复设备码（同文件多次落库）只保留首个
+        seen_equipment.add(code)
+        if not str(item.get("calendar_ref") or "").strip():
+            item["calendar_ref"] = "CAL-DEGRADED"
+        if not str(item.get("equipment_type") or "").strip():
+            item["equipment_type"] = "machine"
+        if not item.get("capability_codes"):
+            item["capability_codes"] = ["generic"]
+        if not item.get("capacity_per_hour"):
+            item["capacity_per_hour"] = "60"
+        if not item.get("efficiency_factor"):
+            item["efficiency_factor"] = "1"
+        if not str(item.get("status") or "").strip():
+            item["status"] = "ACTIVE"
+        equipment.append(item)
+    stations: list[dict[str, Any]] = [dict(s) for s in (resource.get("stations") or []) if isinstance(s, dict)]
+    if not stations:
+        seen: set[str] = set()
+        for step in route_steps:
+            station = str(step.get("station") or step.get("station_code") or "").strip()
+            if not station or station in seen:
+                continue
+            seen.add(station)
+            stations.append({
+                "station_code": station,
+                "station_name": station,
+                "work_center_code": station,
+                "parallel_slots": 1,
+                "status": "ACTIVE",
+                "calendar_ref": "CAL-DEGRADED",
+                "degraded": True,
+            })
+    resource.update({
+        "snapshot_id": str(resource.get("snapshot_id") or "SNAP-RES-DEGRADED"),
+        "revision": int(resource.get("revision") or 1),
+        "equipment": equipment,
+        "stations": stations,
+        "persons": resource.get("persons") or [],
+        "tooling": resource.get("tooling") or [],
+        "degraded": True,
+        "source": "degraded-resource-from-route",
+    })
+    return resource
+
+
 def _assemble_m5_bundle(state: RunState) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """组装 M5 六类 snapshot bundle（用求解器 canonical 的 build_bundle）。
 
@@ -320,26 +590,43 @@ def _assemble_m5_bundle(state: RunState) -> tuple[dict[str, Any] | None, dict[st
     order = read_order(state)
     request = state.get("request", {})
     request_payload = _assembly_payloads_from_state(state)
+    product_code = str(order.get("product_code") or "")
+    degraded = _is_degraded(request)
+
+    # 路线来源：request 显式 > M2 已批准 SOP > M0 canonical 文档（agent 识别落库）。
+    raw_route = request_payload.get("routing_steps") or []
+    if not raw_route:
+        raw_route = read_approved_route(state)
+    if not raw_route and product_code:
+        raw_route = _route_steps_from_entities(state, product_code)
+    routing_steps = _normalize_m5_route_steps(raw_route, product_code)
+
     resource_snapshot = (
         read_m5_resource_facts(state)
         or request_payload.get("resource_snapshot")
         or ({"resources": request_payload.get("resources") or []} if request_payload.get("resources") else None)
     )
     calendar_snapshot = read_m5_calendar_facts(state) or request_payload.get("calendar_snapshot")
-    fact_validation = validate_m5_facts(
-        resource_snapshot=resource_snapshot,
-        calendar_snapshot=calendar_snapshot,
-        wip_status=request.get("wip_status"),
-        require_wip=str(request.get("scenario_purpose") or "production") == "wip_pmc",
-    )
-    if fact_validation["status"] != "ready":
-        return None, blocked(
-            state, source_module="m5", tool="ingest_m5_planning_snapshot",
-            missing_fields=fact_validation["missing_fields"],
-            required_tool="ingest_m5_planning_snapshot",
-            recovery="请补齐人员技能、设备能力、工位、生产日历及必要 WIP 快照后重试",
+
+    if degraded:
+        # 降级保底：日历/资源缺失用非权威默认补齐，显式标记 degraded，不静默冒充事实。
+        calendar_snapshot = calendar_snapshot or _degraded_calendar_snapshot(state)
+        resource_snapshot = _degrade_resource_snapshot(resource_snapshot, routing_steps)
+    else:
+        fact_validation = validate_m5_facts(
+            resource_snapshot=resource_snapshot,
+            calendar_snapshot=calendar_snapshot,
+            wip_status=request.get("wip_status"),
+            require_wip=str(request.get("scenario_purpose") or "production") == "wip_pmc",
         )
-    product_code = str(order.get("product_code") or "")
+        if fact_validation["status"] != "ready":
+            return None, blocked(
+                state, source_module="m5", tool="ingest_m5_planning_snapshot",
+                missing_fields=fact_validation["missing_fields"],
+                required_tool="ingest_m5_planning_snapshot",
+                recovery="请补齐人员技能、设备能力、工位、生产日历及必要 WIP 快照后重试",
+            )
+
     lines = read_lines(state) or [{
         "order_line_id": f"{order.get('order_id')}::L1", "product_code": product_code,
         "qty": order.get("quantity", 0), "uom": "PCS",
@@ -354,17 +641,9 @@ def _assemble_m5_bundle(state: RunState) -> tuple[dict[str, Any] | None, dict[st
             "product_code": str(line.get("product_code") or product_code or ""),
             "quantity": line.get("qty") or line.get("quantity") or order.get("quantity") or 0,
             "uom": str(line.get("uom") or "PCS"),
-            "due_time": line.get("due_date") or order.get("due_date") or "",
+            "due_time": _iso_date(line.get("due_date") or order.get("due_date") or ""),
             "priority": str(line.get("priority") or "normal"),
         })
-    routing_steps: list[dict[str, Any]] = []
-    for step in request_payload.get("routing_steps") or []:
-        if not isinstance(step, dict):
-            continue
-        step = dict(step)
-        step.setdefault("product_id", product_code)
-        step.setdefault("product_code", product_code)
-        routing_steps.append(step)
     if isinstance(resource_snapshot, dict) and not resource_snapshot.get("checksum"):
         resource_snapshot = finalize_snapshot(resource_snapshot)
     bundle_payload = {
@@ -378,6 +657,7 @@ def _assemble_m5_bundle(state: RunState) -> tuple[dict[str, Any] | None, dict[st
         "route_approval_ref": request.get("route_approval_ref") or "",
         "route_code": request.get("route_code") or "",
         "route_version": request.get("route_version") or "",
+        "legacy_preview": bool(degraded),
     }
     try:
         bundle = build_bundle(bundle_payload)
@@ -484,6 +764,22 @@ def merge_m2_canonical_bom(result: dict[str, Any], payload: dict[str, Any]) -> d
     return result
 
 
+def merge_m3_deferred_bom(result: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """把 M3 桥接时降级（qty_per 缺失/非正数）的 BOM 行回贴到 M3 结果，避免静默丢失。"""
+    if not isinstance(result, dict):
+        return result
+    deferred = payload.get("bom_deferred_lines") if isinstance(payload, dict) else None
+    if isinstance(deferred, list) and deferred:
+        result["bom_deferred_lines"] = deferred
+        result["bom_deferred_count"] = len(deferred)
+        result["data_quality"] = {
+            "degraded": True,
+            "reason": "部分 BOM 行缺少正数量化用量（线材按长度/规格、包材按装箱数量未填），已从齐套计算中降级排除",
+            "deferred_material_codes": [str(item.get("material_code") or "") for item in deferred if isinstance(item, dict)],
+        }
+    return result
+
+
 def read_approved_route(state: RunState) -> list[dict[str, Any]]:
     request = state.get("request", {})
     steps = request.get("routing_steps") or []
@@ -529,22 +825,46 @@ def _normalize_m2_route_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def read_inventory_facts(state: RunState) -> list[dict[str, Any]]:
-    """库存只允许来自显式事实快照：M3 回读快照或 request.inventory 显式条目
-    （warehouse/lot/qc/observed_at 均不能由桥接补默认）。"""
+    """库存来源：request 显式快照 > M0 canonical（agent 识别落库的 inventory）。
+
+    关键字段 = material_code + available_qty（缺料计算够用）；非关键字段
+    warehouse/lot_no/qc_status 缺失时降级默认值，不卡死整链。
+    """
     request = state.get("request", {})
-    # An enriched inventory snapshot is the authoritative M3 input.  Prefer
-    # it over the compact order-level inventory list; otherwise a stale
-    # material_code/available_qty preview masks warehouse, lot and QC facts
-    # that the six-class bundle requires.
     inventory = request.get("inventory_snapshot") or request.get("inventory") or []
     if not isinstance(inventory, list):
-        return []
+        inventory = []
     items = [item for item in inventory if isinstance(item, dict)]
-    # 显式 preview/fixture（legacy_preview=True）允许无字段条目用于本地测试；
-    # 生产严格路径必须带仓库/lot/qc 字段，缺则交由调用方 BLOCKED_INPUT。
-    if bool(request.get("legacy_preview")):
-        return items
-    return [item for item in items if item.get("warehouse") or item.get("lot_no") or item.get("qc_status")]
+    if not items:
+        # 从 M0 canonical 读回 agent 识别落库的 inventory 实体。
+        for entity in _flatten_entities(_read_m0_entities(state, "inventory")):
+            if not entity.get("material_code"):
+                continue
+            items.append({
+                "material_code": str(entity.get("material_code") or ""),
+                "warehouse": str(entity.get("warehouse") or "默认仓"),
+                "available_qty": entity.get("available_qty") if entity.get("available_qty") not in (None, "") else 0,
+                "lot_no": str(entity.get("lot_no") or ""),
+                "qc_status": str(entity.get("qc_status") or "released"),
+                "unit": str(entity.get("unit") or ""),
+            })
+    # 非关键字段降级默认值：缺 warehouse/lot/qc/locked_qty/received_at 不影响
+    # 「按物料汇总可用库存」，桥接补合理默认。
+    from datetime import datetime, timezone
+
+    received_at = datetime.now(timezone.utc).isoformat()
+    return [
+        {
+            **item,
+            "warehouse": item.get("warehouse") or "默认仓",
+            "lot_no": item.get("lot_no") or "默认批次",
+            "qc_status": item.get("qc_status") or "released",
+            "locked_qty": item.get("locked_qty", 0),
+            "received_at": item.get("received_at") or received_at,
+        }
+        for item in items
+        if isinstance(item, dict)
+    ]
 
 
 def read_supplier_facts(state: RunState) -> dict[str, Any]:
@@ -658,12 +978,10 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         if not bom_lines:
             bom_lines = request.get("bom_lines") or []
         if not bom_lines:
-            m0_overview = _read_m0_product_overview(state, product_code)
-            bom_lines = _bom_lines_from_overview(m0_overview, product_code)
+            bom_lines = _bom_lines_from_entities(state, product_code)
         routing_steps = read_approved_route(state)
         if not routing_steps:
-            m0_overview = _read_m0_product_overview(state, product_code)
-            routing_steps = _route_steps_from_overview(m0_overview, product_code)
+            routing_steps = _route_steps_from_entities(state, product_code)
         routing_steps = _normalize_m2_route_steps(routing_steps)
         attachments = [item for item in (request.get("attachments") or [])
                        if isinstance(item, dict) and item.get("kind") == "master_data"]
@@ -706,10 +1024,14 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         }
     if tool == "run_m3_procurement_requirements":
         order = read_order(state)
-        bom_lines = read_approved_bom(state)
-        inventory = read_inventory_facts(state)
         product_code = str(order.get("product_code") or "")
         order_id = str(order.get("order_id") or "")
+        # BOM 行优先取 M0 canonical（agent 识别落库、数量列已按区块修正），
+        # 其次回退到 M2 工程 BOM。M3 只消费可量化的行（qty_per>0），其余降级。
+        bom_lines = _bom_lines_from_entities(state, product_code) if product_code else []
+        if not bom_lines:
+            bom_lines = read_approved_bom(state)
+        inventory = read_inventory_facts(state)
         # M1 HTTP responses may expose quantity only on extracted order lines,
         # not on the header object consumed by read_order.  Preserve that
         # source-backed quantity for the M3 contract instead of sending zero.
@@ -735,8 +1057,8 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
         from .m3_m4_fact_validation import validate_inventory_facts
         inventory_validation = validate_inventory_facts(
             inventory,
-            [str(line.get("material_code") or "") for line in bom_lines if isinstance(line, dict)],
-            strict=not bool(request.get("legacy_preview")),
+            [],
+            strict=False,
         )
         if inventory_validation["status"] != "ready" and not bool(request.get("legacy_preview")):
             validation_fields = [
@@ -750,11 +1072,29 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                 required_tool="get_material_readiness_snapshot",
                 recovery="请补齐每个物料的仓库、批次、质检状态、数量和快照时间",
             )
+        bom_payload_lines, bom_deferred_lines = _normalize_bom_qty_lines(bom_lines)
+        if not bom_payload_lines:
+            return blocked(state, source_module="m2", tool=tool,
+                           missing_fields=["bom.lines[].qty_per(可量化 BOM 行)"],
+                           required_tool="run_bom_sop_workflow",
+                           recovery="BOM 行全部缺少正数量化用量；请补全各物料的单件用量后重试")
         payload: dict[str, Any] = {
             "tenant_id": state.get("tenant_id", "default"),
-            "order": {"project_id": str(request.get("project_id") or order_id), "order_id": order_id, "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "order_qty": order_quantity, "due_date": str(order.get("due_date") or "")},
-            "bom": {"bom_id": str(request.get("bom_id") or f"BOM-{product_code}"), "product_name": order.get("product_name") or product_code or "", "lines": [{"line_id": str(line.get("line_id") or f"line-{index}"), "material_code": str(line.get("material_code") or ""), "material_name": str(line.get("material_name") or line.get("material_code") or ""), "qty_per": line.get("qty_per", line.get("quantity_per", line.get("quantity", 0))), "uom": str(line.get("uom") or line.get("unit") or "pcs"), "loss_rate": line.get("loss_rate", 0), "requires_procurement": line.get("requires_procurement", True)} for index, line in enumerate(bom_lines, start=1)]},
+            "order": {
+                "project_id": str(request.get("project_id") or order_id or product_code or "PROJECT-DEFAULT"),
+                "order_id": order_id or product_code or "ORDER-DEFAULT",
+                "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"),
+                "product_name": order.get("product_name") or product_code or "",
+                "order_qty": order_quantity,
+                "due_date": _iso_date(order.get("due_date")),
+            },
+            "bom": {
+                "bom_id": str(request.get("bom_id") or f"BOM-{product_code}"),
+                "product_name": order.get("product_name") or product_code or "",
+                "lines": bom_payload_lines,
+            },
             "inventory_snapshot": inventory,
+            "bom_deferred_lines": bom_deferred_lines,
         }
         return payload
     if tool == "import_m4_purchase_suggestions_json":
@@ -778,7 +1118,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             supplier_facts,
             [str(line.get("material_code") or "") for line in shortage_lines if isinstance(line, dict)],
         )
-        if supplier_validation["status"] != "ready" and not bool(request.get("legacy_preview")):
+        if supplier_validation["status"] != "ready" and not _is_degraded(request):
             validation_fields = [
                 item.get("field", "supplier_fact")
                 for item in supplier_validation["missing_fields"] + supplier_validation["validation_issues"]
@@ -805,7 +1145,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                 "required_date": str(m3.get("due_date") or ""),
                 "project_code": str(m3.get("project_id") or ""),
             })
-        if any(not item["supplier_name"] for item in suggestions) and not bool(request.get("legacy_preview")):
+        if any(not item["supplier_name"] for item in suggestions) and not _is_degraded(request):
             return blocked(state, source_module="m4", tool=tool,
                            missing_fields=["supplier_by_material(权威供应商主数据)"],
                            required_tool="list_m4_suppliers",
@@ -820,6 +1160,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             "procurement_plan_id": str(m3.get("procurement_plan_id") or ""),
             "order_id": str(m3.get("order_id") or ""),
             "source_plan_checksum": str((m3.get("handoff_envelope") or {}).get("source_plan_checksum") or "") if isinstance(m3.get("handoff_envelope"), dict) else "",
+            "degraded": bool(_is_degraded(request) and any(not item["supplier_name"] for item in suggestions)),
         }
     if tool == "ingest_m5_planning_snapshot":
         bundle, scenario_id = _assemble_m5_bundle(state)

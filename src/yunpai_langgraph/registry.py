@@ -372,6 +372,12 @@ def _module_auth_headers(modules: set[str]) -> dict[str, dict[str, str]]:
     for module in modules:
         authorization = os.getenv(f"{module.upper()}_AUTHORIZATION", "").strip()
         api_key = os.getenv(f"{module.upper()}_API_KEY", "").strip()
+        if module == "m5":
+            # M5 v2 服务用 APIKeyHeader(X-M5-API-Key)，而非 Authorization Bearer。
+            key = api_key or authorization
+            if key:
+                result[module] = {"X-M5-API-Key": key}
+            continue
         if not authorization and api_key:
             authorization = f"Bearer {api_key}"
         if authorization:

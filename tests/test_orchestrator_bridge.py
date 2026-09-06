@@ -100,15 +100,10 @@ def test_read_order_merges_explicit_structured_document_for_downstream_steps():
 def test_m2_payload_reads_approved_m0_bom_when_request_has_no_bom(monkeypatch):
     state = _approved_m2_state({"bom_lines": [], "legacy_preview": False})
     state["outputs"]["run_bom_sop_workflow"] = {}
-    monkeypatch.setattr(orchestration_bridge, "_read_m0_product_overview", lambda *_args: {
-        "success": True,
-        "data": {"indexes": {"boms": [{"entity": {
-            "business_key": "P-1", "review_status": "approved",
-            "attributes": {"product_code": "P-1", "lines": [
-                {"line_no": "1", "material_code": "MAT-1", "material_name": "Material", "quantity": "3", "uom": "pcs"},
-            ]},
-        }}]}},
-    })
+    monkeypatch.setattr(orchestration_bridge, "_bom_lines_from_entities", lambda _s, pc: (
+        [{"material_code": "MAT-1", "material_name": "Material", "quantity_per": "3", "quantity": "3", "uom": "pcs"}]
+        if pc == "P-1" else []
+    ))
     payload = bridge_payload(state, "run_bom_sop_workflow")
     assert payload["bom_lines"][0]["material_code"] == "MAT-1"
     assert payload["bom_lines"][0]["quantity_per"] == "3"
@@ -118,15 +113,12 @@ def test_m2_payload_reads_approved_m0_bom_when_request_has_no_bom(monkeypatch):
 def test_m2_payload_ignores_unapproved_or_wrong_product_m0_bom(monkeypatch):
     state = _approved_m2_state({"bom_lines": [], "legacy_preview": False})
     state["outputs"]["run_bom_sop_workflow"] = {}
-    monkeypatch.setattr(orchestration_bridge, "_read_m0_product_overview", lambda *_args: {
-        "data": {"indexes": {"boms": [{"entity": {
-            "business_key": "OTHER", "review_status": "approved",
-            "attributes": {"product_code": "OTHER", "lines": [{"material_code": "BAD", "quantity": 1}]},
-        }}, {"entity": {
-            "business_key": "P-1", "review_status": "candidate",
-            "attributes": {"product_code": "P-1", "lines": [{"material_code": "DRAFT", "quantity": 1}]},
-        }}]}},
-    })
+    # catalog/entities 只读已发布 canonical（候选/未批准不会出现在 canonical_entities），
+    # 这里验证「产品编码不匹配」时 M0 BOM 不被误用。
+    monkeypatch.setattr(orchestration_bridge, "_bom_lines_from_entities", lambda _s, pc: (
+        [{"material_code": "BAD", "quantity_per": 1}]
+        if pc == "OTHER" else []
+    ))
     payload = bridge_payload(state, "run_bom_sop_workflow")
     assert payload["bom_lines"] == []
 
@@ -193,14 +185,15 @@ def test_m3_uses_order_line_quantity_when_header_has_no_quantity():
     assert payload["order"]["order_qty"] == 4
 
 
-def test_m3_inventory_rejects_implicit_defaults_in_production():
-    # production（无 legacy_preview）缺 warehouse/lot/qc 库存事实 -> BLOCKED_INPUT，
-    # 不接受隐式仓库/lot/qc 默认（断点 4）。
+def test_m3_inventory_defaults_noncritical_fields_in_production():
+    # 非关键字段 warehouse/lot/qc/locked_qty/received_at 缺失时降级默认值，
+    # 关键字段 material_code + available_qty 存在即可继续（用户「不全数据可工作」要求）。
     state = _approved_m2_state({"legacy_preview": False, "inventory": [{"material_code": "MAT-1", "available_qty": 5}]})
-    result = bridge_payload(state, "run_m3_procurement_requirements")
-    assert result["success"] is False
-    assert result["code"] == "BLOCKED_INPUT"
-    assert any("inventory_snapshot" in field for field in result["data"]["missing_fields"])
+    payload = bridge_payload(state, "run_m3_procurement_requirements")
+    assert payload["inventory_snapshot"][0]["material_code"] == "MAT-1"
+    assert payload["inventory_snapshot"][0]["available_qty"] == 5
+    assert payload["inventory_snapshot"][0]["warehouse"] == "默认仓"
+    assert payload["inventory_snapshot"][0]["qc_status"] == "released"
 
 
 def test_m3_with_explicit_inventory_facts_builds_payload():

@@ -29,6 +29,8 @@ CANONICAL_SCHEMA: dict[str, dict[str, Any]] = {
         "fields": ("product_code", "product_name", "model", "aliases", "version"),
     },
     "bom": {
+        # 产品身份以 product_code（型号，如 W-H913）为准；extract_bom_full 会从
+        # BOM 的「成品成本」区块抽出型号码。
         "required": ("product_code", "lines"),
         "fields": ("product_code", "product_name", "version", "lines"),
     },

@@ -195,7 +195,8 @@ class PlannerAgent:
             raw = base64.b64decode(str(target["content_b64"]), validate=True)
         except (ValueError, TypeError):
             return None
-        sample = sample_file(raw, str(target.get("filename") or "document.bin"))
+        max_sheets = int(os.getenv("YUNPAI_SAMPLE_MAX_SHEETS", "6"))
+        sample = sample_file(raw, str(target.get("filename") or "document.bin"), max_sheets=max_sheets)
         if not sample.get("content_sampled"):
             return None
         result = await self.router.map_to_canonical(sample)
@@ -209,6 +210,16 @@ class PlannerAgent:
         needs_review = bool(decision.get("needs_review")) or confidence < threshold
         if not entity_type or not isinstance(records, list) or not records or needs_review:
             return None
+        # 两段式（仅 BOM）：LLM 识别为 bom 后，用确定性抽取器 extract_bom_full
+        # 遍历全部产品 sheet，抽出 材料行 + 型号(product_code) + 产品名(sheet 名)。
+        # 其它类型保持 LLM 直接吐 records，不受影响。
+        if entity_type == "bom":
+            from .tabular_extract import extract_bom_full
+
+            bom_result = extract_bom_full(raw, str(target.get("filename") or "document.bin"))
+            bom_records = bom_result.get("records") or []
+            if bom_records:
+                records = bom_records
         request.setdefault("payloads", {})["ingest_canonical"] = {
             "entity_type": entity_type,
             "records": records,

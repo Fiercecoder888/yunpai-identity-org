@@ -415,25 +415,31 @@ def _extract_bom_xlsx(path: Path) -> dict[str, Any]:
                 if "material_code" in mapping and ("material_name" in mapping or "quantity" in mapping):
                     header_maps.append((number, mapping))
             lines: list[dict[str, Any]] = []
+            # header_maps 按行号升序；一个 sheet 里可能有多个数据块（材料明细 vs
+            # 耗材包材），每行应归入「最近的一个表头块」，而不是第一个能匹配到
+            # 物料编码的表头块——否则包材行的「规格」会被误当成「用量」。
             for row_number, values in rows:
-                for header_row, mapping in header_maps:
-                    if row_number <= header_row:
-                        continue
-                    code_index = mapping.get("material_code")
-                    code = values[code_index] if code_index is not None and code_index < len(values) else None
-                    if not _looks_like_material_code(code):
-                        continue
-                    line = {
-                        "sheet_name": sheet.title,
-                        "row_number": row_number,
-                        "material_code": str(code).strip(),
-                        "raw_cells": {str(index + 1): value for index, value in enumerate(values) if value not in (None, "")},
-                    }
-                    for key, index in mapping.items():
-                        if index < len(values) and values[index] not in (None, ""):
-                            line[key] = values[index]
-                    lines.append(line)
-                    break
+                mapping: dict[str, int] | None = None
+                for header_row, candidate in header_maps:
+                    if header_row >= row_number:
+                        break
+                    mapping = candidate
+                if mapping is None:
+                    continue
+                code_index = mapping.get("material_code")
+                code = values[code_index] if code_index is not None and code_index < len(values) else None
+                if not _looks_like_material_code(code):
+                    continue
+                line = {
+                    "sheet_name": sheet.title,
+                    "row_number": row_number,
+                    "material_code": str(code).strip(),
+                    "raw_cells": {str(index + 1): value for index, value in enumerate(values) if value not in (None, "")},
+                }
+                for key, index in mapping.items():
+                    if index < len(values) and values[index] not in (None, ""):
+                        line[key] = values[index]
+                lines.append(line)
             sheets.append({
                 "name": sheet.title,
                 "max_row": sheet.max_row,

@@ -220,7 +220,7 @@ class YunpaiGraph:
             payload = bridged
         record = {
             "id": step["id"], "module": step["module"], "tool": step["tool"],
-            "status": "running", "input_summary": summarize(payload), "started_at": _now(),
+            "status": "running", "input_summary": summarize(payload), "input": payload, "started_at": _now(),
         }
         state["steps"].append(record)
         state["trace"].append({"event": "react.action", "agent": "worker", "tool": step["tool"], "step_index": index, "at": _now()})
@@ -276,9 +276,13 @@ class YunpaiGraph:
             state["trace"].append({"event": "react.observation", "tool": step["tool"], "status": "failed", "at": _now()})
             return self._save(state)
         result = outcome["result"]
-        if step["tool"] == "run_bom_sop_workflow" and state.get("route") == "workflow" and state.get("workflow_id") in BRIDGED_WORKFLOWS:
-            from .orchestration_bridge import merge_m2_canonical_bom
-            result = merge_m2_canonical_bom(result, payload)
+        if state.get("route") == "workflow" and state.get("workflow_id") in BRIDGED_WORKFLOWS:
+            if step["tool"] == "run_bom_sop_workflow":
+                from .orchestration_bridge import merge_m2_canonical_bom
+                result = merge_m2_canonical_bom(result, payload)
+            elif step["tool"] == "run_m3_procurement_requirements":
+                from .orchestration_bridge import merge_m3_deferred_bom
+                result = merge_m3_deferred_bom(result, payload)
         state["current_result"] = result
         state["outputs"][step["tool"]] = result
         state["outputs"][step["module"]] = result

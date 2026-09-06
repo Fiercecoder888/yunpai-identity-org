@@ -493,7 +493,7 @@ async def m5_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str,
                for step in payload.get("routing_steps", []))
     )
     legacy_preview = bool(payload.get("legacy_preview")) or str(purpose).lower() in {"preview", "sandbox"}
-    if payload.get("orders") and not payload.get("routing_steps"):
+    if not v2_marked and payload.get("orders") and not payload.get("routing_steps"):
         return {
             "success": False, "code": "BLOCKED_INPUT", "errors": [{"code": "MISSING_SOP", "message": "缺少可执行的 SOP/工艺路线", "details": []}],
             "data": {

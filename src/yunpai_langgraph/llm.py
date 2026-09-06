@@ -223,6 +223,9 @@ class QwenRouter:
             "entity_type 只能是下列之一；records 每条是对象，字段名只能用该类型「允许」集合内的字段；"
             "数值必须从文件照抄，绝不编造；每条记录可带 _source（sheet/row/col/raw 或 page/image）定位证据。"
             "records 最多输出前 50 条，超出部分省略（不要为了穷举所有行而把 JSON 写超长导致截断）。"
+            "对于表格/多 sheet 文件，额外输出 column_mapping（表头名→canonical 字段名），"
+            "例如 {\"物料编码\":\"material_code\",\"材料名称\":\"material_name\",\"用量\":\"quantity\",\"单位\":\"unit\"}；"
+            "后续会用确定性代码按该映射抽取全量行，所以 column_mapping 的表头名要照抄文件里的实际表头。"
             "confidence 是 0 到 1 浮点；不确定（<0.7）或关键字段缺失时 needs_review=true。reason 一句话说明依据。"
             "特殊结构指引：① 作业指导书(SOP)：每个 sheet 是一道工序，从「制作工站/文件编号/IE工时/作业步骤」抽取"
             "document 的 route_steps 数组，每项为 {operation_code, operation_name, station, standard_minutes}；"
@@ -275,9 +278,13 @@ class QwenRouter:
             confidence = max(0.0, min(1.0, float(value.get("confidence", 0))))
         except (TypeError, ValueError):
             confidence = 0.0
+        column_mapping = value.get("column_mapping")
+        if not isinstance(column_mapping, dict):
+            column_mapping = {}
         return {
             "entity_type": entity_type,
             "records": records,
+            "column_mapping": {str(k): str(v) for k, v in column_mapping.items()},
             "confidence": confidence,
             "needs_review": bool(value.get("needs_review")) or confidence < 0.7,
             "reason": str(value.get("reason") or ""),
