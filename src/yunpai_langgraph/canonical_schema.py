@@ -72,6 +72,11 @@ CANONICAL_SCHEMA: dict[str, dict[str, Any]] = {
         "required": ("calendar_date", "shift"),
         "fields": ("calendar_date", "shift", "start_time", "end_time"),
     },
+    "production_daily_report": {
+        # 生产日报（如押出部日报：日期/订单编号/产品型号/数量米/合计米/备注）
+        "required": ("date", "quantity"),
+        "fields": ("date", "order_id", "product_code", "product_name", "quantity", "total_quantity", "remark"),
+    },
     "document": {
         "required": ("role", "title"),
         "fields": ("role", "title", "product_codes", "content_uri", "route_steps", "document_no", "revision"),
@@ -80,7 +85,7 @@ CANONICAL_SCHEMA: dict[str, dict[str, Any]] = {
 
 # 事实数值字段：必须是 number（agent 照抄，不允许字符串化）。
 NUMERIC_FIELDS = frozenset({
-    "quantity", "available_qty", "unit_price", "total_amount",
+    "quantity", "available_qty", "unit_price", "total_amount", "total_quantity",
     "standard_minutes", "sequence",
 })
 

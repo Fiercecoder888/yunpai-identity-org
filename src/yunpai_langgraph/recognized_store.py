@@ -116,13 +116,28 @@ def _header_row_index(rows: list[list[Any]]) -> int:
     return best
 
 
-def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, Any]:
+def _sample_rows_from_raw(rows: list[list[Any]], max_rows: int) -> tuple[list[str], list[dict[str, Any]]]:
+    """从原始行列表里找表头并抽取前 max_rows 行。"""
+    if not rows:
+        return [], []
+    header_index = _header_row_index(rows)
+    headers = [str(c) for c in rows[header_index]]
+    sample_rows: list[dict[str, Any]] = []
+    for row in rows[header_index + 1:header_index + 1 + max_rows]:
+        if any(v not in (None, "") for v in row):
+            sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(row)})
+    return headers, sample_rows
+
+
+def sample_file(raw: bytes, filename: str, *, max_rows: int = 10, max_sheets: int = 3) -> dict[str, Any]:
     """返回 LLM 可看的小样本；非表格/无法解析时只回嗅探结果 + 说明，不伪造内容。"""
     from .file_sniff import sniff_format
 
     verdict = sniff_format(raw, filename)
     headers: list[str] = []
     sample_rows: list[dict[str, Any]] = []
+    sheet_names: list[str] = []
+    sheets: list[dict[str, Any]] = []
     images: list[str] = []
     row_count: int | None = None
     fmt = verdict.detected_format
@@ -133,20 +148,18 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
             import io
 
             wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
-            ws = wb.worksheets[0] if wb.worksheets else None
-            if ws is not None:
+            sheet_names = [ws.title for ws in wb.worksheets]
+            for ws in wb.worksheets[:max_sheets]:
                 rows: list[list[Any]] = []
                 for row in ws.iter_rows(values_only=True):
                     if len(rows) >= max_rows + 10:
                         break
                     rows.append([("" if c is None else (c.isoformat() if hasattr(c, "isoformat") else c)) for c in row])
-                if rows:
-                    header_index = _header_row_index(rows)
-                    headers = [str(c) for c in rows[header_index]]
-                    for row in rows[header_index + 1:header_index + 1 + max_rows]:
-                        if any(v not in (None, "") for v in row):
-                            sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(row)})
-                row_count = (ws.max_row or 0)
+                sheet_headers, sheet_rows = _sample_rows_from_raw(rows, max_rows)
+                sheets.append({"name": ws.title, "headers": sheet_headers, "sample_rows": sheet_rows})
+                if not headers and (sheet_headers or sheet_rows):
+                    headers, sample_rows = sheet_headers, sheet_rows
+            row_count = (wb.worksheets[0].max_row or 0) if wb.worksheets else None
             wb.close()
         elif fmt == "xls":
             import io
@@ -154,17 +167,14 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
             import xlrd
 
             wb = xlrd.open_workbook(file_contents=raw)
-            if wb.sheets():
-                sh = wb.sheets()[0]
-                if sh.nrows:
-                    rows = [[sh.cell_value(r, c) for c in range(sh.ncols)] for r in range(min(sh.nrows, max_rows + 10))]
-                    header_index = _header_row_index(rows)
-                    headers = [str(c) for c in rows[header_index]]
-                    for r in range(header_index + 1, min(sh.nrows, header_index + 1 + max_rows)):
-                        values = rows[r]
-                        if any(v not in (None, "") for v in values):
-                            sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(values)})
-                    row_count = sh.nrows
+            sheet_names = wb.sheet_names()
+            for sh in wb.sheets()[:max_sheets]:
+                rows = [[sh.cell_value(r, c) for c in range(sh.ncols)] for r in range(min(sh.nrows, max_rows + 10))]
+                sheet_headers, sheet_rows = _sample_rows_from_raw(rows, max_rows)
+                sheets.append({"name": sh.name, "headers": sheet_headers, "sample_rows": sheet_rows})
+                if not headers and (sheet_headers or sheet_rows):
+                    headers, sample_rows = sheet_headers, sheet_rows
+            row_count = wb.sheets()[0].nrows if wb.sheets() else None
         elif fmt in {"csv", "tsv"}:
             import csv
             import io
@@ -208,6 +218,8 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
         "sniff": {"detected_format": verdict.detected_format, "mime_type": verdict.mime_type, "match": verdict.match},
         "headers": headers,
         "sample_rows": sample_rows,
+        "sheet_names": sheet_names,
+        "sheets": sheets,
         "images": images,
         "row_count": row_count,
         "size_bytes": len(raw),

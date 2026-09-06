@@ -60,3 +60,28 @@ def test_sample_file_unsupported_image_degrades_gracefully():
     sample = sample_file(b"\x89PNG\r\n\x1a\n" + b"garbage", "fake.png")
     assert sample["sniff"]["detected_format"] == "png"
     assert sample["images"] == []
+
+
+def test_sample_file_multi_sheet_xlsx():
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "材料明细"
+    ws1.append(["物料编码", "材料名称", "规格"])
+    ws1.append(["YA.001", "铜箔", "2m"])
+    ws2 = wb.create_sheet("产品BOM-1")
+    ws2.append(["物料编码", "材料名称", "用量"])
+    ws2.append(["YA.001", "铜箔", 2])
+    ws3 = wb.create_sheet("产品BOM-2")
+    ws3.append(["物料编码", "材料名称", "用量"])
+    ws3.append(["YA.002", "线材", 5])
+    buf = io.BytesIO()
+    wb.save(buf)
+
+    sample = sample_file(buf.getvalue(), "BOM.xlsx", max_sheets=3)
+    assert sample["sheet_names"] == ["材料明细", "产品BOM-1", "产品BOM-2"]
+    assert len(sample["sheets"]) == 3
+    assert sample["sheets"][0]["name"] == "材料明细"
+    assert sample["sheets"][0]["headers"][:3] == ["物料编码", "材料名称", "规格"]
+    # 主 headers 取第一个有内容的 sheet
+    assert sample["headers"][:3] == ["物料编码", "材料名称", "规格"]

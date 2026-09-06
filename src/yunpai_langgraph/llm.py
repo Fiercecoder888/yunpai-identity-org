@@ -233,10 +233,12 @@ class QwenRouter:
             "detected_format": str((sample.get("sniff") or {}).get("detected_format") or ""),
             "headers": list(sample.get("headers") or []),
             "sample_rows": list(sample.get("sample_rows") or []),
+            "sheet_names": list(sample.get("sheet_names") or []),
+            "sheets": list(sample.get("sheets") or []),
             "row_count": sample.get("row_count"),
         }, ensure_ascii=False)
         parts: list[dict[str, Any]] = [
-            {"type": "text", "text": "文件样本：\n" + text + "\n请判断 entity_type 并抽取 canonical 记录。"},
+            {"type": "text", "text": "文件样本：\n" + text + "\n若含多 sheet（sheet_names 是全部 sheet，sheets 是前几个 sheet 的采样），请综合判断整体业务类型并抽取 canonical 记录。"},
         ]
         for image_b64 in (sample.get("images") or []):
             parts.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + str(image_b64)}})
