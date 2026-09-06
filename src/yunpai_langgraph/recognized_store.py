@@ -84,6 +84,38 @@ def redact_row(row: dict[str, Any], *, sensitive_columns: set[str] | None = None
 # 采样（确定性，只读表头 + 前 N 行）
 # ---------------------------------------------------------------------------
 
+def _is_numeric_cell(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        text = value.strip()
+        return bool(re.match(r"^-?\d+(\.\d+)?%?$", text)) and text not in ("", "-")
+    return False
+
+
+def _header_row_index(rows: list[list[Any]]) -> int:
+    """结构启发：表头行 = 前 10 行里第一个「多列且无纯数值单元格」的行。
+
+    单列标题行被跳过；含数字/编码数值的数据行被跳过；只有「全是文字列名」的行
+    才判为表头。这是结构判断（找表头位置），不做业务语义。
+    """
+    for index, row in enumerate(rows[:10]):
+        cells = [value for value in row if value not in (None, "")]
+        if len(cells) < 2:
+            continue
+        if not any(_is_numeric_cell(value) for value in cells):
+            return index
+    # 兜底：非空单元格最多的行。
+    best, best_count = 0, -1
+    for index, row in enumerate(rows[:10]):
+        count = sum(1 for value in row if value not in (None, ""))
+        if count > best_count:
+            best, best_count = index, count
+    return best
+
+
 def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, Any]:
     """返回 LLM 可看的小样本；非表格/无法解析时只回嗅探结果 + 说明，不伪造内容。"""
     from .file_sniff import sniff_format
@@ -103,17 +135,17 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
             wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
             ws = wb.worksheets[0] if wb.worksheets else None
             if ws is not None:
-                it = ws.iter_rows(values_only=True)
-                try:
-                    headers = [("" if c is None else str(c)) for c in next(it)]
-                except StopIteration:
-                    headers = []
-                for row in it:
-                    if len(sample_rows) >= max_rows:
+                rows: list[list[Any]] = []
+                for row in ws.iter_rows(values_only=True):
+                    if len(rows) >= max_rows + 10:
                         break
-                    values = [("" if c is None else c) for c in row]
-                    if any(v not in (None, "") for v in values):
-                        sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(values)})
+                    rows.append([("" if c is None else (c.isoformat() if hasattr(c, "isoformat") else c)) for c in row])
+                if rows:
+                    header_index = _header_row_index(rows)
+                    headers = [str(c) for c in rows[header_index]]
+                    for row in rows[header_index + 1:header_index + 1 + max_rows]:
+                        if any(v not in (None, "") for v in row):
+                            sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(row)})
                 row_count = (ws.max_row or 0)
             wb.close()
         elif fmt == "xls":
@@ -125,9 +157,11 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
             if wb.sheets():
                 sh = wb.sheets()[0]
                 if sh.nrows:
-                    headers = [str(sh.cell_value(0, c)) for c in range(sh.ncols)]
-                    for r in range(1, min(sh.nrows, max_rows + 1)):
-                        values = [sh.cell_value(r, c) for c in range(sh.ncols)]
+                    rows = [[sh.cell_value(r, c) for c in range(sh.ncols)] for r in range(min(sh.nrows, max_rows + 10))]
+                    header_index = _header_row_index(rows)
+                    headers = [str(c) for c in rows[header_index]]
+                    for r in range(header_index + 1, min(sh.nrows, header_index + 1 + max_rows)):
+                        values = rows[r]
                         if any(v not in (None, "") for v in values):
                             sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(values)})
                     row_count = sh.nrows
@@ -139,8 +173,9 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
             reader = csv.reader(io.StringIO(raw.decode("utf-8-sig", errors="replace")), delimiter=delim)
             rows = list(reader)
             if rows:
-                headers = [str(h) for h in rows[0]]
-                for row in rows[1:max_rows + 1]:
+                header_index = _header_row_index(rows)
+                headers = [str(h) for h in rows[header_index]]
+                for row in rows[header_index + 1:header_index + 1 + max_rows]:
                     sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(row)})
                 row_count = len(rows)
         elif fmt == "json":

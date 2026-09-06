@@ -16,7 +16,9 @@ from typing import Any
 # entity_type -> {required: 必填字段, fields: 允许出现的字段}
 CANONICAL_SCHEMA: dict[str, dict[str, Any]] = {
     "order": {
-        "required": ("order_id", "quantity", "due_date"),
+        # due_date 很关键，但不少来源（如订单产量工资表）不写交期；识别层不做硬拦，
+        # 缺交期在 M3/MRP 需要时由下游 BLOCKED_INPUT Gate 兜底。
+        "required": ("order_id", "quantity"),
         "fields": (
             "order_id", "product_code", "product_name", "quantity", "due_date",
             "customer_name", "unit_price", "total_amount",
@@ -36,7 +38,7 @@ CANONICAL_SCHEMA: dict[str, dict[str, Any]] = {
     },
     "equipment": {
         "required": ("equipment_code", "equipment_name"),
-        "fields": ("equipment_code", "equipment_name", "equipment_type", "line", "status", "capability_codes"),
+        "fields": ("equipment_code", "equipment_name", "equipment_type", "model", "line", "status", "capability_codes"),
     },
     "station": {
         "required": ("station_code",),
@@ -56,7 +58,7 @@ CANONICAL_SCHEMA: dict[str, dict[str, Any]] = {
     },
     "tooling": {
         "required": ("tooling_code", "tooling_name"),
-        "fields": ("tooling_code", "tooling_name", "tooling_type", "status"),
+        "fields": ("tooling_code", "tooling_name", "tooling_type", "model", "status"),
     },
     "route": {
         "required": ("route_code", "operations"),
@@ -145,8 +147,8 @@ def validate_canonical(entity_type: str, records: list[dict[str, Any]]) -> dict[
         for key, value in record.items():
             if key in NUMERIC_FIELDS and value is not None and value != "" and not _is_numeric(value):
                 record_errors.append(f"字段 '{key}' 必须是数字，得到 {type(value).__name__}")
-            if key in LIST_FIELDS and value is not None and not isinstance(value, list):
-                record_errors.append(f"字段 '{key}' 必须是数组")
+            if key in LIST_FIELDS and value is not None and not isinstance(value, (list, str)):
+                record_errors.append(f"字段 '{key}' 必须是数组或字符串")
         if record_errors:
             errors.append({"code": "INVALID_RECORD", "message": "; ".join(record_errors), "record_index": index})
             continue
@@ -159,7 +161,15 @@ def validate_canonical(entity_type: str, records: list[dict[str, Any]]) -> dict[
                 source.update(value)
             else:
                 source[key] = value
-        clean = {key: value for key, value in record.items() if key not in EVIDENCE_FIELDS}
+        # 归一化：LIST_FIELDS 的单个字符串值 → [字符串]，避免 agent 输出单值时被误拒。
+        clean: dict[str, Any] = {}
+        for key, value in record.items():
+            if key in EVIDENCE_FIELDS:
+                continue
+            if key in LIST_FIELDS and isinstance(value, str):
+                clean[key] = [value]
+            else:
+                clean[key] = value
         clean_records.append(clean)
         if source:
             evidence.append({"record_index": index, **source})
