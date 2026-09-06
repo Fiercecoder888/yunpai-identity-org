@@ -7,9 +7,8 @@ M1 是独立领域服务；Orchestrator 不内置任何完整 M1 解析、TaskSt
 
 历史完整实现（任务书阶段 B 的主要来源）：
 
-```text
-交接归档：handoff/m1-tool-skill-completion-20260904/sources/t8-m1-clean.tar.gz
-```
+历史交接归档（t8-m1-clean.tar.gz）已随历史文档清理移出源码树；
+迁移映射与合同要点见根目录 HISTORY.md「M1 交接包」一节，完整归档在 git 历史中。
 
 服务自身能力（FastAPI）：
 

@@ -1,6 +1,6 @@
 """确定性批量抽取：用 LLM 识别的「列映射」遍历所有 sheet，抽取全量记录。
 
-两段式设计（见 docs/AGENT_FREEDOM_PRINCIPLES.md）：
+两段式设计（见 HISTORY.md「Agent 自由化原则」一节）：
 - LLM（map_to_canonical）只负责「理解结构」——识别 entity_type + 输出 column_mapping
   （表头名 → canonical 字段名）；
 - 本模块用该映射做「确定性批量抽取」——遍历全部 sheet，逐行抽全量数据，
