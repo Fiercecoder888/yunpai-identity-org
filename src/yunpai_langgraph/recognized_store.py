@@ -129,7 +129,7 @@ def _sample_rows_from_raw(rows: list[list[Any]], max_rows: int) -> tuple[list[st
     return headers, sample_rows
 
 
-def sample_file(raw: bytes, filename: str, *, max_rows: int = 10, max_sheets: int = 3) -> dict[str, Any]:
+def sample_file(raw: bytes, filename: str, *, max_rows: int = 10, max_sheets: int = 6) -> dict[str, Any]:
     """返回 LLM 可看的小样本；非表格/无法解析时只回嗅探结果 + 说明，不伪造内容。"""
     from .file_sniff import sniff_format
 
@@ -152,11 +152,13 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10, max_sheets: in
             for ws in wb.worksheets[:max_sheets]:
                 rows: list[list[Any]] = []
                 for row in ws.iter_rows(values_only=True):
-                    if len(rows) >= max_rows + 10:
+                    if len(rows) >= 40:
                         break
-                    rows.append([("" if c is None else (c.isoformat() if hasattr(c, "isoformat") else c)) for c in row])
+                    # 截断到前 25 列：真实表头/数据列在左侧，右侧常有脏格式造成的
+                    # 超大 max_column（如 16369），全列读会导致样本爆炸。
+                    rows.append([("" if c is None else (c.isoformat() if hasattr(c, "isoformat") else c)) for c in row[:25]])
                 sheet_headers, sheet_rows = _sample_rows_from_raw(rows, max_rows)
-                sheets.append({"name": ws.title, "headers": sheet_headers, "sample_rows": sheet_rows})
+                sheets.append({"name": ws.title, "headers": sheet_headers, "sample_rows": sheet_rows, "raw_rows": rows})
                 if not headers and (sheet_headers or sheet_rows):
                     headers, sample_rows = sheet_headers, sheet_rows
             row_count = (wb.worksheets[0].max_row or 0) if wb.worksheets else None
@@ -169,9 +171,9 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10, max_sheets: in
             wb = xlrd.open_workbook(file_contents=raw)
             sheet_names = wb.sheet_names()
             for sh in wb.sheets()[:max_sheets]:
-                rows = [[sh.cell_value(r, c) for c in range(sh.ncols)] for r in range(min(sh.nrows, max_rows + 10))]
+                rows = [[sh.cell_value(r, c) for c in range(min(sh.ncols, 25))] for r in range(min(sh.nrows, 40))]
                 sheet_headers, sheet_rows = _sample_rows_from_raw(rows, max_rows)
-                sheets.append({"name": sh.name, "headers": sheet_headers, "sample_rows": sheet_rows})
+                sheets.append({"name": sh.name, "headers": sheet_headers, "sample_rows": sheet_rows, "raw_rows": rows})
                 if not headers and (sheet_headers or sheet_rows):
                     headers, sample_rows = sheet_headers, sheet_rows
             row_count = wb.sheets()[0].nrows if wb.sheets() else None

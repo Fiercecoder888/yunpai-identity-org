@@ -217,12 +217,17 @@ class QwenRouter:
             lines.append(f"- {entity_type}: 必填[{','.join(spec['required'])}] 允许[{','.join(spec['fields'])}]")
         schema_text = "\n".join(lines)
         return (
-            "你是云湃制造系统的数据映射器。根据给定的文件样本（表格看 headers/sample_rows，图片/PDF 直接看图）"
+            "你是云湃制造系统的数据映射器。根据给定的文件样本（表格看 headers/sample_rows/sheets 的 raw_rows，图片/PDF 直接看图）"
             "判断业务实体类型，并把内容抽取成我们 canonical 格式的记录。"
             "只输出一个 JSON 对象，字段为 entity_type、records、confidence、needs_review、reason。"
             "entity_type 只能是下列之一；records 每条是对象，字段名只能用该类型「允许」集合内的字段；"
             "数值必须从文件照抄，绝不编造；每条记录可带 _source（sheet/row/col/raw 或 page/image）定位证据。"
             "confidence 是 0 到 1 浮点；不确定（<0.7）或关键字段缺失时 needs_review=true。reason 一句话说明依据。"
+            "特殊结构指引：① 作业指导书(SOP)：每个 sheet 是一道工序，从「制作工站/文件编号/IE工时/作业步骤」抽取"
+            "document 的 route_steps 数组，每项为 {operation_code, operation_name, station, standard_minutes}；"
+            "operation_code 用 文件编号+序号（如 TX-001-01），standard_minutes 从 IE工时 的秒数除以 60 得到，station 取制作工站。"
+            "② 成品成本分析表/BOM 表：从「物料编码/材料名称/用量/单位/单价/供应商」抽取 bom 的 lines，"
+            "每行 {material_code, material_name, quantity, unit}，用量照抄数值列。"
             "\ncanonical schema：\n" + schema_text
         )
 
