@@ -1,0 +1,126 @@
+{
+  "module": "m0",
+  "base_url": "",
+  "tools": [
+    {
+      "name": "sample_file",
+      "description": "确定性文件采样：按 magic bytes 嗅探真实格式，读取表头 + 前 N 行（xlsx/xlsm/xls/csv/tsv/json），返回 LLM 可看的小样本与 sha256。不做语义分类、不伪造内容。总控 agent 据此判断文件用途（工资表/日报/花名册/订单/BOM/SOP 等）。",
+      "input_schema": {
+        "type": "object",
+        "required": ["content_b64"],
+        "properties": {
+          "content_b64": { "type": "string", "contentEncoding": "base64", "description": "文件内容 Base64。" },
+          "filename": { "type": "string", "description": "原文件名（用于扩展名双因子比对）。" },
+          "max_rows": { "type": "integer", "default": 10, "minimum": 1, "maximum": 50 }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "filename": { "type": "string" },
+              "sniff": { "type": "object" },
+              "headers": { "type": "array" },
+              "sample_rows": { "type": "array" },
+              "row_count": { "type": ["integer", "null"] },
+              "size_bytes": { "type": "integer" },
+              "sha256": { "type": "string" },
+              "content_sampled": { "type": "boolean" }
+            }
+          },
+          "errors": { "type": "array" },
+          "trace_id": { "type": "string" },
+          "evidence": { "type": "array" }
+        }
+      },
+      "capability": "document_parse",
+      "side_effect": "none",
+      "review_gate": "none",
+      "execution": "sync"
+    },
+    {
+      "name": "ingest_recognized",
+      "description": "把 agent 判定后的自描述行落库（kind + 列 + 行）。确定性安全网：kind 枚举校验、PII 确定性脱敏（身份证/银行卡/手机号/敏感列名）、sha256 幂等（重复上传不重复建行）。只写自描述表，不写 canonical 主数据；低置信由 agent 决定走 needs_review。",
+      "input_schema": {
+        "type": "object",
+        "required": ["kind", "filename", "sha256", "columns", "rows"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["order", "bom", "sop", "inventory", "equipment", "station", "worker", "wage", "personnel_roster", "production_daily_report", "rule_config", "engineering_document", "engineering_drawing", "other"] },
+          "filename": { "type": "string" },
+          "sha256": { "type": "string", "description": "文件内容的 sha256（来自 sample_file 或前端）。" },
+          "columns": { "type": "array", "items": { "type": "string" } },
+          "rows": { "type": "array", "items": { "type": "object" } },
+          "confidence": { "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 1.0 },
+          "redact": { "type": "boolean", "default": true }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "inserted_rows": { "type": "integer" },
+              "duplicate": { "type": "boolean" },
+              "sha256": { "type": "string" },
+              "kind": { "type": "string" },
+              "redacted_fields": { "type": "integer" }
+            }
+          },
+          "errors": { "type": "array" },
+          "trace_id": { "type": "string" },
+          "evidence": { "type": "array" }
+        }
+      },
+      "capability": "data_ingest",
+      "side_effect": "local_write",
+      "review_gate": "none",
+      "execution": "sync"
+    },
+    {
+      "name": "query_recognized_table",
+      "description": "读回已落库的自描述表，支持 kind 过滤、字段等值过滤和 count/sum/avg 聚合（可 group_by）。供总控 agent 做跨表计算（如 工资÷计件单价=日工作量），不写死功能路由。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string", "description": "可选，按 kind 过滤。" },
+          "filters": { "type": "object", "description": "可选，字段等值过滤 {列名: 值}。" },
+          "aggregate": {
+            "type": "object",
+            "description": "可选聚合：{op: count|sum|avg, field: 列名, group_by: 列名}。",
+            "properties": {
+              "op": { "type": "string", "enum": ["count", "sum", "avg"] },
+              "field": { "type": "string" },
+              "group_by": { "type": "string" }
+            }
+          },
+          "limit": { "type": "integer", "default": 200, "minimum": 1, "maximum": 1000 }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "rows": { "type": "array" },
+              "count": { "type": "integer" }
+            }
+          },
+          "errors": { "type": "array" },
+          "trace_id": { "type": "string" },
+          "evidence": { "type": "array" }
+        }
+      },
+      "capability": "data_query",
+      "side_effect": "none",
+      "review_gate": "none",
+      "execution": "sync"
+    }
+  ]
+}

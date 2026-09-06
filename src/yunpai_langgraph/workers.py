@@ -654,6 +654,79 @@ def _m5(name: str):
     return M5_HANDLERS[name]
 
 
+async def sample_file(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """确定性采样：把文件压成 LLM 可看的表头 + 前 N 行样本，不伪造内容。"""
+    from .recognized_store import sample_file as _sample
+
+    encoded = str(payload.get("content_b64") or "")
+    filename = str(payload.get("filename") or "document.bin")
+    if not encoded:
+        return {"success": False, "code": "MISSING_FILE",
+                "errors": [{"code": "MISSING_FILE", "message": "缺少 content_b64", "details": []}],
+                "data": {}, "trace_id": _trace(ctx, "sample_file")}
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        return {"success": False, "code": "INVALID_BASE64",
+                "errors": [{"code": "INVALID_BASE64", "message": str(exc), "details": []}],
+                "data": {}, "trace_id": _trace(ctx, "sample_file")}
+    sample = _sample(raw, filename, max_rows=int(payload.get("max_rows") or 10))
+    return {"success": True, "data": sample, "errors": [],
+            "trace_id": _trace(ctx, "sample_file"),
+            "evidence": [_evidence("catalog", "sample_file", f"sampled {filename} ({sample['sniff']['detected_format']})")]}
+
+
+async def ingest_recognized(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """确定性落库：schema 校验 + PII 脱敏 + 自描述表存储 + sha256 幂等。"""
+    from .recognized_store import RecognizedTableStore
+
+    kind = str(payload.get("kind") or "")
+    filename = str(payload.get("filename") or "")
+    sha256 = str(payload.get("sha256") or "")
+    columns = payload.get("columns") or []
+    rows = payload.get("rows") or []
+    confidence = float(payload.get("confidence") or 0.0)
+    if not (kind and filename and sha256):
+        return {"success": False, "code": "MISSING_REQUIRED",
+                "errors": [{"code": "MISSING_REQUIRED", "message": "kind/filename/sha256 必填", "details": []}],
+                "data": {}, "trace_id": _trace(ctx, "ingest_recognized")}
+    if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+        return {"success": False, "code": "INVALID_COLUMNS",
+                "errors": [{"code": "INVALID_COLUMNS", "message": "columns 必须为字符串数组", "details": []}],
+                "data": {}, "trace_id": _trace(ctx, "ingest_recognized")}
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        return {"success": False, "code": "INVALID_ROWS",
+                "errors": [{"code": "INVALID_ROWS", "message": "rows 必须为对象数组", "details": []}],
+                "data": {}, "trace_id": _trace(ctx, "ingest_recognized")}
+    store = RecognizedTableStore(ctx.get("recognized_db"))
+    try:
+        result = store.ingest(kind=kind, filename=filename, sha256=sha256,
+                              columns=list(columns), rows=rows, confidence=confidence)
+    except ValueError as exc:
+        return {"success": False, "code": "INVALID_KIND",
+                "errors": [{"code": "INVALID_KIND", "message": str(exc), "details": []}],
+                "data": {}, "trace_id": _trace(ctx, "ingest_recognized")}
+    return {"success": True, "data": result, "errors": [],
+            "trace_id": _trace(ctx, "ingest_recognized"),
+            "evidence": [_evidence("catalog", "ingest_recognized", f"{kind} rows={result['inserted_rows']} dup={result['duplicate']}")]}
+
+
+async def query_recognized_table(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """agent 读回：对已落库的自描述表做过滤/聚合。"""
+    from .recognized_store import RecognizedTableStore
+
+    store = RecognizedTableStore(ctx.get("recognized_db"))
+    rows = store.query(
+        kind=payload.get("kind"),
+        filters=payload.get("filters"),
+        aggregate=payload.get("aggregate"),
+        limit=int(payload.get("limit") or 200),
+    )
+    return {"success": True, "data": {"rows": rows, "count": len(rows)}, "errors": [],
+            "trace_id": _trace(ctx, "query_recognized_table"),
+            "evidence": [_evidence("catalog", "query_recognized_table", f"returned {len(rows)} rows")]}
+
+
 HANDLERS = {
     "data_import_run": m0_import,
     "data_import_status": m0_status,
@@ -684,4 +757,8 @@ HANDLERS = {
     "advise_m5_schedule": _m5("advise_m5_schedule"),
     "run_m5_intelligent_schedule": _m5("run_m5_intelligent_schedule"),
     "generate_m5_material_procurement_plan": _m5("generate_m5_material_procurement_plan"),
+    # M0 自描述表识别（agent-driven file recognition，确定性安全网）
+    "sample_file": sample_file,
+    "ingest_recognized": ingest_recognized,
+    "query_recognized_table": query_recognized_table,
 }

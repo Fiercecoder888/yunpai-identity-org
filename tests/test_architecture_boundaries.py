@@ -12,7 +12,7 @@ def test_all_registered_skills_use_registered_tools():
     skills.validate_tools(registry.specs)
     assert registry.specs
     assert all(spec.capability for spec in registry.specs.values())
-    assert all(spec.side_effect in {"none", "candidate_write", "canonical_write", "external_write"} for spec in registry.specs.values())
+    assert all(spec.side_effect in {"none", "local_write", "candidate_write", "canonical_write", "external_write"} for spec in registry.specs.values())
     assert all(spec.review_gate in {"none", "data", "candidate", "engineering", "procurement", "schedule"} for spec in registry.specs.values())
 
 

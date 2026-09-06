@@ -1,0 +1,269 @@
+"""Agent 驱动文件识别的确定性安全网：采样 + PII 脱敏 + 自描述结构化表。
+
+本模块只做"事实与安全"，不做"语义理解"：
+- ``sample_file`` 把大文件压成 LLM 可看的小样本（真实格式 + 表头 + 前 N 行）。
+- PII 脱敏用确定性正则（身份证/银行卡/手机号/敏感列名），不交给 LLM。
+- ``RecognizedTableStore`` 落库自描述行（kind + 列 + 行），sha256 幂等。
+
+语义分类（"这是工资表还是日报"）由总控 agent（Qwen）负责，本模块只校验结构。
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import re
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any
+
+# ---------------------------------------------------------------------------
+# PII 脱敏（确定性）
+# ---------------------------------------------------------------------------
+
+_ID_CARD = re.compile(r"\b\d{17}[\dXx]\b")
+_BANK_CARD = re.compile(r"\b\d{16,19}\b")
+_PHONE = re.compile(r"\b1[3-9]\d{9}\b")
+
+#: 列名命中这些 token 即视为敏感列（值会被遮罩）。
+SENSITIVE_COLUMN_TOKENS = (
+    "身份证", "银行卡", "银行账号", "手机", "电话", "工资", "薪资", "薪酬",
+    "应发", "实发", "个税", "社保", "住址", "地址", "紧急联系人", "联系方式",
+)
+
+KIND_ENUM = (
+    "order", "bom", "sop", "inventory", "equipment", "station", "worker",
+    "wage", "personnel_roster", "production_daily_report", "rule_config",
+    "engineering_document", "engineering_drawing", "other",
+)
+
+
+def _mask(value: str) -> str:
+    if len(value) <= 6:
+        return "*" * len(value)
+    return value[:3] + "*" * (len(value) - 7) + value[-4:]
+
+
+def _redact_value(value: Any) -> Any:
+    """确定性 PII 值遮罩：任何列命中身份证/银行卡/手机号即遮罩。"""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if _ID_CARD.fullmatch(text) or _BANK_CARD.fullmatch(text) or _PHONE.fullmatch(text):
+        return _mask(text)
+    return value
+
+
+def _mask_column_value(value: Any) -> Any:
+    """敏感列整列遮罩（字符串与数值都遮，不保留可识别信息）。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return _mask(text) if text else value
+
+
+def redact_row(row: dict[str, Any], *, sensitive_columns: set[str] | None = None) -> dict[str, Any]:
+    """对一行的敏感列做确定性遮罩；敏感判定 = 显式指定列 ∪ 列名 token 命中 ∪ 值形如 PII。"""
+    out: dict[str, Any] = {}
+    for key, value in row.items():
+        key_s = str(key)
+        sensitive = (
+            (key_s in (sensitive_columns or set()))
+            or any(token in key_s for token in SENSITIVE_COLUMN_TOKENS)
+        )
+        out[key] = _mask_column_value(value) if sensitive else _redact_value(value)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 采样（确定性，只读表头 + 前 N 行）
+# ---------------------------------------------------------------------------
+
+def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, Any]:
+    """返回 LLM 可看的小样本；非表格/无法解析时只回嗅探结果 + 说明，不伪造内容。"""
+    from .file_sniff import sniff_format
+
+    verdict = sniff_format(raw, filename)
+    headers: list[str] = []
+    sample_rows: list[dict[str, Any]] = []
+    row_count: int | None = None
+    fmt = verdict.detected_format
+
+    try:
+        if fmt in {"xlsx", "xlsm"}:
+            from openpyxl import load_workbook
+            import io
+
+            wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+            ws = wb.worksheets[0] if wb.worksheets else None
+            if ws is not None:
+                it = ws.iter_rows(values_only=True)
+                try:
+                    headers = [("" if c is None else str(c)) for c in next(it)]
+                except StopIteration:
+                    headers = []
+                for row in it:
+                    if len(sample_rows) >= max_rows:
+                        break
+                    values = [("" if c is None else c) for c in row]
+                    if any(v not in (None, "") for v in values):
+                        sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(values)})
+                row_count = (ws.max_row or 0)
+            wb.close()
+        elif fmt == "xls":
+            import io
+
+            import xlrd
+
+            wb = xlrd.open_workbook(file_contents=raw)
+            if wb.sheets():
+                sh = wb.sheets()[0]
+                if sh.nrows:
+                    headers = [str(sh.cell_value(0, c)) for c in range(sh.ncols)]
+                    for r in range(1, min(sh.nrows, max_rows + 1)):
+                        values = [sh.cell_value(r, c) for c in range(sh.ncols)]
+                        if any(v not in (None, "") for v in values):
+                            sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(values)})
+                    row_count = sh.nrows
+        elif fmt in {"csv", "tsv"}:
+            import csv
+            import io
+
+            delim = "," if fmt == "csv" else "\t"
+            reader = csv.reader(io.StringIO(raw.decode("utf-8-sig", errors="replace")), delimiter=delim)
+            rows = list(reader)
+            if rows:
+                headers = [str(h) for h in rows[0]]
+                for row in rows[1:max_rows + 1]:
+                    sample_rows.append({headers[i] if i < len(headers) else f"col{i}": v for i, v in enumerate(row)})
+                row_count = len(rows)
+        elif fmt == "json":
+            data = json.loads(raw.decode("utf-8-sig"))
+            records = data if isinstance(data, list) else data.get("records") if isinstance(data, dict) else []
+            if isinstance(records, list) and records and isinstance(records[0], dict):
+                headers = sorted({k for rec in records[:max_rows] for k in rec.keys()})
+                sample_rows = records[:max_rows]
+                row_count = len(records)
+    except Exception:
+        # 采样失败不伪造；回退到只给嗅探 + 说明。
+        headers, sample_rows, row_count = [], [], None
+
+    return {
+        "filename": filename,
+        "sniff": {"detected_format": verdict.detected_format, "mime_type": verdict.mime_type, "match": verdict.match},
+        "headers": headers,
+        "sample_rows": sample_rows,
+        "row_count": row_count,
+        "size_bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "content_sampled": bool(sample_rows) or bool(headers),
+    }
+
+
+# ---------------------------------------------------------------------------
+# 自描述结构化表（SQLite，sha256 幂等）
+# ---------------------------------------------------------------------------
+
+def _default_db_path() -> str:
+    return os.getenv("YUNPAI_RECOGNIZED_DB", "runtime/yunpai-recognized.sqlite")
+
+
+class RecognizedTableStore:
+    def __init__(self, db_path: str | None = None):
+        self.db_path = str(db_path or _default_db_path())
+        if os.path.dirname(self.db_path):
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self._init()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init(self) -> None:
+        with self._connect() as db:
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS recognized_tables (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    sha256 TEXT NOT NULL UNIQUE,
+                    columns TEXT NOT NULL,
+                    rows TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    redacted_fields INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+
+    def ingest(self, *, kind: str, filename: str, sha256: str, columns: list[str],
+               rows: list[dict[str, Any]], confidence: float, redact: bool = True) -> dict[str, Any]:
+        """落库自描述行；同 sha256 幂等（重复上传不重复建行）。"""
+        if kind not in KIND_ENUM:
+            raise ValueError(f"unsupported kind: {kind}")
+        redacted = 0
+        stored_rows: list[dict[str, Any]] = []
+        for row in rows:
+            before = json.dumps(row, ensure_ascii=False)
+            out = redact_row(row) if redact else dict(row)
+            if json.dumps(out, ensure_ascii=False) != before:
+                redacted += 1
+            stored_rows.append(out)
+        created = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            exists = db.execute("SELECT 1 FROM recognized_tables WHERE sha256=?", (sha256,)).fetchone()
+            if exists:
+                return {"inserted_rows": 0, "duplicate": True, "sha256": sha256, "kind": kind, "redacted_fields": 0}
+            db.execute(
+                """INSERT INTO recognized_tables(kind, filename, sha256, columns, rows, confidence, redacted_fields, created_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (kind, filename, sha256, json.dumps(columns, ensure_ascii=False),
+                 json.dumps(stored_rows, ensure_ascii=False), float(confidence), redacted, created),
+            )
+        return {"inserted_rows": len(stored_rows), "duplicate": False, "sha256": sha256, "kind": kind, "redacted_fields": redacted}
+
+    def query(self, *, kind: str | None = None, filters: dict[str, Any] | None = None,
+              aggregate: dict[str, str] | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        """读回 + 过滤 + 聚合（近似 SQL 的声明式查询）。"""
+        rows: list[dict[str, Any]] = []
+        with self._connect() as db:
+            sql = "SELECT kind, filename, sha256, columns, rows, confidence, created_at FROM recognized_tables"
+            params: list[Any] = []
+            if kind:
+                sql += " WHERE kind=?"
+                params.append(kind)
+            for r in db.execute(sql, params).fetchall():
+                for row in json.loads(r["rows"]):
+                    rows.append({"kind": r["kind"], "filename": r["filename"], **row})
+
+        if filters:
+            rows = [r for r in rows if all(str(r.get(k)) == str(v) for k, v in (filters or {}).items())]
+
+        if aggregate:
+            # 支持 count / sum / avg 三类聚合，按 group_by 分组。
+            group = aggregate.get("group_by")
+            op = aggregate.get("op", "count")
+            field = aggregate.get("field")
+            buckets: dict[str, list[float]] = {}
+            for r in rows:
+                key = str(r.get(group)) if group else "__all__"
+                val = r.get(field)
+                try:
+                    buckets.setdefault(key, []).append(float(val))
+                except (TypeError, ValueError):
+                    buckets.setdefault(key, []).append(0.0)
+            out = []
+            for key, vals in buckets.items():
+                if op == "count":
+                    v = len(vals)
+                elif op == "sum":
+                    v = sum(vals)
+                elif op == "avg":
+                    v = sum(vals) / len(vals) if vals else 0.0
+                else:
+                    v = None
+                out.append({group or "group": key, op: v})
+            return out[:limit]
+
+        return rows[:limit]
