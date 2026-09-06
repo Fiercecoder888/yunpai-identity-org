@@ -1,0 +1,30 @@
+# 项目版本
+
+> 只在版本号、发布状态、升级路径或兼容性发生变化时读取和更新。
+
+## 当前版本
+
+- 版本号：`2026.09.06`（冻结，tag `release-20260906`；本轮开发基线 `codex/frontend-integration-20260906` @ `eb0f8fd`）
+- 发布状态：前端 A+ 对接（yunpaizhisuan-FE local 模式构建/代理/聊天/上传链路）已打通；`m0_m5` 旧工作流已删除、统一 `m1_m5_document_to_plan`；Qwen 已接入（`planner configured=true`，LLM 意图识别 `source=qwen`）；后端 378 passed/2 skipped
+- 兼容性说明：桌面/移动响应式布局；部署目录保留旧 release 回滚；前端 `frontend-yunpaizhisuan/` 为他人单独开发、仅做对接
+- 最后更新：2026-09-06
+
+## 下一版本计划
+
+- 目标版本：`2026.09.06-dev`（后续开发）
+- 计划内容：文件识别/入库改由总控 agent（Qwen）动态决策（识别/路由/提取不写死），新增 sample_file/ingest_recognized/query_recognized_table 工具；详见实施设计
+- 发布条件：typecheck/build/test、线上 health 和关键浏览器验收通过
+
+## 版本历史
+
+按时间倒序追加：版本号、日期、状态、主要变更、原因、兼容性、证据 ID 和 Gate 结果。
+
+- 2026-09-06：`2026.09.06`，前端对接 + 主链统一冻结；`codex/frontend-integration-20260906` @ `eb0f8fd`：yunpaizhisuan-FE A+ 对接（local 模式 + 最小代理）、删除旧 `m0_m5` 工作流统一 `m1_m5_document_to_plan`、Qwen 接入（LLM 意图识别 `source=qwen`）、修复 candidate 裁决/solve resources 回退/preview M5 读回等 4 个桥接缺口；后端 378 passed/2 skipped；证据 `E-FE-INTEGRATION-20260906`。
+- 2026-09-06：`2026.09.06`，冻结发布；修复 M5 求解器单窗口限制（工序可跨工作窗口放置），后端 378/前端 6 测试与构建通过，39092 隔离后端(9002)部署后 W-H128 800 PCS 订单 M1→M5 端到端 `feasible`；tag `release-20260906` 并推送 `dev`/`main`；证据 `E-GB10-39092-M5-FEASIBLE-20260906`。
+- 2026-09-03：`2026.09.03-dev`，开发中；新增多 session 协作约定并保留 GB10 回滚 release；证据 `E-SESSION-001`。
+- 2026-09-03：`2026.09.03-dev`，集成验收；合并 `neworigin/dev` 后端修复与右栏 session 提交，GB10 切换到 `20260903173855`；证据 `E-INTEGRATION-002`，Gate `G-002`。
+- 2026-09-03：`2026.09.03-dev`，交付完成；`dev` 推送到 `neworigin/dev` `ee8541cc`，session 报告和验收账本封账；证据 `E-INTEGRATION-003`。
+- 2026-09-05：`2026.09.05-dev`，隔离联调；将 `dev@05d4cba` 部署到 GB10 release `20260905013000` 的 9002/39094，未切换 `current`，完成真实 M1/M0 HTTP 探测和订单 Gate，M2 数据 Gate 阻塞后停止隔离进程并保留 release；证据 `E-GB10-M1M5-REAL-001`。
+- 2026-09-05：`2026.09.05-dev`，正式 39092 联调；提交 `c89df91` 修复订单行型号到 M1 顶层候选产品编码的补充，GB10 切换 release `20260905114500`，真实订单在 M0 未裁决候选 Gate 停止；证据 `E-GB10-WH909-ORDER-20260905-004`。
+- 2026-09-05：`2026.09.05-dev`，W-H909 canonical BOM 匹配验收；合并 `edeae4a`/`1708e59`/`84adae3`/`210c30d` 到 `main`/`dev`，GB10 切换 release `20260905080200`，前端租户 URL 复核 M1/M0 Gate 和 M2 7 条 BOM 匹配；SOP/工艺、M3-M5 事实仍阻塞；证据 `E-GB10-WH909-ORDER-20260905-005`。
+- 2026-09-05：`2026.09.05-dev`，上传真实 W-H909 BOM 与 30MB SOP `.xls` 后生成并发布 10 条 M0 canonical，订单工作流回读 7 条 BOM/14 道 SOP，M3 完成缺料计算并在 M4 供应商/采购 data Gate 停止；GB10 release `20260905090437`；证据 `E-GB10-WH909-ORDER-20260905-006`。
