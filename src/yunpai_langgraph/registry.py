@@ -396,6 +396,11 @@ def _extract_uploads(body: dict[str, Any]) -> list[tuple[str, tuple[str, bytes, 
     return uploads
 
 
+# 本地识别四件套：纯本地确定性工具（无 HTTP 端点），生产 HTTP transport 下也必须
+# 保持本地 handler，不得被 M0 远程绑定覆盖。
+LOCAL_ONLY_TOOLS = frozenset({"sample_file", "ingest_recognized", "query_recognized_table", "ingest_canonical"})
+
+
 def build_runtime_registry() -> ToolRegistry:
     registry = build_default_registry()
     transport = os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower()
@@ -425,7 +430,7 @@ def build_runtime_registry() -> ToolRegistry:
         registry.bind_http(
             _module_urls(registry, selected),
             headers_by_module=_module_auth_headers(selected),
-            tool_names=set(registry.specs) - set(EXCLUDED_M3_M4_TOOL_NAMES),
+            tool_names=set(registry.specs) - set(EXCLUDED_M3_M4_TOOL_NAMES) - set(LOCAL_ONLY_TOOLS),
         )
         if "m1" in selected:
             # Replace the generic HTTP binding for M1 with the dedicated M1
