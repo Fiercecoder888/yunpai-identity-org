@@ -190,7 +190,7 @@ class QwenRouter:
                     {"role": "user", "content": self._canonical_prompt(sample)},
                 ],
                 "temperature": 0,
-                "max_tokens": 2048,
+                "max_tokens": 8192,
                 "stream": False,
                 "chat_template_kwargs": {"enable_thinking": False},
                 "response_format": {"type": "json_object"},
@@ -222,6 +222,7 @@ class QwenRouter:
             "只输出一个 JSON 对象，字段为 entity_type、records、confidence、needs_review、reason。"
             "entity_type 只能是下列之一；records 每条是对象，字段名只能用该类型「允许」集合内的字段；"
             "数值必须从文件照抄，绝不编造；每条记录可带 _source（sheet/row/col/raw 或 page/image）定位证据。"
+            "records 最多输出前 50 条，超出部分省略（不要为了穷举所有行而把 JSON 写超长导致截断）。"
             "confidence 是 0 到 1 浮点；不确定（<0.7）或关键字段缺失时 needs_review=true。reason 一句话说明依据。"
             "特殊结构指引：① 作业指导书(SOP)：每个 sheet 是一道工序，从「制作工站/文件编号/IE工时/作业步骤」抽取"
             "document 的 route_steps 数组，每项为 {operation_code, operation_name, station, standard_minutes}；"
