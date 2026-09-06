@@ -71,7 +71,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--directory", default=os.environ.get("YUNPAI_FRONTEND_DIST", "frontend/dist"))
+    parser.add_argument("--directory", default=os.environ.get("YUNPAI_FRONTEND_DIST", "frontend-yunpaizhisuan/dist"))
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=39092)
     parser.add_argument("--backend-port", type=int, default=9000)
