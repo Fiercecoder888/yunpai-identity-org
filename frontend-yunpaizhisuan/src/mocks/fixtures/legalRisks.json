@@ -1,0 +1,4 @@
+[
+  { "id": "CLA-2026-014", "title": "非标设备采购合同", "riskLevel": "high", "reviewRound": "三轮审查完成", "summary": "付款节点与交付验收条款存在不匹配风险。", "status": "pending" },
+  { "id": "CLA-2026-018", "title": "服务补充协议", "riskLevel": "medium", "reviewRound": "二轮审查", "summary": "保密条款范围需要补充说明。", "status": "pending" }
+]

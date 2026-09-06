@@ -1,0 +1,114 @@
+services:
+  identity-bff:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: identity-bff
+      PORT: 9100
+    expose:
+      - "9100"
+    networks:
+      backend:
+        aliases:
+          - yunpai-primary-identity-bff
+
+  orchestrator:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: orchestrator
+      PORT: 9000
+    expose:
+      - "9000"
+    networks:
+      - backend
+
+  m1:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: m1
+      PORT: 8080
+    expose:
+      - "8080"
+    networks:
+      - backend
+
+  m2:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: m2
+      PORT: 8765
+    expose:
+      - "8765"
+    networks:
+      - backend
+
+  m3:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: m3
+      PORT: 8000
+    expose:
+      - "8000"
+    networks:
+      - backend
+
+  m4:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: m4
+      PORT: 8000
+    expose:
+      - "8000"
+    networks:
+      - backend
+
+  m5-api:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: m5-api
+      PORT: 8000
+    expose:
+      - "8000"
+    networks:
+      - backend
+
+  m6:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: m6
+      PORT: 8006
+    expose:
+      - "8006"
+    networks:
+      - backend
+
+  m8:
+    build:
+      context: ./api-gateway/mock-upstream
+    image: yunpaizhisuan-api-gateway-mock-upstream:local
+    environment:
+      UPSTREAM_NAME: m8
+      PORT: 8000
+    expose:
+      - "8000"
+    networks:
+      - backend
+
+networks:
+  backend:
+    name: ${API_GATEWAY_NETWORK:-yunpaizhisuan-backend}

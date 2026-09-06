@@ -1,0 +1,416 @@
+# Production gateway template. The official nginx entrypoint runs envsubst
+# over /etc/nginx/templates/*.template, substituting the dedicated M0/M3/M4/M5
+# gateway service credentials. Empty credentials keep protected routes fail closed.
+# Keep this file in sync with
+# frontend/api-gateway/nginx.conf, which is the static fallback used by legacy
+# mounts and carries no service key.
+map $http_x_request_id $gateway_request_id {
+  "" $request_id;
+  default $http_x_request_id;
+}
+
+map $http_x_trace_id $gateway_trace_id {
+  "" $gateway_request_id;
+  default $http_x_trace_id;
+}
+
+server {
+  listen 8080;
+  server_name _;
+
+  resolver 127.0.0.11 valid=10s ipv6=off;
+
+  client_max_body_size 100m;
+  proxy_connect_timeout 10s;
+  proxy_send_timeout 300s;
+  proxy_read_timeout 300s;
+  proxy_http_version 1.1;
+  proxy_request_buffering on;
+  proxy_buffering off;
+  proxy_intercept_errors on;
+  proxy_pass_request_headers on;
+  proxy_no_cache 1;
+  proxy_cache_bypass 1;
+
+  proxy_set_header Authorization $http_authorization;
+  proxy_set_header Content-Type $content_type;
+  proxy_set_header Accept $http_accept;
+  proxy_set_header X-Request-Id $gateway_request_id;
+  proxy_set_header X-Trace-Id $gateway_trace_id;
+  # Global business lineage. Preserve an existing root TaskID unchanged.
+  proxy_set_header X-Yunpai-Task-ID $http_x_yunpai_task_id;
+  # Default-deny for module tenant headers: only locations that verify the
+  # browser session may set a tenant. Prevents client-side tenant spoofing
+  # against modules that do not override it locally.
+  proxy_set_header X-Tenant-ID "";
+  proxy_set_header X-Yunpai-Tenant "";
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Host $host;
+  proxy_set_header X-Forwarded-Proto $scheme;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header Connection "";
+
+  set $upstream_orchestrator http://orchestrator:9000;
+  set $upstream_identity http://yunpai-primary-identity-bff:9100;
+  set $upstream_m1 http://m1:8080;
+  set $upstream_m2 http://m2:8765;
+  set $upstream_m3 http://m3:8000;
+  set $upstream_m4 http://m4:8000;
+  set $upstream_m5 http://m5-api:8000;
+  set $upstream_m6 http://m6:8006;
+  set $upstream_m7 http://${M7_HOST}:${M7_PORT};
+  set $upstream_m8 http://m8:8000;
+  set $upstream_qc http://qc:8000;
+  set $upstream_m0 http://m0:8010;
+
+  location = /api/gateway/health {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 200 '{"success":true,"data":{"service":"api-gateway","status":"ok"},"errors":[],"trace_id":"$gateway_trace_id"}';
+  }
+
+  location = /_internal/auth/verify {
+    internal;
+    # auth_request shares the original request context. Keep its body limit
+    # aligned with document-upload routes even though the body is not proxied.
+    client_max_body_size 200m;
+    proxy_pass $upstream_identity/internal/auth/verify;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Original-Method $request_method;
+    proxy_set_header X-Original-URI $request_uri;
+    proxy_set_header X-Original-Origin $http_origin;
+    proxy_set_header X-Original-Referer $http_referer;
+    proxy_set_header X-CSRF-Token $http_x_csrf_token;
+    proxy_set_header Cookie $http_cookie;
+  }
+
+  location ~ ^/api/auth/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header Origin $http_origin;
+    proxy_set_header Referer $http_referer;
+    proxy_set_header Cookie $http_cookie;
+    proxy_set_header Authorization "";
+    proxy_set_header X-Yunpai-Principal "";
+    proxy_set_header X-Actor-ID "";
+    proxy_set_header X-Tenant-ID "";
+    proxy_pass $upstream_identity/api/auth/$1$is_args$args;
+  }
+
+  location = /api/gateway/routes {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 200 '{"success":true,"data":{"routes":[{"frontend":"/api/tasks*","upstream":"http://orchestrator:9000/tasks*"},{"frontend":"/api/orchestrator/*","upstream":"http://orchestrator:9000/*"},{"frontend":"/api/m0/parser-compat/*","upstream":"http://m1:8080/*"},{"frontend":"/api/m2/*","upstream":"http://m2:8765/api/*"},{"frontend":"/api/m3/health","upstream":"http://m3:8000/health"},{"frontend":"/api/m3/*","upstream":"http://m3:8000/api/v1/m3/*"},{"frontend":"/api/m4/health","upstream":"http://m4:8000/health"},{"frontend":"/api/m4/*","upstream":"http://m4:8000/api/m4/*"},{"frontend":"/api/m5/health","upstream":"http://m5-api:8000/health"},{"frontend":"/api/m5/*","upstream":"http://m5-api:8000/api/v1/*"},{"frontend":"/api/m6/health","upstream":"http://m6:8006/health"},{"frontend":"/api/m6/*","upstream":"http://m6:8006/api/v1/*"},{"frontend":"/api/m7/*","upstream":"http://${M7_HOST}:${M7_PORT}/api/m7/*"},{"frontend":"/api/m8/*","upstream":"http://m8:8000/api/*"},{"frontend":"/api/qc/health","upstream":"http://qc:8000/api/qc/health"},{"frontend":"/api/qc/*","upstream":"http://qc:8000/api/qc/*"},{"frontend":"/api/m0/health","upstream":"http://m0:8010/health"},{"frontend":"/api/m0/*","upstream":"http://m0:8010/api/m0/*"}]},"errors":[],"trace_id":"$gateway_trace_id"}';
+  }
+
+  location ~ ^/api/tasks(?:/|$) {
+    add_header Cache-Control "no-store" always;
+    proxy_intercept_errors off;
+    auth_request /_internal/auth/verify;
+    auth_request_set $internal_authorization $upstream_http_x_yunpai_internal_authorization;
+    proxy_set_header Authorization $internal_authorization;
+    proxy_set_header X-Yunpai-Principal "";
+    proxy_set_header X-Yunpai-Tenant "";
+    proxy_set_header X-Yunpai-Data-Scope "";
+    proxy_set_header X-Yunpai-Roles "";
+    proxy_set_header X-Actor-ID "";
+    proxy_set_header X-Actor-Role "";
+    proxy_set_header X-Tenant-ID "";
+    rewrite ^/api/tasks(.*)$ /tasks$1 break;
+    proxy_pass $upstream_orchestrator;
+  }
+
+  location ~ ^/api/(dashboard/(summary|module-statuses)|audit/logs|flow/agent)$ {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 501 '{"success":false,"data":null,"errors":[{"code":"NOT_IMPLEMENTED","message":"Gateway aggregate endpoint is not implemented"}],"trace_id":"$gateway_trace_id"}';
+  }
+
+  location ~ ^/api/demo/(bom|sop|purchase|legal)(/|$) {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 501 '{"success":false,"data":null,"errors":[{"code":"NOT_IMPLEMENTED","message":"Demo-only endpoint is not implemented in real mode"}],"trace_id":"$gateway_trace_id"}';
+  }
+
+  location ~ ^/api/orchestrator/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    add_header X-Accel-Buffering "no" always;
+    # 订单文件经 base64 编码后走此路由（体积放大 ~4/3）：100MB 文件 base64 后约
+    # 133MB，覆盖 server 级默认 100m，避免 75-100MB 文件在网关被 413 拒绝。
+    client_max_body_size 150m;
+    # Preserve application-level JSON errors (for example chat history 503).
+    # Nginx-generated connection failures still use the generic 502 handler.
+    proxy_intercept_errors off;
+    auth_request /_internal/auth/verify;
+    auth_request_set $internal_authorization $upstream_http_x_yunpai_internal_authorization;
+    proxy_set_header Authorization $internal_authorization;
+    proxy_set_header X-Yunpai-Principal "";
+    proxy_set_header X-Yunpai-Tenant "";
+    proxy_set_header X-Yunpai-Data-Scope "";
+    proxy_set_header X-Yunpai-Roles "";
+    proxy_set_header X-Actor-ID "";
+    proxy_set_header X-Actor-Role "";
+    proxy_set_header X-Tenant-ID "";
+    proxy_request_buffering off;
+    proxy_pass $upstream_orchestrator/$1$is_args$args;
+  }
+
+  location ~ ^/api/m0/parser-compat/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    client_max_body_size 200m;
+    proxy_request_buffering off;
+    # Require a valid browser session; the identity BFF validates it and the
+    # gateway injects the internal service JWT. The browser never receives it.
+    auth_request /_internal/auth/verify;
+    auth_request_set $internal_authorization $upstream_http_x_yunpai_internal_authorization;
+    auth_request_set $internal_principal $upstream_http_x_yunpai_principal;
+    auth_request_set $internal_tenant $upstream_http_x_yunpai_tenant;
+    proxy_set_header Authorization $internal_authorization;
+    # The internal parser worker resolves tenant context from X-Tenant-ID.
+    # Keep that implementation private and inject the verified session tenant.
+    proxy_set_header X-Yunpai-Principal $internal_principal;
+    proxy_set_header X-Yunpai-Tenant $internal_tenant;
+    proxy_set_header X-Tenant-ID $internal_tenant;
+    proxy_set_header X-Actor-ID $internal_principal;
+    proxy_pass $upstream_m1/$1$is_args$args;
+  }
+
+  location ~ ^/api/m2/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    auth_request /_internal/auth/verify;
+    auth_request_set $internal_authorization $upstream_http_x_yunpai_internal_authorization;
+    proxy_set_header Authorization $internal_authorization;
+    proxy_pass $upstream_m2/api/$1$is_args$args;
+  }
+
+  location = /api/m3/health {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m3/health;
+  }
+
+  location ~ ^/api/m3/((?:next-generation/)?procurement-requirements:run-json)$ {
+    add_header Cache-Control "no-store" always;
+    # This standalone root entry is the only browser route authenticated with
+    # M3's dedicated identity-proxy credential. It may create or reuse a root
+    # TaskID, so the BFF-issued identity and tenant remain authoritative.
+    auth_request /_internal/auth/verify;
+    auth_request_set $m3_principal $upstream_http_x_yunpai_principal;
+    auth_request_set $m3_roles $upstream_http_x_yunpai_roles;
+    auth_request_set $m3_tenant $upstream_http_x_yunpai_tenant;
+    auth_request_set $m3_data_scope $upstream_http_x_yunpai_data_scope;
+    auth_request_set $m3_user_name $upstream_http_x_yunpai_user_name;
+    auth_request_set $m3_user_name_encoding $upstream_http_x_yunpai_user_name_encoding;
+    proxy_set_header Authorization "Bearer ${M3_GATEWAY_SERVICE_TOKEN}";
+    proxy_set_header X-Yunpai-Principal $m3_principal;
+    proxy_set_header X-Yunpai-Roles $m3_roles;
+    proxy_set_header X-Yunpai-Tenant $m3_tenant;
+    proxy_set_header X-Yunpai-Data-Scope $m3_data_scope;
+    proxy_set_header X-Yunpai-User-Name $m3_user_name;
+    proxy_set_header X-Yunpai-User-Name-Encoding $m3_user_name_encoding;
+    proxy_pass $upstream_m3/api/v1/m3/$1$is_args$args;
+  }
+
+  location ~ ^/api/m3/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    # All ordinary M3 APIs use the signed Identity-BFF JWT. Static service
+    # credentials are not accepted here because they would weaken role and
+    # tenant checks on approval, cache, inventory, and persisted-plan routes.
+    auth_request /_internal/auth/verify;
+    auth_request_set $internal_authorization $upstream_http_x_yunpai_internal_authorization;
+    auth_request_set $m3_principal $upstream_http_x_yunpai_principal;
+    auth_request_set $m3_roles $upstream_http_x_yunpai_roles;
+    auth_request_set $m3_tenant $upstream_http_x_yunpai_tenant;
+    auth_request_set $m3_data_scope $upstream_http_x_yunpai_data_scope;
+    proxy_set_header Authorization $internal_authorization;
+    proxy_set_header X-Yunpai-Principal $m3_principal;
+    proxy_set_header X-Yunpai-Roles $m3_roles;
+    proxy_set_header X-Yunpai-Tenant $m3_tenant;
+    proxy_set_header X-Yunpai-Data-Scope $m3_data_scope;
+    proxy_set_header X-Yunpai-User-Name "";
+    proxy_set_header X-Yunpai-User-Name-Encoding "";
+    proxy_pass $upstream_m3/api/v1/m3/$1$is_args$args;
+  }
+
+  location = /api/m4/health {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m4/health;
+  }
+
+  location ~ ^/api/m4/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    # The dedicated M4 gateway credential is an identity-proxy service secret,
+    # not the orchestrator's tenant/site JWT. M4 binds scope to the verified
+    # browser tenant and explicit requested site after authenticating this key.
+    auth_request /_internal/auth/verify;
+    auth_request_set $m4_principal $upstream_http_x_yunpai_principal;
+    auth_request_set $m4_roles $upstream_http_x_yunpai_roles;
+    auth_request_set $m4_tenant $upstream_http_x_yunpai_tenant;
+    auth_request_set $m4_data_scope $upstream_http_x_yunpai_data_scope;
+    auth_request_set $m4_user_name $upstream_http_x_yunpai_user_name;
+    auth_request_set $m4_user_name_encoding $upstream_http_x_yunpai_user_name_encoding;
+    proxy_set_header Authorization "Bearer ${M4_GATEWAY_SERVICE_TOKEN}";
+    proxy_set_header X-Yunpai-Principal $m4_principal;
+    proxy_set_header X-Yunpai-Roles $m4_roles;
+    proxy_set_header X-Yunpai-Tenant $m4_tenant;
+    proxy_set_header X-Yunpai-Data-Scope $m4_data_scope;
+    proxy_set_header X-Yunpai-User-Name $m4_user_name;
+    proxy_set_header X-Yunpai-User-Name-Encoding $m4_user_name_encoding;
+    proxy_pass $upstream_m4/api/m4/$1$is_args$args;
+  }
+
+  location = /api/m5/health {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m5/health;
+  }
+
+  location ~ ^/api/m5/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    # Require a valid browser session; the identity BFF validates it and the
+    # gateway injects the M5 service key (envsubst substitutes
+    # ${M5_GATEWAY_API_KEY}). The browser never receives the key.
+    # B0.5: 转发 BFF 验证会话后注入的人类主体身份头，供 M5 在 service key
+    # 校验通过后采信并记录真实审批/复核人。
+    auth_request /_internal/auth/verify;
+    auth_request_set $m5_principal $upstream_http_x_yunpai_principal;
+    auth_request_set $m5_roles $upstream_http_x_yunpai_roles;
+    auth_request_set $m5_tenant $upstream_http_x_yunpai_tenant;
+    auth_request_set $m5_data_scope $upstream_http_x_yunpai_data_scope;
+    auth_request_set $m5_user_name $upstream_http_x_yunpai_user_name;
+    auth_request_set $m5_user_name_encoding $upstream_http_x_yunpai_user_name_encoding;
+    proxy_set_header X-M5-API-Key "${M5_GATEWAY_API_KEY}";
+    proxy_set_header X-Yunpai-Principal $m5_principal;
+    proxy_set_header X-Yunpai-Roles $m5_roles;
+    proxy_set_header X-Yunpai-Tenant $m5_tenant;
+    proxy_set_header X-Yunpai-Data-Scope $m5_data_scope;
+    proxy_set_header X-Yunpai-User-Name $m5_user_name;
+    proxy_set_header X-Yunpai-User-Name-Encoding $m5_user_name_encoding;
+    proxy_pass $upstream_m5/api/v1/$1$is_args$args;
+  }
+
+  location = /api/m6/health {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m6/health;
+  }
+
+  location ~ ^/api/m6/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m6/api/v1/$1$is_args$args;
+  }
+
+  location = /api/m7/health {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m7/api/m7/health;
+  }
+
+  location ~ ^/api/m7/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    auth_request /_internal/auth/verify;
+    auth_request_set $m7_principal $upstream_http_x_yunpai_principal;
+    auth_request_set $m7_roles $upstream_http_x_yunpai_roles;
+    auth_request_set $m7_tenant $upstream_http_x_yunpai_tenant;
+    proxy_set_header X-Yunpai-Principal $m7_principal;
+    proxy_set_header X-Yunpai-Roles $m7_roles;
+    proxy_set_header X-Yunpai-Tenant $m7_tenant;
+    proxy_set_header X-M7-Orchestrator-Key "";
+    proxy_pass $upstream_m7/api/m7/$1$is_args$args;
+  }
+
+  location ~ ^/api/m8/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m8/api/$1$is_args$args;
+  }
+
+  location = /api/qc/health {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_qc/api/qc/health;
+  }
+
+  location ~ ^/api/qc/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    # qc resolves the caller tenant from X-Yunpai-Tenant / X-Tenant-ID and
+    # otherwise falls back to "default"; inject the verified session tenant.
+    auth_request /_internal/auth/verify;
+    auth_request_set $internal_authorization $upstream_http_x_yunpai_internal_authorization;
+    auth_request_set $internal_tenant $upstream_http_x_yunpai_tenant;
+    proxy_set_header Authorization $internal_authorization;
+    proxy_set_header X-Yunpai-Tenant $internal_tenant;
+    proxy_set_header X-Tenant-ID $internal_tenant;
+    proxy_pass $upstream_qc/api/qc/$1$is_args$args;
+  }
+
+  location = /api/m0/health {
+    add_header Cache-Control "no-store" always;
+    proxy_pass $upstream_m0/api/m0/health;
+  }
+
+  location ~ ^/api/m0/?(.*)$ {
+    add_header Cache-Control "no-store" always;
+    # 大数据文档上传：放开单请求体上限并把请求体流式转发到上游，
+    # 使浏览器上传进度反映真实传输（配合前端 XHR upload.onprogress）。
+    # m0 处理大 PDF 可能超过 60s：显式调大上游读取超时，避免 504/499。
+    client_max_body_size 200m;
+    proxy_request_buffering off;
+    proxy_read_timeout 300s;
+    auth_request /_internal/auth/verify;
+    auth_request_set $internal_authorization $upstream_http_x_yunpai_internal_authorization;
+    auth_request_set $m0_principal $upstream_http_x_yunpai_principal;
+    auth_request_set $m0_roles $upstream_http_x_yunpai_roles;
+    auth_request_set $m0_tenant $upstream_http_x_yunpai_tenant;
+    auth_request_set $m0_data_scope $upstream_http_x_yunpai_data_scope;
+    auth_request_set $m0_user_name $upstream_http_x_yunpai_user_name;
+    auth_request_set $m0_user_name_encoding $upstream_http_x_yunpai_user_name_encoding;
+    proxy_set_header Authorization $internal_authorization;
+    proxy_set_header X-M0-API-Key "${M0_GATEWAY_API_KEY}";
+    proxy_set_header X-Yunpai-Principal $m0_principal;
+    proxy_set_header X-Yunpai-Roles $m0_roles;
+    proxy_set_header X-Yunpai-Tenant $m0_tenant;
+    proxy_set_header X-Yunpai-Data-Scope $m0_data_scope;
+    proxy_set_header X-Yunpai-User-Name $m0_user_name;
+    proxy_set_header X-Yunpai-User-Name-Encoding $m0_user_name_encoding;
+    proxy_pass $upstream_m0/api/m0/$1$is_args$args;
+  }
+
+  location @gateway_upstream_error {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 502 '{"success":false,"data":null,"errors":[{"code":"UPSTREAM_UNAVAILABLE","message":"Gateway upstream is unavailable"}],"trace_id":"$gateway_trace_id"}';
+  }
+
+  location @gateway_payload_too_large {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 413 '{"success":false,"data":null,"errors":[{"code":"PAYLOAD_TOO_LARGE","message":"Request body is too large; gateway limit is 200 MiB"}],"trace_id":"$gateway_trace_id"}';
+  }
+
+  error_page 502 503 504 = @gateway_upstream_error;
+  error_page 413 = @gateway_payload_too_large;
+
+  error_page 401 = @gateway_unauthorized;
+  error_page 403 = @gateway_forbidden;
+
+  location @gateway_unauthorized {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 401 '{"success":false,"data":null,"errors":[{"code":"UNAUTHORIZED","message":"A valid Yunpai browser session is required"}],"trace_id":"$gateway_trace_id"}';
+  }
+
+  location @gateway_forbidden {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 403 '{"success":false,"data":null,"errors":[{"code":"FORBIDDEN","message":"Origin or CSRF validation failed"}],"trace_id":"$gateway_trace_id"}';
+  }
+
+  location /api/ {
+    default_type application/json;
+    add_header Cache-Control "no-store" always;
+    return 404 '{"success":false,"data":null,"errors":[{"code":"NOT_FOUND","message":"API route is not configured in the gateway"}],"trace_id":"$gateway_trace_id"}';
+  }
+}

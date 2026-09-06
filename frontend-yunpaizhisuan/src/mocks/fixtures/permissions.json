@@ -1,0 +1,63 @@
+{
+  "currentRoleId": "factory-director",
+  "permissionDeniedRoleId": "worker",
+  "roles": [
+    {
+      "id": "factory-director",
+      "name": "厂长",
+      "permissions": [
+        "dashboard:read",
+        "leader:read",
+        "leader:write",
+        "worker:read",
+        "worker:report",
+        "m1:read",
+        "m4:read",
+        "m4:operate",
+        "schedule:read",
+        "schedule:write",
+        "qc:read",
+        "quality:supervise",
+        "audit:read",
+        "chat:read",
+        "chat:write",
+        "chat:delete",
+        "m0:bom:approve"
+      ]
+    },
+    {
+      "id": "quality-assurance",
+      "name": "品保",
+      "permissions": [
+        "quality:supervise",
+        "qc:read",
+        "audit:read",
+        "chat:read",
+        "chat:write"
+      ]
+    },
+    {
+      "id": "team-leader",
+      "name": "组长",
+      "permissions": [
+        "leader:read",
+        "leader:write",
+        "worker:read",
+        "schedule:read",
+        "audit:read",
+        "chat:read",
+        "chat:write"
+      ]
+    },
+    {
+      "id": "worker",
+      "name": "生产工人",
+      "permissions": [
+        "worker:read",
+        "worker:report",
+        "chat:read",
+        "chat:write"
+      ]
+    }
+  ]
+}

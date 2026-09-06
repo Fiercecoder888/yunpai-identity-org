@@ -1,0 +1,35 @@
+[
+  {
+    "id": 401,
+    "purchase_order_item_id": 301,
+    "promised_date": "2026-07-18",
+    "unit_price": "12.5",
+    "currency": "CNY",
+    "exception_type": "delivery_delay",
+    "exception_description": "供应商库存不足，交期延后",
+    "arrival_status": "not_received",
+    "is_overdue": false
+  },
+  {
+    "id": 402,
+    "purchase_order_item_id": 302,
+    "promised_date": "2026-07-17",
+    "unit_price": "86",
+    "currency": "CNY",
+    "exception_type": null,
+    "exception_description": null,
+    "arrival_status": "not_received",
+    "is_overdue": false
+  },
+  {
+    "id": 403,
+    "purchase_order_item_id": 303,
+    "promised_date": "2026-07-02",
+    "unit_price": "245.80",
+    "currency": "CNY",
+    "exception_type": "supplier_exception",
+    "exception_description": "外协产能不足，需采购员确认替代供应商",
+    "arrival_status": "overdue",
+    "is_overdue": true
+  }
+]

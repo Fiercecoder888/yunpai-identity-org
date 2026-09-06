@@ -1,0 +1,12 @@
+{
+  "activities": [
+    { "id": "A-1", "time": "09:20", "module": "M1", "message": "完成订单图纸识别，2 个字段需要人工确认", "status": "warning" },
+    { "id": "A-2", "time": "10:12", "module": "M3", "message": "更新库存净需求，生成 4 条采购建议", "status": "success" },
+    { "id": "A-3", "time": "11:05", "module": "M4", "message": "供应商关键件交期回复已更新", "status": "warning" }
+  ],
+  "risks": [
+    { "id": "RISK-1", "title": "采购交期风险", "module": "M4", "level": "high", "description": "供应商 A 的关键件回复超期 2 天。" },
+    { "id": "RISK-2", "title": "排程冲突", "module": "M5", "level": "medium", "description": "产线 2 在 6 月 29 日存在资源重叠。" },
+    { "id": "RISK-3", "title": "识别低置信度", "module": "M1", "level": "medium", "description": "材料牌号字段需要人工确认。" }
+  ]
+}

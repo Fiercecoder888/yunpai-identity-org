@@ -1,0 +1,47 @@
+name: yunpaizhisuan-frontend-package
+
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_ENABLE_MSW: "false"
+        NGINX_CONF: nginx.real-e2e.conf
+        YUNPAI_BUILD_COMMIT: ${YUNPAI_BUILD_COMMIT:-unknown}
+        YUNPAI_BUILD_BRANCH: ${YUNPAI_BUILD_BRANCH:-unknown}
+        YUNPAI_BUILD_TIME: ${YUNPAI_BUILD_TIME:-unknown}
+        YUNPAI_BUILD_DIRTY: ${YUNPAI_BUILD_DIRTY:-true}
+    image: ${FRONTEND_IMAGE:-yunpaizhisuan-fe:package}
+    ports:
+      - "${FRONTEND_PACKAGE_PORT:-18080}:80"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - frontend-package
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+    image: ${API_GATEWAY_IMAGE:-yunpaizhisuan-api-gateway:package}
+    ports:
+      - "${API_GATEWAY_PORT:-8088}:8080"
+    networks:
+      - frontend-package
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/gateway/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+networks:
+  frontend-package:
+    name: ${FRONTEND_PACKAGE_NETWORK:-yunpaizhisuan-frontend-package}

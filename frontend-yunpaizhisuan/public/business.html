@@ -1,0 +1,1111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>订单全链路 · 云湃验收</title>
+  <style>
+    :root{--ink:#14242d;--muted:#70818a;--line:#dbe6e7;--bg:#f3f7f6;--panel:#fff;--navy:#173d4c;--teal:#0d9188;--amber:#b5741c;--red:#c24d4b;--shadow:0 16px 40px #173d4c12}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 Arial,"PingFang SC","Microsoft Yahei",sans-serif}
+    .shell{max-width:1480px;margin:auto;padding:30px 42px 72px}.top{display:flex;justify-content:space-between;gap:24px;align-items:flex-end}.eyebrow{margin:0 0 7px;color:var(--teal);font-size:11px;font-weight:800;letter-spacing:.16em}.top h1{margin:0;color:var(--navy);font-size:clamp(30px,4vw,50px);letter-spacing:-.045em}.lede{max-width:760px;margin:10px 0 0;color:var(--muted);font-size:15px}.nav{display:flex;gap:8px;align-items:center}.nav a{padding:9px 13px;border:1px solid var(--line);border-radius:10px;color:var(--muted);background:#fff;text-decoration:none}.nav a.active{border-color:#b9ddda;color:var(--navy);background:#e5f5f1;font-weight:800}
+    form{display:flex;gap:10px;margin-top:24px;padding:11px;background:#e7f1f0;border:1px solid #cde1df;border-radius:15px}label{padding:10px;color:var(--navy);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}input{min-width:0;flex:1;border:1px solid #c7d8d9;border-radius:9px;padding:10px 12px;background:#fff;color:var(--navy);outline:0}button{border:0;border-radius:9px;padding:10px 20px;background:var(--navy);color:#fff;font-weight:800;cursor:pointer}
+    .sample-catalog{margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:#fff}.sample-catalog summary{cursor:pointer;color:var(--navy);font-weight:800}.sample-catalog .table-wrap{max-height:520px;margin-top:12px}.catalog-tools{display:grid;grid-template-columns:minmax(220px,1fr) 180px auto;gap:8px;margin-top:12px}.catalog-tools input,.catalog-tools select{height:38px;padding:0 10px;border:1px solid #c7d8d9;border-radius:8px;background:#fff;color:var(--navy)}.catalog-count{align-self:center;color:var(--muted);font-size:12px}.candidate-note{margin-top:16px;padding:15px;border-left:4px solid var(--amber);background:#fff7e8;color:#765018}
+    .notice{margin-top:14px;padding:12px 15px;border-left:4px solid var(--amber);background:#fff6e8;color:#765018}.hidden{display:none}.hero{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-top:22px;padding:24px 26px;border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:var(--shadow)}.hero h2{margin:0;color:var(--navy);font-size:28px}.hero p{margin:6px 0 0;color:var(--muted)}.status{padding:10px 14px;border-radius:99px;background:#e4f5ef;color:#176f68;font-weight:800}.status.warn{background:#fff0d7;color:#8a5c16}.status.danger{background:#ffe9e8;color:#a53e3c}
+    .metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:14px}.metric{padding:15px 17px;border:1px solid var(--line);border-radius:13px;background:#fff}.metric span{display:block;color:var(--muted);font-size:12px}.metric b{display:block;margin-top:4px;color:var(--navy);font-size:24px}
+    .pipeline{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:18px}.step{position:relative;padding:18px;border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:0 8px 22px #173d4c08;cursor:pointer;transition:.18s}.step:hover,.step.selected{border-color:#7dc8c1;box-shadow:0 12px 28px #0d91881f;transform:translateY(-2px)}.step:not(:last-child):after{content:"→";position:absolute;right:-14px;top:38px;color:var(--teal);font-size:20px;font-weight:900;z-index:2}.step-kicker{color:var(--teal);font-size:11px;font-weight:900;letter-spacing:.1em}.step h3{margin:8px 0 5px;color:var(--navy);font-size:18px}.step p{min-height:44px;margin:0;color:var(--muted);font-size:12px}.chip{display:inline-block;margin-top:12px;padding:4px 8px;border-radius:99px;background:#e9f4f2;color:#21746e;font-size:11px;font-weight:800}.chip.warn{background:#fff0d7;color:#8a5c16}.detail-panel{margin-top:16px}.detail-grid{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:14px}.detail-list{display:grid;gap:8px}.detail-item{padding:10px 12px;border-radius:9px;background:#f6f9f8}.detail-item b{display:block;color:var(--navy)}.detail-item span{color:var(--muted);font-size:12px}.module-json{max-height:330px}
+    .grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:16px;margin-top:16px}.panel{min-width:0;padding:21px;border:1px solid var(--line);border-radius:15px;background:#fff;box-shadow:0 8px 22px #173d4c08}.panel h3{margin:0;color:var(--navy);font-size:18px}.panel-note{margin:4px 0 16px;color:var(--muted);font-size:12px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:10px 9px;border-bottom:1px solid #edf2f2;text-align:left;white-space:nowrap}th{color:var(--muted);font-weight:700;background:#f8fbfb}td strong{color:var(--navy)}.explain{display:grid;gap:10px}.explain div{padding:12px 13px;border-radius:10px;background:#f6f9f8}.explain b{display:block;color:var(--navy);margin-bottom:3px}.explain span{color:var(--muted);font-size:12px}.raw{margin-top:16px}.raw summary{cursor:pointer;color:var(--navy);font-weight:800}.raw pre{max-height:500px;overflow:auto;padding:15px;border-radius:10px;background:#14262f;color:#d9eeee;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .io-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.io-box{min-width:0;border:1px solid #e4ecec;border-radius:11px;overflow:hidden}.io-title{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;background:#f4f8f7}.io-title b{color:var(--navy)}.io-title span{color:var(--muted);font-size:11px}.io-box .table-wrap{max-height:390px}.summary-band{display:grid;grid-template-columns:1.25fr .75fr;gap:16px;margin-top:16px}.readiness-ready{color:#17736c;font-weight:800}.readiness-shortage{color:#b34342;font-weight:800}.subtle{color:var(--muted)}.section-stack{display:grid;gap:16px}.table-caption{padding:10px 12px;background:#f4f8f7;color:var(--navy);font-weight:800}
+    .m5-schedule-visualization{margin-top:20px}.m5-schedule-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.m5-schedule-head h4,.m5-business-progress h4{margin:0;color:var(--navy);font-size:17px}.m5-schedule-head p{margin:4px 0 0;color:var(--muted);font-size:12px}.m5-order-legend{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}.m5-order-key{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:11px}.m5-order-key i{width:10px;height:10px;border-radius:2px;background:var(--order-color)}.m5-gantt-scroll{margin-top:14px;overflow-x:auto}.m5-gantt{min-width:760px}.m5-gantt-axis,.m5-gantt-lane{display:grid;grid-template-columns:150px minmax(560px,1fr);gap:12px}.m5-gantt-axis{align-items:end;color:var(--muted);font-size:11px}.m5-axis-track{display:flex;justify-content:space-between;padding:0 2px 7px}.m5-gantt-lane{align-items:center;margin-top:8px}.m5-resource-label b,.m5-resource-label span{display:block}.m5-resource-label b{color:var(--navy)}.m5-resource-label span{color:var(--muted);font-size:11px}.m5-gantt-track{position:relative;height:42px;border:1px solid #e4ecec;border-radius:7px;background:repeating-linear-gradient(to right,#f8fbfb 0,#f8fbfb calc(25% - 1px),#e3ecec calc(25% - 1px),#e3ecec 25%)}.m5-gantt-bar{position:absolute;top:5px;height:30px;padding:6px 8px;border-radius:5px;background:var(--order-color);color:#fff;font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.m5-order-0{--order-color:#2470a8}.m5-order-1{--order-color:#0d9188}.m5-order-2{--order-color:#b5741c}.m5-order-3{--order-color:#a34f7a}.m5-load-list{display:grid;gap:8px;margin:16px 0}.m5-load-row{display:grid;grid-template-columns:150px minmax(160px,1fr) 120px;gap:12px;align-items:center}.m5-load-label{color:var(--navy);font-weight:800}.m5-load-track{height:9px;border-radius:99px;background:#e9efef;overflow:hidden}.m5-load-fill{display:block;height:100%;border-radius:inherit;background:var(--teal)}.m5-load-value{text-align:right;color:var(--muted);font-size:11px}.m5-personnel-gap{margin:14px 0;padding:12px 14px;border-left:4px solid #7d94a0;background:#f3f7f8;color:#536973}.m5-operation-table{margin-top:14px}.m5-business-progress{display:grid;gap:18px;margin-top:20px}.m5-business-progress>section{padding-top:18px;border-top:1px solid var(--line)}.m5-business-progress .panel-note{margin-bottom:12px}.m5-progress-metrics{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin:14px 0}.m5-progress-metrics div{padding:10px 0;border-bottom:2px solid #dcebea}.m5-progress-metrics span{display:block;color:var(--muted);font-size:11px}.m5-progress-metrics b{display:block;margin-top:3px;color:var(--navy);font-size:17px}.m5-process-progress{margin:14px 0}.m5-process-progress-head{display:flex;justify-content:space-between;gap:12px;color:var(--navy);font-weight:800}.m5-process-bar{height:10px;margin-top:8px;border-radius:99px;background:#e9efef;overflow:hidden}.m5-process-fill{display:block;height:100%;border-radius:inherit;background:var(--teal)}.m5-site-progress{margin:14px 0;padding:14px 16px;border:1px solid #d9e6e5;background:#f7fbfa}.m5-site-progress-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--navy);font-weight:800}.m5-site-progress-head b{font-size:17px}.m5-site-progress-detail{margin:4px 0 0;color:var(--muted);font-size:12px}.m5-site-bar{height:10px;margin-top:10px;border-radius:99px;background:#e9efef;overflow:hidden}.m5-site-fill{display:block;height:100%;border-radius:inherit;background:#2470a8}.m5-site-progress.no-feedback .m5-site-fill{background:#7d94a0}.m5-data-boundary{margin:12px 0;padding:11px 13px;border-left:4px solid #7d94a0;background:#f3f7f8;color:#536973;font-size:12px}
+    .detail-actions{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:16px}.secondary-button,.file-link{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:8px 13px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--navy);font-weight:800;text-decoration:none;cursor:pointer}.file-actions{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px;border-top:1px solid #e4ecec;background:#fbfdfd}.overview-only.is-hidden{display:none}.preview-modal{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:28px;background:#14242db8}.preview-modal.hidden{display:none}.preview-dialog{display:flex;flex-direction:column;width:min(1120px,100%);max-height:88vh;border-radius:12px;background:#fff;box-shadow:0 24px 70px #0005;overflow:hidden}.preview-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 18px;border-bottom:1px solid var(--line)}.preview-head h3{margin:0;color:var(--navy);font-size:17px}.icon-button{width:38px;height:38px;padding:0;border-radius:8px;background:#eef4f3;color:var(--navy);font-size:22px;line-height:1}.preview-body{min-height:220px;overflow:auto;padding:18px}.preview-body table{min-width:760px}.preview-raw{min-width:100%;margin:0;padding:15px;border-radius:8px;background:#14262f;color:#d9eeee;white-space:pre;overflow:auto;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}.preview-frame{display:block;width:100%;height:70vh;border:1px solid var(--line);border-radius:8px;background:#f6f9f8}.preview-image{display:block;max-width:100%;max-height:70vh;margin:auto}.preview-help{display:grid;gap:10px;place-items:start;padding:24px;border:1px solid var(--line);border-radius:8px;background:#f8fbfb}.preview-help p{margin:0;color:var(--muted)}
+    @media(max-width:950px){.shell{padding:22px 18px 50px}.top,.hero{align-items:flex-start;flex-direction:column}.pipeline{grid-template-columns:repeat(2,1fr)}.step:not(:last-child):after{display:none}.grid,.summary-band,.io-grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(3,1fr)}.m5-schedule-head{display:block}.m5-order-legend{justify-content:flex-start;margin-top:8px}.m5-progress-metrics{grid-template-columns:repeat(2,minmax(120px,1fr))}}@media(max-width:560px){form{align-items:stretch;flex-direction:column}.metrics,.pipeline{grid-template-columns:1fr 1fr}.metrics .metric:last-child{grid-column:span 2}.m5-load-row{grid-template-columns:100px minmax(100px,1fr);gap:8px}.m5-load-value{grid-column:2;text-align:left}.m5-progress-metrics{grid-template-columns:1fr 1fr}}
+    .detail-grid>*{min-width:0}.module-json,.raw pre{display:block;box-sizing:border-box;width:100%;max-width:100%;overflow:auto;white-space:pre;overflow-wrap:normal;word-break:normal}.module-json{height:330px;max-height:330px}.raw{display:block;max-width:100%;min-width:0}.raw pre{height:500px;max-height:500px}.detail-table{min-width:0;border:1px solid #e7eeee;border-radius:11px;overflow:hidden}.detail-table h4{margin:0;padding:12px 14px;color:var(--navy);background:#f5f9f8}.detail-table .table-wrap{max-height:350px;overflow:auto}.empty-table{padding:28px 16px;color:var(--muted);text-align:center}.catalog-actions{display:flex;gap:6px}.catalog-view,.catalog-run{padding:7px 10px;white-space:nowrap;font-size:12px}.catalog-view{background:var(--teal)}.catalog-run,.run-candidate{background:#b5741c;color:#fff}.catalog-run:disabled,.run-candidate:disabled{cursor:wait;opacity:.58}.candidate-actions{display:flex;gap:10px;align-items:center;margin-top:16px}.run-candidate{padding:11px 18px}.run-progress{margin-top:16px;padding:15px;border:1px solid #d9e7e5;border-radius:10px;background:#f7fbfa}.run-progress b{display:block;color:var(--navy)}.run-progress span{display:block;margin-top:4px;color:var(--muted)}
+    .module-tabs{display:flex;gap:8px;margin:-2px 0 18px;padding-bottom:8px;border-bottom:1px solid var(--line)}.module-tab{min-height:46px;padding:10px 17px;border-radius:7px;background:transparent;color:var(--muted);font-size:15px;font-weight:800}.module-tab.active{background:#e5f5f1;color:var(--navy)}.module-tab:hover{background:#eef6f5;color:var(--navy)}.matching-metrics{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));border:1px solid var(--line);border-width:1px 0;margin-bottom:16px}.matching-metric{padding:12px 14px;border-right:1px solid var(--line)}.matching-metric span{display:block;color:var(--muted);font-size:11px}.matching-metric b{display:block;margin-top:3px;color:var(--navy);font-size:19px}.matching-legend{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.match-badge{display:inline-flex;align-items:center;min-height:24px;padding:3px 8px;border-radius:4px;background:#eef4f3;color:#44606a;font-size:11px;font-weight:800}.match-badge.applied{background:#dff3eb;color:#176f68}.match-badge.reviewed{background:#e7eef8;color:#355b87}.match-badge.agent{background:#fff0d7;color:#8a5c16}.match-badge.unresolved{background:#ffe9e8;color:#a53e3c}.matching-table{min-width:1540px}.matching-table td{vertical-align:top}.material-title{display:block;max-width:260px;white-space:normal;color:var(--navy);font-weight:800}.material-code{display:block;color:var(--muted);font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}.evidence-number{display:block;color:var(--navy);font-size:15px;font-weight:800}.evidence-note{display:block;max-width:240px;white-space:normal;color:var(--muted);font-size:11px}.candidate-details{max-width:440px}.candidate-details summary{cursor:pointer;color:var(--teal);font-weight:800}.candidate-list{display:grid;gap:7px;margin-top:8px}.candidate-row{padding:8px 0;border-top:1px solid #edf2f2;white-space:normal}.matching-warning{margin:14px 0;padding:12px 14px;border-left:4px solid var(--amber);background:#fff7e8;color:#765018}.matching-error{border-left-color:var(--red);background:#fff0ef;color:#963c3a}.review-toolbar{display:grid;grid-template-columns:minmax(220px,360px) auto auto 1fr;gap:10px;align-items:center;margin:14px 0;padding:13px;border:1px solid var(--line);background:#f9fbfb}.review-toolbar input{height:38px}.review-message{color:var(--amber);font-size:12px}.review-control{display:grid;min-width:250px;gap:7px}.review-control select{width:100%;height:34px;border:1px solid #c7d8d9;border-radius:7px;background:#fff;color:var(--navy)}.review-actions{display:flex;gap:6px}.review-actions button{min-height:32px;padding:6px 9px;border-radius:7px;font-size:11px}.review-match{background:var(--teal)}.review-unmatched{background:#7a858a}.review-state{white-space:normal;color:var(--muted);font-size:11px}.review-state.verified{color:#176f68;font-weight:800}.matching-loading{padding:28px 18px;border:1px solid var(--line);background:#f7fbfa}.matching-loading b{display:block;color:var(--navy)}.matching-loading span{display:block;margin-top:5px;color:var(--muted)}
+    @media(max-width:680px){.catalog-tools{grid-template-columns:1fr}}
+    .task-id-hash{display:inline-block;padding:0 3px;border-radius:4px;background:#e6f0ff;color:#0958d9;font-weight:600;font-family:ui-monospace,Menlo,Consolas,monospace}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="top"><div><p class="eyebrow">YUNPAI / BUSINESS CHAIN VIEW</p><h1>订单全链路</h1><p class="lede">用白话看懂订单经过了什么：识别、匹配 BOM、拆物料、形成采购需求与权威排程。浏览器只提交一次，模块交接由服务端 LangGraph 完成，每个结论都来自同一个 Tracking TaskID。</p></div><nav class="nav"><a href="/">原始追踪</a><a class="active" href="/business.html">业务白话</a></nav></header>
+  <form id="form"><label for="task">Task ID</label><input id="task" placeholder="输入正式业务链路的 Tracking TaskID" spellcheck="false"><button>查询订单链路</button></form>
+  <details id="sample-catalog" class="sample-catalog" open>
+    <summary id="sample-catalog-title">历史订单目录</summary>
+    <div class="catalog-tools"><input id="catalog-search" type="search" placeholder="搜索订单号、产品名称或来源"><select id="catalog-status" aria-label="筛选订单状态"><option value="all">全部状态</option><option value="已验收">已验收</option><option value="待运行">待运行</option></select><span id="catalog-count" class="catalog-count"></span></div>
+    <div id="sample-catalog-body"></div>
+  </details>
+  <div id="message" class="notice hidden"></div><section id="content"><div class="hero"><div><p class="eyebrow">BUSINESS TRACKING</p><h2>输入 TaskID 查看订单全链路</h2><p>页面将按 订单到排程 展示本次订单的真实输入、输出、BOM、缺料、采购与测试排程信息。</p></div></div></section>
+  <section id="upload-panel" class="panel" style="margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:15px;background:#fff">
+    <h3 style="margin:0 0 4px;color:var(--navy);font-size:18px">上传订单文件并运行全链路</h3>
+    <p style="margin:0 0 12px;color:var(--muted);font-size:12px">选择订单文件（CSV/XLSX/PDF/图片等），M1 解析 → M2 BOM → M3 物料需求 → M4 采购 → M5 排程；可选用测试文件（如 /uploads/CAND-008_订单.csv）。</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="upload-file" type="file" style="border:1px solid #c7d8d9;border-radius:8px;padding:6px;flex:1;min-width:240px"/>
+      <input id="upload-order" placeholder="订单号（留空自动）" style="border:1px solid #c7d8d9;border-radius:8px;padding:8px;width:150px"/>
+      <input id="upload-product" placeholder="产品名称（可选）" style="border:1px solid #c7d8d9;border-radius:8px;padding:8px;width:160px"/>
+      <input id="upload-qty" type="number" min="1" placeholder="数量（可选）" style="border:1px solid #c7d8d9;border-radius:8px;padding:8px;width:90px"/>
+      <input id="upload-bom" placeholder="历史BOM路径（可选，如 /srv/yunpai-business-tracking/history-bom/CAND-008_历史BOM.xlsx）" style="border:1px solid #c7d8d9;border-radius:8px;padding:8px;flex:1;min-width:220px"/>
+      <button id="upload-run" style="background:var(--navy);color:#fff;border:0;border-radius:8px;padding:9px 18px;font-weight:800">上传并运行</button>
+    </div>
+    <div id="upload-result" style="margin-top:10px;padding:10px 12px;border-radius:9px;background:#f6f9f8;color:#536973;font-size:12px"></div>
+  </section>
+  <section id="exec-panel" class="panel" style="margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:15px;background:#fff">
+    <h3 style="margin:0 0 4px;color:var(--navy);font-size:18px">库存 / 生产 / 消费 人工操作</h3>
+    <p style="margin:0 0 14px;color:var(--muted);font-size:12px">收货入待检 → 质检 pass 入可用 → 领料消耗 → 完工登记产出；全部写入统一事实账本并自动重算库存。</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+      <div style="border:1px solid #e4ecec;border-radius:11px;padding:12px">
+        <b style="color:var(--navy)">收货入待检</b>
+        <div style="display:grid;gap:6px;margin-top:8px">
+          <input id="exec-receipt-material" placeholder="物料编码" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-receipt-order" placeholder="订单号" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-receipt-po" placeholder="采购单号" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-receipt-wh" value="WH-1" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-receipt-lot" placeholder="批次" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-receipt-qty" type="number" min="0.01" placeholder="数量" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <button class="exec-btn" data-action="receipt" style="background:var(--navy);color:#fff;border:0;border-radius:8px;padding:8px;font-weight:800">收货入待检</button>
+        </div>
+      </div>
+      <div style="border:1px solid #e4ecec;border-radius:11px;padding:12px">
+        <b style="color:var(--navy)">质检 pass 入可用</b>
+        <div style="display:grid;gap:6px;margin-top:8px">
+          <input id="exec-qc-material" placeholder="物料编码" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-qc-order" placeholder="订单号" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-qc-wh" value="WH-1" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-qc-id" placeholder="检验单号" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-qc-lot" placeholder="批次" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-qc-qty" type="number" min="0.01" placeholder="数量" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <button class="exec-btn" data-action="inspection" style="background:var(--teal);color:#fff;border:0;border-radius:8px;padding:8px;font-weight:800">提交质检</button>
+        </div>
+      </div>
+      <div style="border:1px solid #e4ecec;border-radius:11px;padding:12px">
+        <b style="color:var(--navy)">领料消耗</b>
+        <div style="display:grid;gap:6px;margin-top:8px">
+          <input id="exec-con-material" placeholder="物料编码" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-con-order" placeholder="订单号" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-con-wh" value="WH-1" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-con-lot" placeholder="批次" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-con-qty" type="number" min="0.01" placeholder="数量" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <button class="exec-btn" data-action="consumption" style="background:#b5741c;color:#fff;border:0;border-radius:8px;padding:8px;font-weight:800">提交领料</button>
+        </div>
+      </div>
+      <div style="border:1px solid #e4ecec;border-radius:11px;padding:12px">
+        <b style="color:var(--navy)">完工登记产出</b>
+        <div style="display:grid;gap:6px;margin-top:8px">
+          <input id="exec-finish-order" placeholder="订单号" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-finish-wh" value="FG-WH" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-finish-qty" type="number" min="0.01" placeholder="完工数量" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-finish-scrap" type="number" min="0" value="0" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-finish-op" value="OP-10" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <input id="exec-finish-plan" value="plan-v1" style="border:1px solid #c7d8d9;border-radius:7px;padding:6px"/>
+          <button class="exec-btn" data-action="production_output" style="background:#a34f7a;color:#fff;border:0;border-radius:8px;padding:8px;font-weight:800">登记完工</button>
+        </div>
+      </div>
+    </div>
+    <div id="exec-result" style="margin-top:12px;padding:10px 12px;border-radius:9px;background:#f6f9f8;color:#536973;font-size:12px;white-space:pre-wrap"></div>
+  </section>
+  <section id="material-trace-panel" class="panel" style="margin-top:18px;padding:18px;border:1px solid var(--line);border-radius:15px;background:#fff">
+    <h3 style="margin:0 0 4px;color:var(--navy);font-size:18px">物料库存全追踪</h3>
+    <p style="margin:0 0 12px;color:var(--muted);font-size:12px">输入物料编码，展示库存余额、收发流水、批次流转与生产/消费记录（来自统一事实账本）。</p>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <input id="mt-material" placeholder="物料编码（如 MAT-CTRL-001 / FG-CTRL-001）" style="flex:1;border:1px solid #c7d8d9;border-radius:8px;padding:8px"/>
+      <button id="mt-query" style="background:var(--teal);color:#fff;border:0;border-radius:8px;padding:8px 18px;font-weight:800">查询全追踪</button>
+    </div>
+    <div id="mt-result" style="font-size:12px"></div>
+  </section>
+</main>
+<div id="preview-modal" class="preview-modal hidden" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+  <div class="preview-dialog">
+    <div class="preview-head"><h3 id="preview-title">原始上传文件</h3><button id="preview-close" class="icon-button" type="button" aria-label="关闭预览">×</button></div>
+    <div id="preview-body" class="preview-body"></div>
+  </div>
+</div>
+<script>
+const $=s=>document.querySelector(s), api="/api/orchestrator/tracking/tasks/",reviewStorageKey="yunpai.m3.materialReviews.v1",reviewerStorageKey="yunpai.m3.reviewer.v1";
+const pageParams=new URLSearchParams(location.search),requestedTaskId=pageParams.get("task_id")||"",requestedCatalogId=pageParams.get("catalog_id")||"",requestedAction=pageParams.get("action")||"view",requestedModule=/^m[1-5]$/.test(pageParams.get("module")||"")?pageParams.get("module"):pageParams.get("action")==="m3"?"m3":"";
+let historicalSamples=[],candidateRuns=[],materialReviews=readStoredReviews(),lastMatchingTrial=null,activeBusinessSnapshot=null,m3AutoOpenPending=requestedAction==="m3",m3ReviewContinueEnabled=false,pendingM3Flow=null,autoAcceptM3=false;
+const runningCatalogs=new Set();
+const jobEvidence=new Map();
+let csrfToken="";
+const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const taskIdHtml=v=>{const t=String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));const m=t.match(/[0-9a-fA-F]{8,}/);if(!m||m.index===undefined)return t;const start=m.index,end=start+m[0].length;const headEnd=Math.min(start+7,end);return t.slice(0,start)+`<span class="task-id-hash">${t.slice(start,headEnd)}</span>`+t.slice(headEnd)};
+const date=v=>v?new Date(v).toLocaleString("zh-CN",{hour12:false}):"未提供";
+$("#form").addEventListener("submit",e=>{e.preventDefault();load($("#task").value.trim())});
+$("#catalog-search").addEventListener("input",renderCatalog);
+$("#catalog-status").addEventListener("change",renderCatalog);
+$("#sample-catalog-body").addEventListener("click",event=>{
+  const viewButton=event.target.closest(".catalog-view"),runButton=event.target.closest(".catalog-run");
+  if(viewButton)openCatalogItem(viewButton.dataset.catalogId);
+  if(runButton)runCatalogItem(runButton.dataset.catalogId);
+});
+$("#content").addEventListener("click",event=>{
+  const button=event.target.closest(".run-candidate");
+  if(button){const item=historicalSamples.find(row=>row.catalog_id===button.dataset.catalogId);if(item)runCandidate(item);return}
+  const reviewButton=event.target.closest(".open-m3-review");
+  if(reviewButton){const item=historicalSamples.find(row=>row.catalog_id===reviewButton.dataset.catalogId);if(item)openM3Review(item);return}
+  const submitM2=event.target.closest(".submit-m2-answers");
+  if(submitM2){const item=historicalSamples.find(row=>row.catalog_id===submitM2.dataset.catalogId);if(item)submitM2Answers(item);return}
+  const submitRestockBtn=event.target.closest(".submit-restock");
+  if(submitRestockBtn){const item=historicalSamples.find(row=>row.catalog_id===submitRestockBtn.dataset.catalogId);if(item)submitRestock(item);return}
+  const m5FixtureBtn=event.target.closest(".load-m5-fixture");
+  if(m5FixtureBtn){const item=historicalSamples.find(row=>row.catalog_id===m5FixtureBtn.dataset.catalogId);if(item)loadM5Fixture(item);return}
+  const resumeBtn=event.target.closest(".continue-flow");
+  if(resumeBtn){const item=historicalSamples.find(row=>row.catalog_id===resumeBtn.dataset.catalogId);if(item)continueBusinessFlow(item);return}
+  const moduleTab=event.target.closest(".module-tab");
+  if(moduleTab&&activeBusinessSnapshot){if(moduleTab.dataset.view==="matching")openM3Matching(activeBusinessSnapshot);else showModule("m3",activeBusinessSnapshot);return}
+  const autoFill=event.target.closest(".auto-fill-best");
+  if(autoFill){autoFillBestCandidates();return}
+  const continueFlow=event.target.closest(".continue-m3-flow");
+  if(continueFlow){continueAfterReview();return}
+  const reviewAction=event.target.closest(".review-match,.review-unmatched,.export-reviews,.import-reviews");
+  if(!reviewAction)return;
+  if(reviewAction.classList.contains("export-reviews"))exportVerifiedReviews();
+  else if(reviewAction.classList.contains("import-reviews"))$("#review-import")?.click();
+  else saveMaterialReview(reviewAction.closest("tr"),reviewAction.classList.contains("review-unmatched"));
+});
+$("#content").addEventListener("change",event=>{
+  if(event.target.id!=="review-import")return;
+  const file=event.target.files?.[0];if(file)importVerifiedReviews(file);event.target.value="";
+});
+$("#content").addEventListener("input",event=>{
+  if(event.target.id==="reviewer-name")try{localStorage.setItem(reviewerStorageKey,event.target.value.trim())}catch{}
+});
+initializeSamples();
+function readStoredReviews(){try{return JSON.parse(localStorage.getItem(reviewStorageKey)||"{}")}catch{return{}}}
+function persistReviews(){try{localStorage.setItem(reviewStorageKey,JSON.stringify(materialReviews))}catch{}}
+function reviewerName(){return($("#reviewer-name")?.value||localStorage.getItem(reviewerStorageKey)||"").trim()}
+async function initializeSamples(){
+  try{
+    const response=await fetch("/historical-order-catalog.json",{cache:"no-store"});if(!response.ok)throw Error(response.status);
+    historicalSamples=await response.json();
+    candidateRuns=await fetch("/run-config/candidate-run-manifest.json",{cache:"no-store"}).then(r=>r.ok?r.json():[]).catch(()=>[]);
+    restoreCandidateRuns();
+    refreshCatalogSummary();
+    renderCatalog();
+    if(requestedTaskId){$("#task").value=requestedTaskId;await load(requestedTaskId);return}
+    const initial=historicalSamples.find(item=>item.catalog_id===requestedCatalogId)||historicalSamples.find(item=>item.task_id===$("#task").value)||historicalSamples.find(item=>item.task_id)||historicalSamples[0];
+    if(initial){
+      if(requestedAction==="run"&&candidateRuns.some(run=>run.catalog_id===initial.catalog_id)){const nextUrl=new URL(location.href);nextUrl.searchParams.set("action","view");history.replaceState(null,"",nextUrl);runCandidate(initial)}
+      else if(initial.task_id){$("#task").value=initial.task_id;load(initial.task_id)}
+      else renderCandidate(initial);
+    }
+  }catch{$("#sample-catalog").classList.add("hidden")}
+}
+function renderCatalog(){
+  const keyword=$("#catalog-search").value.trim().toLowerCase(),status=$("#catalog-status").value;
+  const rows=historicalSamples.filter(item=>(status==="all"||item.status===status)&&(!keyword||[item.order_id,item.product_name,item.source_file,item.source_sheet].some(value=>String(value).toLowerCase().includes(keyword))));
+  $("#catalog-count").textContent=`当前显示 ${rows.length} / ${historicalSamples.length} 条`;
+  if(!rows.length){$("#sample-catalog-body").innerHTML='<div class="empty-table">没有符合条件的历史订单</div>';return}
+  $("#sample-catalog-body").innerHTML=`<div class="table-wrap"><table><thead><tr>${["状态","订单号","产品名称","来源","BOM 物料","MRP 汇总","M4 有效建议","数据说明","操作"].map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(item=>{const runnable=candidateRuns.some(run=>run.catalog_id===item.catalog_id);return`<tr><td><strong>${esc(item.status)}</strong></td><td>${esc(item.order_id)}</td><td>${esc(item.product_name)}</td><td>${esc(`${item.source_file} / ${item.source_sheet}`)}</td><td>${esc(item.bom_lines)}</td><td>${esc(item.mrp_lines??"待运行")}</td><td>${esc(item.m4_valid_rows??"待运行")}</td><td>${esc(item.data_status)}</td><td><div class="catalog-actions"><button class="catalog-view" type="button" data-catalog-id="${esc(item.catalog_id)}">${item.task_id?"查看链路":"查看详情"}</button><button class="catalog-run" type="button" data-catalog-id="${esc(item.catalog_id)}" ${!runnable||runningCatalogs.has(item.catalog_id)?"disabled":""}>${runningCatalogs.has(item.catalog_id)?"正在运行":item.task_id?"重新运行":runnable?"运行":"缺少文件"}</button></div></td></tr>`}).join("")}</tbody></table></div>`;
+}
+function openCatalogItem(id){const item=historicalSamples.find(row=>row.catalog_id===id);if(!item)return;if(item.task_id){$("#task").value=item.task_id;load(item.task_id)}else renderCandidate(item);$("#content").scrollIntoView({behavior:"smooth",block:"start"})}
+function runCatalogItem(id){const item=historicalSamples.find(row=>row.catalog_id===id);if(item)runCandidate(item)}
+function renderCandidate(item){
+  $("#message").classList.add("hidden");$("#task").value=item.task_id||"";
+  const runnable=candidateRuns.some(run=>run.catalog_id===item.catalog_id);
+  $("#content").innerHTML=`<section class="hero"><div><p class="eyebrow">HISTORICAL ORDER CANDIDATE</p><h2>${esc(item.order_id)}</h2><p>${esc(item.product_name)}</p></div><div class="status warn">${item.task_id?"已有历史链路":"待运行链路"}</div></section><section class="metrics">${metric("历史 BOM 物料",item.bom_lines)}${metric("MRP 汇总",item.mrp_lines??"待运行")}${metric("采购建议",item.m4_valid_rows??"待运行")}${metric("库存匹配",item.inventory_matches??"待运行")}${metric("在途采购",item.open_po_matches??"待运行")}</section><section class="panel detail-panel"><h3>历史数据候选详情</h3>${table(["订单号","产品名称","来源文件","来源工作表","历史 BOM 物料行","当前状态"],[[item.order_id,item.product_name,item.source_file,item.source_sheet,item.bom_lines,item.status]])}<div class="candidate-note">${item.task_id?"该订单已有正式验收链路，也可以重新运行生成新的 TaskID。":runnable?"该订单的原始文件、历史 BOM 和物料计算输入已就绪；点击后只向服务端提交一次受治理流程。若没有已批准的设备、工艺路线与日历，正式模式会安全阻断，不会生成模拟排程。":"该订单缺少可执行原始文件，只保留查看，不会伪造运行结果。"}</div>${runnable?`<div class="candidate-actions"><button class="run-candidate" type="button" data-catalog-id="${esc(item.catalog_id)}">${item.task_id?"重新运行 订单到排程":"运行 订单到排程"}</button><span class="subtle">完成或安全阻断后可按同一 TaskID 查询</span></div>`:""}</section>`;
+}
+function refreshCatalogSummary(){const accepted=historicalSamples.filter(item=>item.status==="已验收").length;$("#sample-catalog-title").textContent=`历史订单目录 · 共 ${historicalSamples.length} 条 · ${accepted} 条已验收 · ${historicalSamples.length-accepted} 条待运行`}
+function restoreCandidateRuns(){try{const saved=JSON.parse(localStorage.getItem("yunpai-candidate-runs")||"{}");historicalSamples.forEach(item=>{if(saved[item.catalog_id]?.task_id)Object.assign(item,saved[item.catalog_id])})}catch{}}
+function persistCandidateRun(item){try{const saved=JSON.parse(localStorage.getItem("yunpai-candidate-runs")||"{}");saved[item.catalog_id]={status:item.status,task_id:item.task_id,flow_run_id:item.flow_run_id,job_id:item.job_id,job_ids:item.job_ids,bom_lines:item.bom_lines,mrp_lines:item.mrp_lines,m4_valid_rows:item.m4_valid_rows,inventory_matches:item.inventory_matches,open_po_matches:item.open_po_matches,data_status:item.data_status};localStorage.setItem("yunpai-candidate-runs",JSON.stringify(saved))}catch{}}
+function clearStaleCandidateRun(item){try{const saved=JSON.parse(localStorage.getItem("yunpai-candidate-runs")||"{}");delete saved[item.catalog_id];localStorage.setItem("yunpai-candidate-runs",JSON.stringify(saved))}catch{}item.status="待运行";item.task_id="";delete item.flow_run_id;delete item.job_id;delete item.job_ids;item.data_status="历史目录记录存在，但当前正式 Tracking 库无对应 TaskID，需重新运行"}
+function runState(item,title,detail,failed=false){$("#content").innerHTML=`<section class="hero"><div><p class="eyebrow">RUNNING REAL MODULE CHAIN</p><h2>${esc(item.order_id)}</h2><p>${esc(item.product_name)}</p></div><div class="status ${failed?"danger":"warn"}">${failed?"执行失败":"正在运行"}</div></section><section class="panel detail-panel"><h3>${failed?"链路停在真实失败步骤":"正在执行 订单到排程"}</h3><div class="run-progress"><b>${esc(title)}</b><span>${esc(detail)}</span></div>${failed?`<div class="candidate-actions"><button class="run-candidate" type="button" data-catalog-id="${esc(item.catalog_id)}">重新运行</button><button class="secondary-button open-m3-review" type="button" data-catalog-id="${esc(item.catalog_id)}">物料匹配与人工核验</button></div>`:""}</section>`}
+function runAttentionState(item,title,detail,flow){const m2=flow&&flow.results&&flow.results.m2,payload=m2&&(m2.result||m2),questions=(payload&&payload.open_customer_questions)||[],unique=[...new Map(questions.map(q=>[q.field||q.question_id,q])).values()];let questionsHtml="";if(unique.length){questionsHtml=`<div class="m2-questions" style="margin-top:14px;padding:14px;border:1px solid #d9e7e5;border-radius:10px;background:#f7fbfa"><b>M2 需要人工确认以下物料问题</b>${unique.map(q=>`<div style="margin-top:10px"><div style="font-size:12px;color:#536973">${esc(q.question||"")}</div><textarea class="m2-answer" data-field="${esc(q.field||q.question_id||"")}" rows="2" style="width:100%;margin-top:5px;border:1px solid #c7d8d9;border-radius:7px;padding:7px" placeholder="填写确认内容"></textarea></div>`).join("")}<button class="submit-m2-answers" type="button" data-catalog-id="${esc(item.catalog_id)}" style="margin-top:10px;background:#0d9188">提交确认并继续</button></div>`}const rd=flow&&flow.results&&flow.results.material_readiness,rdData=rd&&(rd.data||rd)||{},shortages=(rdData.critical_shortages||rdData.shortages||[]).filter(s=>s&&s.material_code);let restockHtml="";if(shortages.length){restockHtml=`<div class="restock-panel" style="margin-top:14px;padding:14px;border:1px solid #e7c9a0;border-radius:10px;background:#fff7e8"><b style="color:#8a5c16">物料缺料：请按建议采购量补货入账后继续</b>${shortages.map(s=>`<div style="display:flex;gap:10px;align-items:center;margin-top:8px"><span style="flex:1;font-size:12px;color:#536973">${esc(s.material_code)} ${esc(s.material_name||"")} · 缺 ${displayQuantity(s.shortage_qty)} · 建议采购 ${displayQuantity(s.suggest_purchase_qty)}</span><input class="restock-qty" type="number" min="0" step="any" data-code="${esc(s.material_code)}" data-name="${esc(s.material_name||"")}" value="${esc(String(s.suggest_purchase_qty||s.shortage_qty||0))}" style="width:120px;border:1px solid #c7d8d9;border-radius:7px;padding:6px"/></div>`).join("")}<button class="submit-restock" type="button" data-catalog-id="${esc(item.catalog_id)}" style="margin-top:12px;background:#b5741c">补货入账并继续</button></div>`}const isM5Gate=/M5|capacity facts|routings|resources/i.test(detail||"");let m5Html="";if(isM5Gate){m5Html=`<div class="m5-fixture-panel" style="margin-top:14px;padding:14px;border:1px solid #b9ddda;border-radius:10px;background:#e5f5f1"><b style="color:#176f68">M5 缺少权威产能事实（受控演示）</b><p style="margin:6px 0 10px;font-size:12px;color:#536973">可载入受控排程 fixture（4 道标准工序、4 个独立工位、7 天班次窗口）继续演示排程。正式发布仍需真实工艺/资源/班次。</p><button class="load-m5-fixture" type="button" data-catalog-id="${esc(item.catalog_id)}" style="background:#0d9188;color:#fff;border:0;border-radius:8px;padding:9px 16px;font-weight:800">载入受控排程 fixture 并继续</button></div>`}$("#content").innerHTML=`<section class="hero"><div><p class="eyebrow">GOVERNED BUSINESS FLOW</p><h2>${esc(item.order_id)}</h2><p>${esc(item.product_name)}</p></div><div class="status warn">等待业务事实</div></section><section class="panel detail-panel"><h3>链路已安全暂停</h3><div class="run-progress"><b>${esc(title)}</b><span>${esc(detail)}</span></div><div class="candidate-actions"><button class="run-candidate" type="button" data-catalog-id="${esc(item.catalog_id)}">补充配置后重新运行</button><button class="continue-flow" type="button" data-catalog-id="${esc(item.catalog_id)}">继续运行</button><button class="secondary-button open-m3-review" type="button" data-catalog-id="${esc(item.catalog_id)}">物料匹配与人工核验</button></div>${questionsHtml}${restockHtml}${m5Html}</section>`}
+async function jsonRequest(url,options={},allowRecovery=true){
+  const method=String(options.method||"GET").toUpperCase(),unsafe=["POST","PUT","PATCH","DELETE"].includes(method);
+  if(unsafe)await ensureBrowserSession();
+  const headers=new Headers(options.headers||{});if(unsafe&&csrfToken)headers.set("X-CSRF-Token",csrfToken);
+  const response=await fetch(url,{credentials:"include",...options,headers});
+  if(allowRecovery&&unsafe&&[401,403].includes(response.status)){
+    await ensureBrowserSession();
+    const retryHeaders=new Headers(options.headers||{});if(csrfToken)retryHeaders.set("X-CSRF-Token",csrfToken);
+    return jsonRequest(url,{...options,headers:retryHeaders},false);
+  }
+  const text=await response.text();let data={};try{data=text?JSON.parse(text):{}}catch{data={raw:text}}
+  if(!response.ok){const message=data?.detail?.message||data?.detail||data?.errors?.[0]?.message||data?.message||data?.raw||response.statusText;throw Error(`${response.status} ${typeof message==="string"?message:JSON.stringify(message)}`)}
+  return data;
+}
+async function ensureBrowserSession(){
+  const me=await fetch("/api/auth/me",{cache:"no-store",credentials:"include"});
+  if(me.status===404){csrfToken="";return}
+  if(me.ok){
+    const contentType=me.headers.get("content-type")||"";if(!contentType.includes("application/json"))throw Error(`身份服务代理未接入当前 Business 网关：HTTP ${me.status}`);
+    const body=await me.json(),data=body.data||body;
+    csrfToken=data?.session?.csrf_token||data?.csrf_token||"";
+    if(!csrfToken)throw Error("已有身份会话未返回 CSRF Token");
+    return;
+  }
+  if(me.status!==401)throw Error(`身份服务不可用：${me.status} ${await me.text()}`);
+  const configResponse=await fetch("/api/auth/config",{cache:"no-store",credentials:"include"});
+  if(!configResponse.ok)throw Error(`身份配置不可用：${configResponse.status} ${await configResponse.text()}`);
+  const configBody=await configResponse.json(),config=configBody.data||configBody;
+  if(config.auth_mode!=="shared_anonymous"||!config.capabilities?.anonymous_session)throw Error("401 需要有效登录会话");
+  const response=await fetch("/api/auth/session/anonymous",{method:"POST",cache:"no-store",credentials:"include"});
+  const contentType=response.headers.get("content-type")||"";if(!contentType.includes("application/json"))throw Error(`身份服务代理未接入当前 Business 网关：HTTP ${response.status}`);
+  const text=await response.text();let data={};try{data=text?JSON.parse(text):{}}catch{}
+  if(!response.ok)throw Error(`匿名会话创建失败：${response.status} ${data?.errors?.[0]?.message||data?.detail?.message||response.statusText}`);
+  csrfToken=data?.session?.csrf_token||data?.csrf_token||"";
+  if(!csrfToken)throw Error("身份会话未返回 CSRF Token");
+}
+async function blobBase64(blob){const bytes=new Uint8Array(await blob.arrayBuffer());let binary="";for(let offset=0;offset<bytes.length;offset+=32768)binary+=String.fromCharCode(...bytes.subarray(offset,offset+32768));return btoa(binary)}
+const SHA256_INITIAL=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19],SHA256_ROUNDS=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+function sha256Rotate(value,amount){return value>>>amount|value<<32-amount}
+function sha256HexSync(bytes){
+  const bitLength=bytes.byteLength*8,paddedLength=Math.ceil((bytes.byteLength+9)/64)*64,padded=new Uint8Array(paddedLength),view=new DataView(padded.buffer),state=[...SHA256_INITIAL],words=new Uint32Array(64);padded.set(bytes);padded[bytes.byteLength]=128;view.setUint32(paddedLength-8,Math.floor(bitLength/0x100000000),false);view.setUint32(paddedLength-4,bitLength>>>0,false);
+  for(let offset=0;offset<paddedLength;offset+=64){
+    for(let index=0;index<16;index++)words[index]=view.getUint32(offset+index*4,false);
+    for(let index=16;index<64;index++){const prior15=words[index-15],prior2=words[index-2],sigma0=sha256Rotate(prior15,7)^sha256Rotate(prior15,18)^prior15>>>3,sigma1=sha256Rotate(prior2,17)^sha256Rotate(prior2,19)^prior2>>>10;words[index]=(words[index-16]+sigma0+words[index-7]+sigma1)>>>0}
+    let[a,b,c,d,e,f,g,h]=state;
+    for(let index=0;index<64;index++){const upperSigma1=sha256Rotate(e,6)^sha256Rotate(e,11)^sha256Rotate(e,25),choice=e&f^~e&g,temporary1=(h+upperSigma1+choice+SHA256_ROUNDS[index]+words[index])>>>0,upperSigma0=sha256Rotate(a,2)^sha256Rotate(a,13)^sha256Rotate(a,22),majority=a&b^a&c^b&c,temporary2=(upperSigma0+majority)>>>0;h=g;g=f;f=e;e=(d+temporary1)>>>0;d=c;c=b;b=a;a=(temporary1+temporary2)>>>0}
+    state[0]=(state[0]+a)>>>0;state[1]=(state[1]+b)>>>0;state[2]=(state[2]+c)>>>0;state[3]=(state[3]+d)>>>0;state[4]=(state[4]+e)>>>0;state[5]=(state[5]+f)>>>0;state[6]=(state[6]+g)>>>0;state[7]=(state[7]+h)>>>0;
+  }
+  return state.map(word=>word.toString(16).padStart(8,"0")).join("");
+}
+async function sha256Hex(value){const bytes=typeof value==="string"?new TextEncoder().encode(value):value,subtle=globalThis.crypto?.subtle;if(subtle&&typeof subtle.digest==="function"){try{const digest=await subtle.digest("SHA-256",bytes.slice().buffer);return[...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,"0")).join("")}catch{}}return sha256HexSync(bytes)}
+function buildM2Payload(item,config){
+  const historyBomPath=config.order?.bom_excel_path||config.history_bom_path;
+  return{product_profile:{product_name:item.product_name,product_code:config.product_code||""},requirement_text:`订单 ${item.order_id}，数量 ${config.order?.order_qty??"待确认"} ${config.order?.unit||""}，交期 ${config.order?.due_date||"待确认"}。仅使用已提供的历史 BOM 和证据；缺失事实时请求人工补充。`,rule_package_path:"",use_demo_sources:false,history_bom_paths:historyBomPath?[historyBomPath]:[],template_confirmation:{confirmed:false},enable_bom_model:false,enable_sop_model:false};
+}
+function buildM3Payload(input,{lines,sourcePackageId}={}){
+  const payload=structuredClone(input);
+  payload.source_module="M2";
+  payload.source_package_id=sourcePackageId||"${steps.run_bom_sop_workflow.result.result.run_id}";
+  payload.bom={...payload.bom,lines:lines||"${steps.run_bom_sop_workflow.result.result.bom_generation.standard_bom.bom_lines}"};
+  return payload;
+}
+function bridgeM2BomLines(lines,m3Input,item){
+  const originals=new Map((m3Input.bom?.lines||[]).map(line=>[String(line.material_code||""),line]));
+  return lines.map((line,index)=>{
+    const materialCode=String(line.component_item||line.material_code||line.item_code||"").trim();
+    if(!materialCode)throw Error(`M2 第 ${index+1} 条 BOM 缺少物料编码`);
+    const original=originals.get(materialCode)||{},qty=Number(line.qty_per??line.required_quantity??line.quantity??0),lossRate=Number(line.scrap_pct??line.loss_rate??original.loss_rate??0),unitPrice=Number(original.unit_price??0);
+    if(!(qty>0))throw Error(`M2 物料 ${materialCode} 的单位用量无效`);
+    return{...original,line_id:String(original.line_id||`M2-${String(index+1).padStart(4,"0")}`),product_name:item.product_name,material_code:materialCode,material_name:String(line.component_name||line.material_name||original.material_name||materialCode),qty_raw:qty,qty_per:qty,uom:String(line.uom||line.unit||original.uom||"PCS"),uom_factor:1,unit_price:unitPrice,line_cost:Number((unitPrice*qty).toFixed(9)),loss_rate:lossRate,requires_procurement:Object.prototype.hasOwnProperty.call(original,"requires_procurement")?Boolean(original.requires_procurement):String(line.supply_type||"BUY").toUpperCase()!=="MAKE",source_sheet:String(line.source_sheet||original.source_sheet||""),source_row:Number(line.source_row||original.source_row||index+1),evidence_refs:original.evidence_refs||[]};
+  });
+}
+function runStepLabel(job){
+  const names={ingest_document:"M0 解析订单文件",run_bom_sop_workflow:"M2 匹配并拆解历史 BOM",run_mrp_procurement_plan:"M3 计算库存、在途与缺料",export_m3_procurement_suggestions:"M3 导出采购建议",import_m4_purchase_suggestions_json:"M4 导入采购建议"};
+  const completed=job.steps?.at(-1),current=job.current_step||completed,done=job.steps?.filter(step=>step.status==="ok").length||0;
+  return current?`${done}/5 ${names[current.tool]||current.tool}：${current.status==="running"?"执行中":current.status==="ok"?"完成":current.error||current.status}`:"编排任务已提交，等待调度";
+}
+function snapshotModules(snapshot){return new Set((snapshot.module_runs||[]).map(run=>run.module))}
+function isModuleEntity(entity,module){return entity?.module===module||(entity?.bindings||[]).some(binding=>binding.module===module)}
+function selectProcurementPlan(entities){
+  const plans=(entities||[]).filter(entity=>entity.entity_type==="procurement_plan");
+  return plans.find(entity=>isModuleEntity(entity,"m3")&&entity.metadata?.lines?.length)||
+    plans.find(entity=>entity.metadata?.lines?.length)||
+    plans.find(entity=>isModuleEntity(entity,"m3"))||
+    plans[0]||
+    {};
+}
+function findM3Lines(snapshot,plan){
+  if(plan?.metadata?.lines?.length)return plan.metadata.lines;
+  for(const event of snapshot.events||[]){
+    if(event.module!=="m3")continue;
+    const related=[...(event.payload?.related_entities||[]),...(event.payload?.relations||[]).flatMap(relation=>[relation.source,relation.target])];
+    const bom=related.find(entity=>entity?.module==="m3"&&entity?.entity_type==="bom"&&entity?.metadata?.bom_lines?.length);
+    if(bom)return bom.metadata.bom_lines;
+  }
+  return[];
+}
+function completeCandidate(item,taskId,jobIds,snapshot){
+  const plan=selectProcurementPlan(snapshot.entities),planLines=findM3Lines(snapshot,plan),suggestions=(snapshot.entities||[]).filter(entity=>entity.entity_type==="purchase_suggestion"),bom=(snapshot.entities||[]).find(entity=>entity.entity_type==="bom"&&isModuleEntity(entity,"m2"));
+  item.status="已验收";item.task_id=taskId;item.job_ids=jobIds;item.job_id=jobIds.at(-1);item.bom_lines=bom?.metadata?.bom_lines?.length??item.bom_lines;item.mrp_lines=planLines.length||item.mrp_lines;item.m4_valid_rows=suggestions.length;item.inventory_matches=planLines.filter(line=>Number(line.available_qty||0)>0).length;item.open_po_matches=(plan?.metadata?.open_purchase_orders||[]).length;item.data_status="订单到排程 执行完成，pressure_only 测试排程与链路可追踪";
+  persistCandidateRun(item);refreshCatalogSummary();renderCatalog();$("#task").value=taskId;load(taskId);
+}
+function cacheJobEvidence(taskId,item,config,m3Input,job){
+  const step=name=>job.steps?.find(value=>value.tool===name)?.result||{},m2Output=step("run_bom_sop_workflow"),m2Data=unwrapResult(m2Output),exportOutput=step("export_m3_procurement_suggestions");
+  const actualM3=structuredClone(m3Input),m2Lines=m2Data.bom_generation?.standard_bom?.bom_lines||[];actualM3.source_module="M2";actualM3.source_package_id=m2Data.run_id;actualM3.bom={...actualM3.bom,lines:m2Lines.length?bridgeM2BomLines(m2Lines,m3Input,item):actualM3.bom?.lines||[]};
+  jobEvidence.set(taskId,{m1:{input:{"文件名":config.order_filename,"订单":config.order},output:step("ingest_document")},m2:{input:buildM2Payload(item,config),output:m2Output},m3:{input:actualM3,output:step("run_mrp_procurement_plan")},m4:{input:{suggestions:unwrapResult(exportOutput).suggestions||[]},output:step("import_m4_purchase_suggestions_json")}});
+}
+async function hydrateJobEvidence(taskId){
+  if(jobEvidence.has(taskId))return;
+  const item=historicalSamples.find(row=>row.task_id===taskId);if(!item?.flow_run_id&&!item?.job_id)return;
+  const config=candidateRuns.find(row=>row.catalog_id===item.catalog_id);if(!config)return;
+  try{
+    const [runs,m3Input]=await Promise.all([
+      item.flow_run_id
+        ? Promise.all([jsonRequest(`/api/orchestrator/business-flows/${encodeURIComponent(item.flow_run_id)}`,{cache:"no-store"})])
+        : Promise.all((item.job_ids||[item.job_id]).map(id=>jsonRequest(`/api/orchestrator/jobs/${encodeURIComponent(id)}`,{cache:"no-store"}))),
+      jsonRequest(config.m3_input_url,{cache:"no-store"}),
+    ]);
+    cacheJobEvidence(taskId,item,config,m3Input,{steps:runs.flatMap(run=>run.steps||[])});
+  }catch{}
+}
+async function waitForJob(item,jobId,taskId){
+  for(let attempt=0;attempt<180;attempt++){
+    const job=await jsonRequest(`/api/orchestrator/jobs/${encodeURIComponent(jobId)}`,{cache:"no-store"});
+    runState(item,"正式编排器运行中",`${runStepLabel(job)} · TaskID：${taskId}`);
+    if(["done","partial","failed"].includes(job.status)){
+      if(job.status!=="done")throw Error(job.error||`编排任务状态：${job.status}`);
+      return job;
+    }
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  throw Error("编排任务超过 3 分钟仍未结束，请稍后按 TaskID 查询");
+}
+function businessFlowStepLabel(run){
+  const labels={intake:"受理订单",resolve_order_from_m1:"M1 解析订单",resolve_or_generate_bom:"M2 生成受控 BOM",calculate_material_requirements:"M3 计算物料需求",persist_procurement_plan:"持久化采购计划",create_or_update_purchase_orders:"M4 采购处理",check_material_readiness:"核对物料齐套",solve_schedule:"M5 权威排程",persist_trace:"持久化全链路追踪"};
+  return labels[run.current_node]||run.current_node||"等待服务端调度";
+}
+async function waitForBusinessFlow(item,runId,taskId){
+  for(let attempt=0;attempt<300;attempt++){
+    const run=await jsonRequest(`/api/orchestrator/business-flows/${encodeURIComponent(runId)}`,{cache:"no-store"});
+    if(run.tracking_task_id!==taskId)throw Error("流程查询返回了不同的 Tracking TaskID");
+    runState(item,"服务端 LangGraph 运行中",`${businessFlowStepLabel(run)} · TaskID：${taskId}`);
+    if(!["queued","running"].includes(run.status))return run;
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  throw Error("业务流程超过 5 分钟仍未结束，请稍后按 TaskID 查询");
+}
+async function waitForSnapshot(taskId,requiredModules=["m1","m2","m3","m4"]){
+  let latest=null;
+  for(let attempt=0;attempt<30;attempt++){const response=await fetch(`${api}${encodeURIComponent(taskId)}/snapshot?include_event_payload=true`,{cache:"no-store"});if(response.ok){latest=await response.json();const modules=snapshotModules(latest);if(requiredModules.every(module=>modules.has(module)))return latest}await new Promise(resolve=>setTimeout(resolve,1000))}
+  if(!latest)throw Error("业务执行成功，但 Tracking 快照尚未生成");
+  const modules=snapshotModules(latest),missing=requiredModules.filter(module=>!modules.has(module));
+  throw Error(`Tracking 快照缺少模块事件：${missing.join("、")}`);
+}
+function unwrapM5Envelope(payload){return payload?.success===true?payload.data:payload}
+async function waitForM5Flow(taskId,planVersion){
+  for(let attempt=0;attempt<30;attempt++){
+    const payload=await jsonRequest(`/api/m5/ops/flow-dashboard?tracking_task_id=${encodeURIComponent(taskId)}&limit=20`,{cache:"no-store"}),items=unwrapM5Envelope(payload);
+    if(!Array.isArray(items))throw Error("M5 看板返回格式错误");
+    const match=items.find(value=>value.tracking_task_id===taskId&&value.plan_version===planVersion);
+    if(match)return match;
+    await new Promise(resolve=>setTimeout(resolve,1000));
+  }
+  throw Error("M5 已返回排程，但业务看板未读到同 TaskID 的持久化计划");
+}
+async function runCandidate(item){
+  if(runningCatalogs.has(item.catalog_id))return;
+  const config=candidateRuns.find(row=>row.catalog_id===item.catalog_id);if(!config){runState(item,"缺少执行输入","该订单没有完整的原始文件、历史 BOM 或计算输入。",true);return}
+  runningCatalogs.add(item.catalog_id);renderCatalog();
+  try{
+    runState(item,"准备受治理订单输入","读取订单文件与本订单的权威物料计算上下文");
+    const [orderResponse,m3Response]=await Promise.all([fetch(config.order_url,{cache:"no-store"}),fetch(config.m3_input_url,{cache:"no-store"})]);
+    if(!orderResponse.ok)throw Error(`读取订单文件失败：${orderResponse.status}`);if(!m3Response.ok)throw Error(`读取物料计算输入失败：${m3Response.status}`);
+    const orderBlob=await orderResponse.blob(),m3Input=await m3Response.json();
+    if(m3Input.order?.order_id!==item.order_id)throw Error("运行配置与当前订单号不一致，已拒绝执行");
+    const contentB64=await blobBase64(orderBlob),fileDigest=await sha256Hex(new Uint8Array(await orderBlob.arrayBuffer())),identityDigest=await sha256Hex(`${item.catalog_id}:${item.order_id}:${fileDigest}`);
+    const trackingTaskId=`task_${identityDigest.slice(0,32)}`,runKey=`business:${item.catalog_id}:${identityDigest}`;
+    await ensureBrowserSession();
+    const headers={"Content-Type":"application/json","X-Yunpai-Task-ID":trackingTaskId};if(csrfToken)headers["X-CSRF-Token"]=csrfToken;
+    const configuredPurpose=config.m5_payload?.scenario_purpose,mode=config.mode==="pressure_only"||configuredPurpose==="pressure_only"?"pressure_only":"real";
+    const created=await jsonRequest("/api/orchestrator/business-flows",{method:"POST",headers,body:JSON.stringify({
+      idempotency_key:runKey,
+      order_id:item.order_id,
+      order_number:config.order?.order_number||item.order_id,
+      mode,
+      order_file:{filename:config.order_filename,content_type:orderBlob.type||"application/octet-stream",content_b64:contentB64},
+      m1_options:{semantic_enrichment:false},
+      m2_payload:buildM2Payload(item,config),
+      m3_payload:structuredClone(m3Input),
+      m4_payload:config.m4_payload||{},
+      m4_generate_payload:config.m4_generate_payload===undefined?{}:config.m4_generate_payload,
+      m5_payload:config.m5_payload||null,
+      replace_m3_bom_with_m2:true,
+      session_id:`business-${item.catalog_id}`,
+    })});
+    if(!created.run_id||created.tracking_task_id!==trackingTaskId)throw Error("服务端未返回同一根 Tracking TaskID");
+    const flow=await waitForBusinessFlow(item,created.run_id,trackingTaskId);
+    cacheJobEvidence(trackingTaskId,item,config,m3Input,flow);
+    item.task_id=trackingTaskId;item.flow_run_id=created.run_id;item.job_ids=[];delete item.job_id;
+    const reason=flow.blocked_reason?.message||flow.error?.message||"流程未完成";
+    if(flow.status==="human_input_required"||flow.status==="blocked"){
+      item.status="待补充";item.data_status=`${flow.status==="blocked"?"安全阻断":"等待人工补充"}：${reason}`;
+      persistCandidateRun(item);refreshCatalogSummary();renderCatalog();
+      runAttentionState(item,flow.status==="blocked"?"权威条件未满足":"需要人工补充",`${reason} · TaskID：${trackingTaskId}`,flow);
+      return;
+    }
+    if(flow.status!=="completed")throw Error(reason);
+    const trace=await jsonRequest(`/api/orchestrator/business-orders/${encodeURIComponent(item.order_id)}/trace`,{cache:"no-store"});
+    const schedule=trace.schedule_versions?.at(-1),planVersion=schedule?.source_schedule_id||schedule?.schedule_id;
+    if(planVersion)await waitForM5Flow(trackingTaskId,planVersion);
+    const completedModules=[...new Set((flow.steps||[]).filter(step=>step.tool&&step.status==="completed").map(step=>step.module).filter(module=>/^m[1-5]$/.test(module)))];
+    const snapshot=await waitForSnapshot(trackingTaskId,completedModules);
+    completeCandidate(item,trackingTaskId,[],snapshot);
+    item.flow_run_id=created.run_id;
+    item.data_status=mode==="pressure_only"?"订单到排程 服务端流程完成；排程为显式 pressure_only 测试数据":"订单到排程 服务端流程完成；权威业务链可追踪";
+    persistCandidateRun(item);
+  }catch(error){runState(item,"执行未完成",error.message,true)}
+  finally{runningCatalogs.delete(item.catalog_id);renderCatalog()}
+}
+async function continueBusinessFlow(item,answers={},restock=null,m3Overrides=null,m5Payload=null,mode=null){
+  const runId=item.flow_run_id;
+  if(!runId||runningCatalogs.has(item.catalog_id))return;
+  runningCatalogs.add(item.catalog_id);renderCatalog();
+  try{
+    runState(item,"继续运行业务流程","服务端 LangGraph 恢复执行");
+    await ensureBrowserSession();
+    const headers={"Content-Type":"application/json"};if(csrfToken)headers["X-CSRF-Token"]=csrfToken;
+    const supplement={"m2_payload":{"template_confirmation":{"confirmed":true}}};
+    if(Object.keys(answers).length)supplement.m2_payload.customer_answers=answers;
+    if(restock)supplement.m3_payload={inventory_snapshot:restock};
+    if(m3Overrides)supplement.m3_payload={...(supplement.m3_payload||{}),material_matching_overrides:m3Overrides};
+    if(m5Payload)supplement.m5_payload=m5Payload;
+    if(mode)supplement.mode=mode;
+    await jsonRequest(`/api/orchestrator/business-flows/${encodeURIComponent(runId)}/resume`,{method:"POST",cache:"no-store",headers,body:JSON.stringify(supplement)});
+    const flow=await waitForBusinessFlow(item,runId,item.task_id);
+    const reason=flow.blocked_reason?.message||flow.error?.message||"流程未完成";
+    if(flow.status==="human_input_required"||flow.status==="blocked"){
+      item.status="待补充";item.data_status=`${flow.status==="blocked"?"安全阻断":"等待人工补充"}：${reason}`;
+      persistCandidateRun(item);refreshCatalogSummary();renderCatalog();
+      runAttentionState(item,flow.status==="blocked"?"权威条件未满足":"需要人工补充",`${reason} · TaskID：${item.task_id}`,flow);
+      return;
+    }
+    if(flow.status!=="completed")throw Error(reason);
+    const trace=await jsonRequest(`/api/orchestrator/business-orders/${encodeURIComponent(item.order_id)}/trace`,{cache:"no-store"});
+    const schedule=trace.schedule_versions?.at(-1),planVersion=schedule?.source_schedule_id||schedule?.schedule_id;
+    if(planVersion)await waitForM5Flow(item.task_id,planVersion);
+    const completedModules=[...new Set((flow.steps||[]).filter(step=>step.tool&&step.status==="completed").map(step=>step.module).filter(module=>/^m[1-5]$/.test(module)))];
+    const snapshot=await waitForSnapshot(item.task_id,completedModules);
+    completeCandidate(item,item.task_id,[],snapshot);
+    item.flow_run_id=runId;
+    item.data_status="订单到排程 服务端流程完成；权威业务链可追踪";
+    persistCandidateRun(item);
+  }catch(error){runState(item,"执行未完成",error.message,true)}
+  finally{runningCatalogs.delete(item.catalog_id);renderCatalog()}
+}
+async function submitM2Answers(item){
+  const answers={};
+  document.querySelectorAll(".m2-answer").forEach(input=>{const value=input.value.trim();if(value)answers[input.dataset.field]=value});
+  if(!Object.keys(answers).length){runAttentionState(item,"需要人工补充","请至少填写一项确认内容后再继续。",null);return}
+  await continueBusinessFlow(item,answers);
+}
+async function submitRestock(item){
+  const runId=item.flow_run_id;
+  if(!runId)return;
+  let flow=null;
+  try{flow=await jsonRequest(`/api/orchestrator/business-flows/${encodeURIComponent(runId)}`,{cache:"no-store"})}catch{}
+  const orig=(flow&&flow.request&&flow.request.m3_payload&&flow.request.m3_payload.inventory_snapshot)||[];
+  const restock=[...orig];
+  let any=false;
+  document.querySelectorAll(".restock-qty").forEach(input=>{
+    const qty=parseFloat(input.value);
+    if(!(qty>0)||!input.dataset.code)return;
+    restock.push({
+      material_code:input.dataset.code,
+      material_name:input.dataset.name||"",
+      warehouse:"材料仓",
+      lot_no:`RESTOCK-${Date.now()}-${input.dataset.code}`,
+      available_qty:qty,locked_qty:0,qc_status:"passed",
+      received_at:new Date().toISOString().slice(0,10),
+      base_stock_reserved:0,
+    });
+    any=true;
+  });
+  if(!any){runAttentionState(item,"需要人工补充","请填写至少一项补货数量后再继续。",flow);return}
+  await continueBusinessFlow(item,{},restock);
+}
+async function loadM5Fixture(item){
+  const runId=item.flow_run_id;
+  if(!runId)return;
+  runState(item,"提交服务端受控排程","M5 求解中（服务端构建受控演示 fixture）");
+  let flow=null;
+  try{flow=await jsonRequest(`/api/orchestrator/business-flows/${encodeURIComponent(runId)}`,{cache:"no-store"})}catch{}
+  // 只提交服务端构建标记：orchestrator solve_schedule 消费 fixture 标记，
+  // 由服务端 _build_demo_m5_payload 构建受控演示排程载荷，替代前端直调 M5。
+  const mode=(flow&&flow.mode)==="pressure_only"?"pressure_only":"real";
+  const scenarioPurpose=mode==="real"?"production":"pressure_only";
+  const m5Payload={scenario_purpose:scenarioPurpose,fixture:"standard-4station"};
+  try{
+    // 不传 mode：保留 run 原 mode，scenario_purpose 已与 run.mode 匹配。
+    await continueBusinessFlow(item,{},{},null,m5Payload);
+    if(item.task_id){try{await load(item.task_id)}catch{}}
+  }catch(e){runState(item,"受控排程生成失败",e.message,true)}
+}
+function bindExecPanel(){
+  document.querySelectorAll(".exec-btn").forEach(btn=>{
+    btn.addEventListener("click",async ()=>{
+      const action=btn.dataset.action,out=$("#exec-result");
+      out.textContent="提交中...";
+      await ensureBrowserSession();
+      const headers={"Content-Type":"application/json"};if(csrfToken)headers["X-CSRF-Token"]=csrfToken;
+      try{
+        let url,body;
+        if(action==="receipt"){
+          url="/api/orchestrator/business-facts";
+          body={fact_type:"receipt",aggregate_type:"material",aggregate_id:$("#exec-receipt-material").value.trim(),source_module:"m4",source_event_id:`ui-receipt-${Date.now()}`,auto_recalculate:false,payload:{material_id:$("#exec-receipt-material").value.trim(),order_id:$("#exec-receipt-order").value.trim(),purchase_order_id:$("#exec-receipt-po").value.trim(),location_id:$("#exec-receipt-wh").value.trim(),quantity:String($("#exec-receipt-qty").value),lot_id:$("#exec-receipt-lot").value.trim()}};
+        }else if(action==="inspection"){
+          url="/api/orchestrator/business-facts";
+          body={fact_type:"inspection",aggregate_type:"material",aggregate_id:$("#exec-qc-material").value.trim(),source_module:"m4",source_event_id:`ui-inspection-${Date.now()}`,auto_recalculate:false,payload:{material_id:$("#exec-qc-material").value.trim(),order_id:$("#exec-qc-order").value.trim(),location_id:$("#exec-qc-wh").value.trim(),inspection_id:$("#exec-qc-id").value.trim(),quantity:String($("#exec-qc-qty").value),result:"pass",source:"purchase_receipt",lot_id:$("#exec-qc-lot").value.trim()}};
+        }else if(action==="consumption"){
+          url="/api/orchestrator/business-facts";
+          body={fact_type:"consumption",aggregate_type:"material",aggregate_id:$("#exec-con-material").value.trim(),source_module:"mes",source_event_id:`ui-consumption-${Date.now()}`,auto_recalculate:false,payload:{material_id:$("#exec-con-material").value.trim(),order_id:$("#exec-con-order").value.trim(),location_id:$("#exec-con-wh").value.trim(),movement_type:"issue",quantity:String($("#exec-con-qty").value),lot_id:$("#exec-con-lot").value.trim()}};
+        }else if(action==="production_output"){
+          url="/api/orchestrator/business-execution-outputs";
+          body={order_id:$("#exec-finish-order").value.trim(),location_id:$("#exec-finish-wh").value.trim(),execution_event:{event_type:"actual_finish",event_id:`ui-finish-${Date.now()}`,external_ref:`UI-${Date.now()}`,source:"mes",reported_quantity:Number($("#exec-finish-qty").value),scrap_quantity:Number($("#exec-finish-scrap").value||0),operation_id:$("#exec-finish-op").value.trim(),plan_version:$("#exec-finish-plan").value.trim(),actual_end_time:new Date().toISOString()}};
+        }
+        const resp=await fetch(url,{method:"POST",credentials:"include",headers,body:JSON.stringify(body)});
+        const text=await resp.text();
+        if(!resp.ok){out.textContent=`失败 ${resp.status}: ${text.slice(0,400)}`;return}
+        out.textContent=`✓ ${action} 发布成功\n${text.slice(0,600)}`;
+      }catch(e){out.textContent=`错误: ${e.message}`}
+    });
+  });
+}
+bindExecPanel();
+function bindMaterialTrace(){
+  const query=$("#mt-query"),input=$("#mt-material"),out=$("#mt-result");
+  if(!query)return;
+  query.addEventListener("click",async ()=>{
+    const code=input.value.trim();
+    if(!code){out.innerHTML='<div class="notice">请输入物料编码。</div>';return}
+    out.innerHTML='<div class="matching-loading"><b>查询物料全追踪...</b><span>读取库存余额、收发流水与生产消费事实。</span></div>';
+    await ensureBrowserSession();
+    try{
+      const data=await jsonRequest(`/api/orchestrator/business-materials/${encodeURIComponent(code)}/trace`,{cache:"no-store"});
+      const t=data?.data&&typeof data.data==="object"&&!Array.isArray(data.data)?data.data:data;
+      const material=t.material||{},balances=t.inventory_balances||t.balances||[],movements=t.inventory_movements||t.movements||[],lots=t.lots||[],facts=t.facts||{},consumption=facts.consumption||t.consumption||[],production=facts.production_output||t.production_output||[];
+      const name=material.material_name||material.name||"";
+      const balanceRows=balances.map(b=>[b.location_id||b.location||"—",displayQuantity(b.quantity_on_hand??b.quantity_available??0),displayQuantity(b.quantity_available??0),displayQuantity(b.quantity_blocked??0),displayQuantity(b.quantity_reserved??0)]);
+      const movementRows=movements.map(m=>[date(m.occurred_at||m.created_at),m.movement_type||"—",displayQuantity(m.quantity),m.lot_id||"—",m.location_id||"—",m.source_module||"—"]);
+      const lotRows=(lots||[]).map(l=>[l.lot_id||"—",(l.roles||[]).join("/")||"—",(l.order_ids||[]).join("/")||"—",displayQuantity(l.net_quantity??l.quantity),date(l.first_seen_at),date(l.last_seen_at)]);
+      const consumptionRows=consumption.map(f=>{const p=f&&typeof f==="object"?f:{};return[date(p.created_at||p.occurred_at||""),p.order_id||"—",displayQuantity(p.quantity),p.location_id||"—",p.lot_id||"—",p.movement_type||"issue"]});
+      const productionRows=production.map(f=>{const p=f&&typeof f==="object"?f:{};return[date(p.produced_at||p.created_at||""),p.order_id||"—",displayQuantity(p.reported_quantity??p.quantity),p.location_id||"—",p.operation_id||"—",p.plan_version||"—"]});
+      out.innerHTML=`
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><b style="color:var(--navy)">${esc(code)}</b><span style="color:var(--muted)">${esc(name)}</span><span style="color:var(--teal)">${balances.length} 个库位 · ${movements.length} 条流水 · ${lots.length} 个批次</span></div>
+        <div class="table-caption">库存余额</div>${table(["库位","在库数量","可用数量","冻结数量","预留数量"],balanceRows,"该物料当前没有库存余额")}
+        <div class="table-caption">收发流水</div>${table(["时间","类型","数量","批次","库位","来源"],movementRows,"该物料没有收发流水")}
+        <div class="table-caption">批次流转</div>${table(["批次","角色","关联订单","净量","首次出现","最近出现"],lotRows,"该物料没有批次流转")}
+        <div class="table-caption">领料消费记录</div>${table(["时间","订单","数量","库位","批次","动作"],consumptionRows,"没有领料消费记录")}
+        <div class="table-caption">生产产出记录</div>${table(["时间","订单","产出数量","库位","工序","计划版本"],productionRows,"没有生产产出记录")}`;
+    }catch(e){out.innerHTML=`<div class="matching-loading matching-error"><b>查询失败</b><span>${esc(e.message)}</span></div>`}
+  });
+}
+bindMaterialTrace();
+function bindUploadPanel(){
+  const runBtn=$("#upload-run");
+  if(!runBtn)return;
+  runBtn.addEventListener("click",async ()=>{
+    const fileInput=$("#upload-file"),out=$("#upload-result");
+    const file=fileInput&&fileInput.files&&fileInput.files[0];
+    if(!file){out.textContent="请选择订单文件。";return}
+    out.textContent="读取文件...";
+    const contentB64=await blobBase64(file);
+    const digest=await sha256Hex(new Uint8Array(await file.arrayBuffer()));
+    const orderId=($("#upload-order").value.trim()||`SO-UPLOAD-${Date.now()%100000}`);
+    const productName=$("#upload-product").value.trim()||"上传订单";
+    const qty=Number($("#upload-qty").value)||1;
+    const now=new Date(),due=new Date(now.getTime()+14*864e5);
+    const historyBom=$("#upload-bom").value.trim();
+    const m3={order:{project_id:"PRJ-UPLOAD",order_id:orderId,bom_id:"BOM-UPLOAD",procurement_plan_id:`PROC-${orderId}`,product_name:productName,order_qty:qty,due_date:due.toISOString().slice(0,10),planning_date:now.toISOString().slice(0,10)},bom:{bom_id:"BOM-UPLOAD",product_name:productName,product_qty_basis:1,lines:[]},inventory_snapshot:[],open_purchase_orders:[],historical_usage:[]};
+    const catalogId=`upload-${Date.now()}`;
+    const identityDigest=await sha256Hex(`${catalogId}:${orderId}:${digest}`);
+    const trackingTaskId=`task_${identityDigest.slice(0,32)}`;
+    const item={catalog_id:catalogId,order_id:orderId,product_name:productName,bom_lines:0,mrp_lines:0,m4_valid_rows:0,status:"待运行",source_file:file.name,source_sheet:"upload",data_status:"上传订单",task_id:trackingTaskId};
+    historicalSamples.unshift(item);
+    renderCatalog();
+    const body={idempotency_key:`upload-${orderId}-${digest.slice(0,16)}`,order_id:orderId,order_number:orderId,mode:"real",order_file:{filename:file.name,content_type:file.type||"application/octet-stream",content_b64:contentB64},m1_options:{semantic_enrichment:false},m2_payload:{product_profile:{product_name:productName,product_code:"UPLOAD"},requirement_text:`上传订单 ${orderId} 数量 ${qty}。仅使用已提供事实；缺失时请求人工补充。`,rule_package_path:"",use_demo_sources:false,history_bom_paths:historyBom?[historyBom]:[],template_confirmation:{confirmed:false},enable_bom_model:false,enable_sop_model:false},m3_payload:m3,m4_payload:{},m4_generate_payload:{},m5_payload:null,replace_m3_bom_with_m2:true,session_id:`business-${catalogId}`};
+    out.textContent="提交业务流...";
+    try{
+      await ensureBrowserSession();
+      const headers={"Content-Type":"application/json","X-Yunpai-Task-ID":trackingTaskId};if(csrfToken)headers["X-CSRF-Token"]=csrfToken;
+      const created=await jsonRequest("/api/orchestrator/business-flows",{method:"POST",cache:"no-store",headers,body:JSON.stringify(body)});
+      item.flow_run_id=created.run_id;item.task_id=created.tracking_task_id||trackingTaskId;
+      persistCandidateRun(item);
+      const flow=await waitForBusinessFlow(item,created.run_id,item.task_id);
+      const reason=flow.blocked_reason?.message||flow.error?.message||"流程未完成";
+      if(flow.status==="human_input_required"||flow.status==="blocked"){
+        item.status="待补充";item.data_status=`${flow.status==="blocked"?"安全阻断":"等待人工补充"}：${reason}`;
+        persistCandidateRun(item);refreshCatalogSummary();renderCatalog();
+        runAttentionState(item,flow.status==="blocked"?"权威条件未满足":"需要人工补充",`${reason} · TaskID：${item.task_id}`,flow);
+        out.textContent=`流程已提交：${created.run_id} · TaskID ${item.task_id}`;
+      }else if(flow.status==="completed"){
+        item.status="已完成";item.data_status="订单到排程 服务端流程完成";persistCandidateRun(item);refreshCatalogSummary();renderCatalog();
+        out.textContent="流程完成：订单到排程 服务端流程完成";
+      }else{
+        item.status="失败";item.data_status=reason;persistCandidateRun(item);refreshCatalogSummary();renderCatalog();
+        out.textContent=`流程失败：${reason}`;
+      }
+    }catch(e){out.textContent=`提交失败：${e.message}`}
+  });
+}
+bindUploadPanel();
+
+async function loadM5State(id){
+  try{
+    const payload=await jsonRequest(`/api/m5/ops/flow-dashboard?tracking_task_id=${encodeURIComponent(id)}&limit=20`,{cache:"no-store"}),items=unwrapM5Envelope(payload);
+    if(!Array.isArray(items))throw Error("M5 返回格式错误");
+    const item=items.find(value=>value.tracking_task_id===id)||null,state={item,error:"",schedule:null,scheduleError:"",execution:null,executionError:""};
+    if(!item?.plan_version)return state;
+    try{
+      const detail=unwrapM5Envelope(await jsonRequest(`/api/m5/schedules/${encodeURIComponent(item.plan_version)}`,{cache:"no-store"}));
+      state.schedule=detail;
+    }catch(error){state.scheduleError=error.message}
+    try{
+      state.execution=unwrapM5Envelope(await jsonRequest(`/api/m5/schedules/${encodeURIComponent(item.plan_version)}/execution-summary`,{cache:"no-store"}));
+    }catch(error){state.executionError=error.message}
+    return state;
+  }catch(error){return{item:null,error:error.message,schedule:null,scheduleError:"",execution:null,executionError:""}}
+}
+function jsonObject(value){if(value&&typeof value==="object"&&!Array.isArray(value))return value;try{const parsed=JSON.parse(value||"{}");return parsed&&typeof parsed==="object"&&!Array.isArray(parsed)?parsed:{}}catch{return{}}}
+const RAW_JSON_MAX_DEPTH=6,RAW_JSON_MAX_ITEMS=50,RAW_JSON_MAX_FIELDS=40,RAW_JSON_MAX_STRING=2000;
+function boundedJsonValue(value,depth=0){
+  if(typeof value==="string")return value.length>RAW_JSON_MAX_STRING?`${value.slice(0,RAW_JSON_MAX_STRING)}... [truncated ${value.length-RAW_JSON_MAX_STRING} chars]`:value;
+  if(value===null||typeof value!=="object")return value;
+  if(depth>=RAW_JSON_MAX_DEPTH)return Array.isArray(value)?`[Array(${value.length}) omitted at depth ${depth}]`:`[Object omitted at depth ${depth}]`;
+  if(Array.isArray(value)){
+    const visible=value.slice(0,RAW_JSON_MAX_ITEMS).map(item=>boundedJsonValue(item,depth+1));
+    if(value.length>visible.length)visible.push({__truncated_items__:value.length-visible.length,__total_items__:value.length});
+    return visible;
+  }
+  const result={},keys=Object.keys(value),visibleKeys=keys.slice(0,RAW_JSON_MAX_FIELDS);
+  for(const key of visibleKeys)result[key]=boundedJsonValue(value[key],depth+1);
+  if(keys.length>visibleKeys.length){result.__truncated_fields__=keys.length-visibleKeys.length;result.__total_fields__=keys.length}
+  return result;
+}
+function boundedJsonText(value){return JSON.stringify(boundedJsonValue(value),null,2)}
+function flowStepModule(step){
+  const explicit=String(step?.module||"").toLowerCase();if(/^m[1-5]$/.test(explicit))return explicit;
+  const text=[step?.tool,step?.node,step?.node_name].filter(Boolean).join(" ").toLowerCase();
+  if(/m5|schedul|dispatch/.test(text))return"m5";
+  if(/m4|purchase_order|import_m4|purchase_suggestion/.test(text))return"m4";
+  if(/m3|mrp|material_readiness|procurement_plan/.test(text))return"m3";
+  if(/m2|bom|sop/.test(text))return"m2";
+  if(/m1|ingest_document|resolve_order/.test(text))return"m1";
+  return"";
+}
+function normalizedModuleStatus(value){const status=String(value||"").toLowerCase();if(["failed","fail","error","dead_letter"].includes(status))return"failed";if(["blocked","warning","human_input_required","review_required","data_incomplete"].includes(status))return"blocked";if(["running","queued","processing","in_progress"].includes(status))return"running";if(["ok","completed","complete","succeeded","success","sent","applied"].includes(status))return"completed";return"pending"}
+function normalizedDiagnosticStatus(value){const status=String(value||"").toLowerCase();if(["fail","failed","error"].includes(status))return"fail";if(["warning","warn","blocked","human_input_required","data_incomplete"].includes(status))return"warning";return"pass"}
+function mergeModuleRuns(...collections){
+  const rank={pending:0,completed:1,running:2,blocked:3,failed:4},byModule=new Map();
+  for(const run of collections.flat()){const module=String(run?.module||"").toLowerCase();if(!/^m[1-5]$/.test(module))continue;const status=normalizedModuleStatus(run.status),current=byModule.get(module),candidate={...run,module,status:status==="completed"?"ok":status==="failed"?"fail":status==="blocked"?"warning":status};if(!current||rank[status]>=rank[normalizedModuleStatus(current.status)])byModule.set(module,{...current,...candidate,message:candidate.message||current?.message||"",event_count:Math.max(Number(current?.event_count||0),Number(run.event_count||0))})}
+  return[...byModule.values()].sort((a,b)=>a.module.localeCompare(b.module));
+}
+function mergeEntities(primary,secondary){
+  const byIdentity=new Map(),anonymous=[];
+  for(const value of [...secondary,...primary]){const tenant=value?.tenant_id||value?.metadata?.tenant_id||"",id=value?.business_id||value?.local_id,version=value?.version_id||value?.metadata?.version_id||"";if(!value?.entity_type||!id){anonymous.push(value);continue}const key=JSON.stringify([String(tenant),String(value.entity_type),String(id),String(version)]),current=byIdentity.get(key)||{},defined=Object.fromEntries(Object.entries(value).filter(([,item])=>item!==undefined)),metadata={...(current.metadata||{}),...(value.metadata||{})};byIdentity.set(key,{...current,...defined,metadata})}
+  return[...byIdentity.values(),...anonymous];
+}
+function scopedSnapshotEntities(snapshot){const tenant=snapshot?.task?.tenant_id||"";return(snapshot?.entities||[]).map(value=>value?.tenant_id||value?.metadata?.tenant_id||!tenant?value:{...value,tenant_id:tenant})}
+function mergeSnapshots(tracking,governed,taskId){
+  const diagnosticRank={pass:0,warning:1,fail:2},trackingStatus=normalizedDiagnosticStatus(tracking?.diagnostics?.status),governedStatus=normalizedDiagnosticStatus(governed?.diagnostics?.status),diagnostics=diagnosticRank[governedStatus]>diagnosticRank[trackingStatus]?governed.diagnostics:tracking.diagnostics;
+  const eventKeys=new Set(),events=[];for(const event of [...(tracking.events||[]),...(governed.events||[])]){const key=event?.event_id||event?.id||event?.idempotency_key||`${event?.module||""}:${event?.event_type||event?.type||""}:${event?.occurred_at||event?.created_at||events.length}`;if(eventKeys.has(key))continue;eventKeys.add(key);events.push(event)}
+  return{...governed,...tracking,task:{...(governed.task||{}),...(tracking.task||{}),task_id:taskId},generated_at:tracking.generated_at||governed.generated_at,module_runs:mergeModuleRuns(tracking.module_runs||[],governed.module_runs||[]),entities:mergeEntities(scopedSnapshotEntities(tracking),scopedSnapshotEntities(governed)),events,diagnostics,business_flow:governed.business_flow||tracking.business_flow,governed_trace:governed.governed_trace||tracking.governed_trace};
+}
+function governedPurchaseOrderEntities(purchaseOrders,materialById,tenantId){
+  const byOrder=new Map();
+  for(const value of purchaseOrders){
+    const attributes=jsonObject(value.attributes),purchaseOrderNumber=String(value?.purchase_order_number||"").trim(),sourcePurchaseOrderId=String(attributes.source_purchase_order_id||"").trim(),rowId=String(value?.purchase_order_id||"").trim(),purchaseOrderId=purchaseOrderNumber||sourcePurchaseOrderId||rowId;if(!purchaseOrderId)continue;
+    const material=materialById.get(value.material_id)||{},item={purchase_order_line_id:value.purchase_order_id,order_id:value.order_id,plan_line_id:value.plan_line_id,material_id:value.material_id,source_module:value.source_module,source_purchase_order_id:attributes.source_purchase_order_id,source_item_id:attributes.source_item_id,item_code:material.material_code||value.material_id,item_name:material.name||value.material_id,quantity:value.ordered_quantity,received_quantity:value.received_quantity,unit:material.unit,required_date:value.expected_at,status:value.status};
+    const current=byOrder.get(purchaseOrderId);
+    if(current){current.metadata.items.push(item);continue}
+    byOrder.set(purchaseOrderId,{tenant_id:tenantId,entity_type:"purchase_order",module:"m4",local_id:purchaseOrderId,business_id:purchaseOrderId,status:value.status,metadata:{purchase_order_number:purchaseOrderNumber||null,source_purchase_order_id:attributes.source_purchase_order_id,order_id:value.order_id,source_module:value.source_module,supplier_id:value.supplier_id,supplier_name:attributes.supplier_name,items:[item]}});
+  }
+  return[...byOrder.values()];
+}
+function governedTraceSnapshot(payload,taskId){
+  const flow=payload?.flow||{},trace=payload?.trace||{},order=trace.order||{},tenantId=trace.tenant_id||order.tenant_id||"",materials=trace.materials||[],orderMaterials=trace.order_materials||[],balances=trace.inventory_balances||[],plans=trace.procurement_plans||[],plan=plans.at(-1)||{},planLines=(trace.procurement_plan_lines||[]).filter(line=>!plan.plan_id||line.plan_id===plan.plan_id),purchaseOrders=trace.purchase_orders||[],schedules=trace.schedule_versions||[];
+  const materialById=new Map(materials.map(material=>[material.material_id,material])),availableByMaterial=new Map();
+  for(const balance of balances)availableByMaterial.set(balance.material_id,(availableByMaterial.get(balance.material_id)||0)+Number(balance.quantity_available||0));
+  const lines=planLines.map(line=>{const material=materialById.get(line.material_id)||{},calculation=jsonObject(line.calculation);return{line_id:line.line_id,material_code:material.material_code||line.material_id,material_name:material.name||line.material_id,uom:material.unit||"—",gross_required_qty:line.demand_quantity,available_qty:line.on_hand_quantity??availableByMaterial.get(line.material_id)??0,open_po_qty:line.open_po_quantity??0,shortage_qty:line.shortage_quantity??0,order_shortage_qty:line.shortage_quantity??0,net_required_qty:calculation.net_required_qty??line.shortage_quantity??0,suggest_purchase_qty:line.recommended_quantity??0,expected_arrival_date:line.required_at,readiness:calculation.readiness||line.status};});
+  const orderAttributes=jsonObject(order.attributes),bomLines=orderMaterials.map(line=>{const material=materialById.get(line.material_id)||{},attributes=jsonObject(line.attributes);return{line_id:line.source_line_id||line.line_id,component_item:material.material_code||line.material_id,material_code:material.material_code||line.material_id,component_name:material.name||line.material_id,material_name:material.name||line.material_id,qty_per:attributes.qty_per,required_quantity:line.quantity,gross_required_qty:line.quantity,uom:line.unit||material.unit||"—",unit:line.unit||material.unit||"—",evidence_ref:line.evidence_ref};});
+  const openPurchaseOrders=purchaseOrders.map(po=>{const material=materialById.get(po.material_id)||{},attributes=jsonObject(po.attributes);return{material_code:material.material_code||po.material_id,open_po_qty:Number(po.ordered_quantity||0)-Number(po.received_quantity||0),promise_date:po.expected_at,supplier_id:po.supplier_id,supplier_name:attributes.supplier_name,purchase_order_number:po.purchase_order_number};});
+  const orderId=order.order_id||trace.order_id,bomId=orderAttributes.bom_id||orderMaterials[0]?.bom_version||"",moduleRuns=[];
+  if(orderId)moduleRuns.push({module:"m1",status:"ok",event_count:1});if(bomLines.length)moduleRuns.push({module:"m2",status:"ok",event_count:bomLines.length});if(planLines.length||plans.length)moduleRuns.push({module:"m3",status:"ok",event_count:Math.max(planLines.length,plans.length)});if(purchaseOrders.length)moduleRuns.push({module:"m4",status:"ok",event_count:purchaseOrders.length});if(schedules.length)moduleRuns.push({module:"m5",status:"ok",event_count:schedules.length});
+  for(const flowStep of flow.steps||[]){const module=flowStepModule(flowStep);if(module)moduleRuns.push({module,status:flowStep.status,event_count:1,message:flowStep.error?.message||flowStep.error||flowStep.message||""})}
+  const flowStatus=normalizedModuleStatus(flow.status),currentModule=flowStepModule({node:flow.current_node});
+  if(currentModule&&["failed","blocked"].includes(flowStatus)){const reason=flow.blocked_reason?.message||flow.error?.message||flow.error||"";moduleRuns.push({module:currentModule,status:flow.status,event_count:1,message:flow.status==="data_incomplete"?`数据未完善${reason?`：${reason}`:"，等待权威数据"}`:reason})}
+  const entities=[];
+  if(orderId)entities.push({tenant_id:tenantId,entity_type:"order",module:"m1",business_id:orderId,metadata:{...orderAttributes,order_qty:orderAttributes.order_quantity,order_number:order.order_number,status:order.lifecycle_status}});
+  if(bomId&&bomLines.length)entities.push({tenant_id:tenantId,entity_type:"bom",module:"m2",business_id:bomId,metadata:{bom_lines:bomLines}});
+  entities.push(...plans.filter(value=>value.plan_id).map(value=>{const summary=jsonObject(value.summary);return{tenant_id:tenantId,entity_type:"procurement_plan",module:"m3",business_id:summary.source_plan_id||value.plan_id,version_id:summary.source_version||"",status:value.status,metadata:{...summary,lines:value.plan_id===plan.plan_id?lines:[],open_purchase_orders:openPurchaseOrders}}}));
+  entities.push(...governedPurchaseOrderEntities(purchaseOrders,materialById,tenantId));
+  if(orderId&&(flow.steps||[]).some(step=>flowStepModule(step)==="m1"&&normalizedModuleStatus(step.status)==="completed"))entities.push({tenant_id:tenantId,entity_type:"document_task",module:"m1",business_id:orderId,metadata:{source:"business_flow_step"}});
+  const evidence={};if(orderId)evidence.m1={input:{"订单":{order_id:orderId,product_name:orderAttributes.product_name,order_qty:orderAttributes.order_quantity}},output:{governed_projection:order}};if(bomLines.length)evidence.m2={input:{product_profile:{product_name:orderAttributes.product_name},requirement_text:"从统一业务库恢复"},output:{bom_generation:{standard_bom:{bom_lines:bomLines}}}};if(plans.length)evidence.m3={input:{order:{order_id:orderId,bom_id:bomId,order_qty:orderAttributes.order_quantity},inventory_snapshot:balances},output:{success:true,data:{procurement_plan_id:plan.plan_id,lines}}};if(purchaseOrders.length)evidence.m4={input:{suggestions:lines.filter(line=>Number(line.suggest_purchase_qty)>0)},output:{purchase_orders:purchaseOrders}};jobEvidence.set(taskId,{...evidence,...(jobEvidence.get(taskId)||{})});
+  return{task:{task_id:taskId,tenant_id:tenantId,task_summary:`受治理业务流 ${flow.run_id||""}`.trim()},generated_at:flow.updated_at||flow.completed_at||new Date().toISOString(),diagnostics:{status:flow.status==="failed"?"fail":["blocked","human_input_required","data_incomplete"].includes(flow.status)?"warning":"pass"},module_runs:mergeModuleRuns(moduleRuns),entities,events:[],business_flow:{run_id:flow.run_id,status:flow.status,current_node:flow.current_node,mode:flow.mode,steps:flow.steps||[]},governed_trace:trace};
+}
+async function load(id){
+  if(!id)return;$("#message").classList.add("hidden");
+  try{
+    await ensureBrowserSession();
+    const [r,m5State,governedResult]=await Promise.all([
+      fetch(api+encodeURIComponent(id)+"/snapshot?include_event_payload=true",{cache:"no-store"}),
+      loadM5State(id),
+      jsonRequest(`/api/orchestrator/business-tasks/${encodeURIComponent(id)}/trace`,{cache:"no-store"}).then(payload=>({payload,error:null})).catch(error=>({payload:null,error})),
+    ]);
+    let tracking=null;if(r.ok){tracking=await r.json();await hydrateJobEvidence(id)}
+    const governed=governedResult.payload?governedTraceSnapshot(governedResult.payload,id):null;
+    if(tracking&&governed){render(mergeSnapshots(tracking,governed,id),m5State);return}
+    if(tracking){render(tracking,m5State);return}
+    if(governed){render(governed,m5State);return}
+    if(r.status===404){const item=historicalSamples.find(row=>row.task_id===id);if(item){clearStaleCandidateRun(item);refreshCatalogSummary();renderCatalog();renderCandidate(item);$("#message").textContent="原历史 TaskID 不在当前正式 Tracking 库中，请重新运行该订单生成新链路。";$("#message").classList.remove("hidden");return}}
+    if(r.status===503)throw Error(`受治理业务流查询失败：${governedResult.error?.message||"不可用"}`);
+    throw Error(r.status+" "+await r.text());
+  }catch(e){$("#message").textContent="读取失败："+e.message;$("#message").classList.remove("hidden");$("#content").innerHTML=""}
+}
+function entity(s,type){return s.entities.filter(e=>e.entity_type===type)}
+function moduleSnapshotState(snapshot,module){const run=mergeModuleRuns(snapshot.module_runs||[]).find(value=>value.module===module)||{};return{status:normalizedModuleStatus(run.status),message:run.message||run.error?.message||run.error||""}}
+function visualStageStatus(hasEvidence,state){if(state.status==="failed")return"failed";if(state.status==="blocked")return"blocked";if(state.status==="running")return"running";if(hasEvidence||state.status==="completed")return"done";return"pending"}
+function m5VisualStageStatus(item,state){if(state.status==="failed")return"failed";if(state.status==="blocked")return"blocked";if(item?.overall_status==="attention")return"attention";if(item?.overall_status==="complete")return"done";if(item?.overall_status==="active")return"running";return visualStageStatus(Boolean(item),state)}
+function failedStageBody(label,state){return`${label}执行失败${state.message?`：${esc(state.message)}`:""}`}
+function blockedStageBody(label,state){return`${label}已阻塞${state.message?`：${esc(state.message)}`:"，等待权威数据"}`}
+function normalizeBomLines(lines){return lines.map(l=>({...l,component_item:l.component_item||l.material_code||l.item_code,component_name:l.component_name||l.material_name||l.item_name,required_quantity:l.required_quantity??l.gross_required_qty??l.quantity,gross_purchase_quantity:l.gross_purchase_quantity??l.suggest_purchase_qty??l.purchase_quantity,unit:l.unit||l.uom}))}
+function findLines(s,bom){
+  const cachedResult=unwrapResult(jobEvidence.get(s.task.task_id)?.m2?.output||{}),cachedLines=cachedResult.bom_generation?.standard_bom?.bom_lines;
+  if(Array.isArray(cachedLines)&&cachedLines.length)return normalizeBomLines(cachedLines);
+  const m2Event=(s.events||[]).find(e=>e.module==="m2"&&e.payload?.metadata?.capture==="acceptance_real_input_output");
+  const m2Result=unwrapResult(m2Event?.payload?.metadata?.output||{}),m2Lines=m2Result.bom_generation?.standard_bom?.bom_lines;
+  if(Array.isArray(m2Lines)&&m2Lines.length)return normalizeBomLines(m2Lines);
+  const m=bom?.metadata||{};if(Array.isArray(m.bom_lines))return normalizeBomLines(m.bom_lines);
+  const out=[];for(const e of s.events||[]){const walk=v=>{if(Array.isArray(v))return v.forEach(walk);if(!v||typeof v!=="object")return;const lines=v.bom_lines||v.bom_items||v.items||v.lines;if(String(v.bom_id||"")===String(bom.business_id||bom.local_id)&&Array.isArray(lines))out.push(...lines);Object.values(v).forEach(walk)};walk(e.payload)}return normalizeBomLines(out)
+}
+function render(s,m5State={item:null,error:"",schedule:null,scheduleError:"",execution:null,executionError:""}){
+  activeBusinessSnapshot=s;
+  const orders=entity(s,"order"),boms=entity(s,"bom"),plans=entity(s,"procurement_plan"),suggestions=entity(s,"purchase_suggestion"),purchaseOrders=entity(s,"purchase_order"),docs=entity(s,"document_task"),batches=entity(s,"purchase_import_batch");
+  const order=orders[0]||{},bom=boms.find(e=>isModuleEntity(e,"m2"))||boms[0]||{},plan=selectProcurementPlan(s.entities),bomLines=findLines(s,bom),m3Lines=findM3Lines(s,plan),displayBomLines=bomLines.length?bomLines:normalizeBomLines(m3Lines),lines=(m3Lines.length?m3Lines:displayBomLines).map(x=>({...x})),openPOs=plan.metadata?.open_purchase_orders||[],substitutes=plan.metadata?.substitute_materials||[];
+  const shortages=lines.filter(line=>Number(line.order_shortage_qty??line.shortage_qty??line.net_required_qty??0)>0),d=s.diagnostics||{},tone=d.status==="fail"?"danger":d.status==="warning"?"warn":"";
+  const orderId=order.business_id||order.local_id||docs[0]?.business_id||"尚未识别",bomId=bom.business_id||bom.local_id||"尚未生成",orderQty=lines.find(line=>Number(line.order_qty)>0)?.order_qty??order.metadata?.order_qty??"未提供",m5=m5State.item;
+  const m1State=moduleSnapshotState(s,"m1"),m2State=moduleSnapshotState(s,"m2"),m3State=moduleSnapshotState(s,"m3"),m4State=moduleSnapshotState(s,"m4"),m5TraceState=moduleSnapshotState(s,"m5"),m1Evidence=Boolean(docs.length||orders.length),m2Evidence=Boolean(boms.length),m3Evidence=Boolean(plans.length),m4Evidence=Boolean(suggestions.length||purchaseOrders.length||batches.length);
+  const m1Visual=visualStageStatus(m1Evidence,m1State),m2Visual=visualStageStatus(m2Evidence,m2State),m3Visual=visualStageStatus(m3Evidence,m3State),m4Visual=visualStageStatus(m4Evidence,m4State),m5Visual=m5VisualStageStatus(m5,m5TraceState);
+  const m1Body=m1Visual==="failed"?failedStageBody("M1 ",m1State):m1Visual==="blocked"?blockedStageBody("M1 ",m1State):docs.length?"订单文件已识别":orders.length?"订单事实已持久化":m1State.status==="completed"?"模块已完成，追踪实体待同步":"尚未记录订单文档";
+  const m2Body=m2Visual==="failed"?failedStageBody("M2 ",m2State):m2Visual==="blocked"?blockedStageBody("M2 ",m2State):boms.length?`匹配到 ${esc(bomId)}`:m2State.status==="completed"?"模块已完成，未发现持久化 BOM":"尚未匹配历史 BOM";
+  const m3Body=m3Visual==="failed"?failedStageBody("M3 ",m3State):m3Visual==="blocked"?blockedStageBody("M3 ",m3State):plans.length?`${lines.length} 种物料，${shortages.length} 种订单缺料`:m3State.status==="completed"?"模块已完成，采购计划追踪待同步":"尚未生成采购需求";
+  const m4Body=m4Visual==="failed"?failedStageBody("M4 ",m4State):m4Visual==="blocked"?blockedStageBody("M4 ",m4State):suggestions.length?`${suggestions.length} 条有效采购建议${purchaseOrders.length?`，${purchaseOrders.length} 张采购单已持久化`:""}`:purchaseOrders.length?`${purchaseOrders.length} 张采购单已持久化`:m4State.status==="completed"?"模块已完成，未发现持久化采购建议或采购单":"尚未形成采购建议";
+  const m5Body=m5Visual==="failed"?failedStageBody("M5 ",m5TraceState):m5Visual==="blocked"?blockedStageBody("M5 ",m5TraceState):m5State.error?"M5 查询失败，M1 → M4 数据仍可查看":m5Visual==="attention"?`${m5?.output?.scheduled_operation_count??0} 道工序 · 排程需关注 · 流程 ${m5?.progress_percent??0}%`:m5Visual==="running"?(m5?`${m5.output?.scheduled_operation_count??0} 道工序 · 排程执行中 ${m5.progress_percent??0}%`:"M5 正在执行"):m5?`${m5.output?.scheduled_operation_count??0} 道工序 · 排程流程 ${m5.progress_percent??0}%`:m5TraceState.status==="completed"?"模块已完成，排程详情追踪待同步":"M5 尚未接入或尚未生成排程";
+  $("#content").innerHTML=`
+    <section class="hero"><div><p class="eyebrow">TASK / ${taskIdHtml(s.task.task_id)}</p><h2>${esc(orderId)}</h2><p>${esc(s.task.task_summary||"订单从输入到采购的真实业务链路")} · 更新时间 ${date(s.generated_at)}</p></div><div class="status ${tone}">${d.status==="fail"?"存在待核对项":d.status==="warning"?"需要核对":"链路可追踪"}</div></section>
+    <section class="metrics">${metric("订单数量",orderQty)}${metric("历史 BOM 物料",displayBomLines.length)}${metric("MRP 汇总物料",lines.length)}${metric("缺料",shortages.length)}${metric("采购建议",suggestions.length)}${metric("采购单",purchaseOrders.length)}</section>
+    <section class="pipeline">${step("01","M1 · 订单输入",m1Body,"m1",m1Visual)}${step("02","M2 · 历史 BOM 匹配",m2Body,"m2",m2Visual)}${step("03","M3 · 物料与补库计算",m3Body,"m3",m3Visual)}${step("04","M4 · 采购建议入库",m4Body,"m4",m4Visual)}${step("05","M5 · 生产排程",m5Body,"m5",m5Visual)}</section>
+    <section id="module-detail" class="panel detail-panel"><h3>点击上方模块查看输入与输出</h3><p class="panel-note">表格来自各模块本次真实请求和真实返回，不使用前端示例值。</p></section>
+    <section class="summary-band overview-only">
+      <div class="panel"><h3>订单齐套与补库建议</h3><p class="panel-note">订单缺料只判断本订单能否齐套；补库缺口另加安全库存，最终再按 MOQ 和包装倍数取整</p>${materialReadinessTable(lines)}</div>
+      <div class="section-stack">
+        <div class="panel"><h3>在途采购</h3><p class="panel-note">已经下单但尚未入库的数量与预计到货日</p>${openPoTable(openPOs)}</div>
+        <div class="panel"><h3>替代料建议</h3><p class="panel-note">只作为人工审核建议，不会自动替换</p>${substituteTable(substitutes)}</div>
+      </div>
+    </section>
+    <div class="grid overview-only">
+      <section class="panel"><h3>BOM 拆解：需要哪些物料</h3><p class="panel-note">历史 BOM：${esc(bomId)} · 共 ${displayBomLines.length} 条真实物料；M3 会按物料编码汇总净需求</p>${bomTable(displayBomLines)}</section>
+      <section class="panel"><h3>M4 采购建议</h3><p class="panel-note">订单缺料采购和恢复安全库存的补库建议都会进入采购模块，由采购人工确认后处理</p>${suggestionTable(suggestions)}<div class="table-caption">已持久化采购单</div>${purchaseOrderTable(purchaseOrders)}</section>
+    </div>
+    <details class="raw overview-only"><summary>查看原始 JSON 有界摘要（支持上下左右滚动）</summary><pre>${esc(boundedJsonText(s))}</pre></details>`;
+  document.querySelectorAll(".step").forEach(el=>el.addEventListener("click",()=>{document.querySelectorAll(".step").forEach(x=>x.classList.remove("selected"));el.classList.add("selected");showModule(el.dataset.module,s,m5State)}));
+  if(requestedModule){const selected=document.querySelector(`.step[data-module="${requestedModule}"]`);if(selected){selected.classList.add("selected");showModule(requestedModule,s,m5State);if(requestedModule==="m3"&&m3AutoOpenPending){m3AutoOpenPending=false;openM3Matching(s)}}}
+}
+function table(headers,rows,empty="当前没有数据"){return rows.length?`<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map((cell,index)=>`<td>${index===0?`<strong>${esc(cell)}</strong>`:esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`:`<div class="empty-table">${esc(empty)}</div>`}
+function cnMaterial(code,name){const names={"CBL-USBC-1M":"USB-C 线缆组件","PKG-PE-BAG":"PE 包装袋","TIE-WRAP-100":"100mm 扎带","LBL-USBC-BLK":"黑色零售标签","CTN-USBC-50":"50 条装外箱"};return names[code]||name||"未提供"}
+function smartTable(headers,rows,empty="当前没有数据"){
+  if(!rows.length)return table(headers,rows,empty);
+  const hasValue=(v)=>{const s=String(v??"").trim();return s!==""&&s!=="—"&&s!=="-"&&s!=="0"&&s!=="0.0"&&s!=="0.00"&&s!=="未提供"};
+  const scores=headers.map((_,ci)=>rows.reduce((acc,row)=>acc+(hasValue(row[ci])?1:0),0));
+  const order=headers.map((_,ci)=>ci).sort((a,b)=>(scores[b]-scores[a])||(a-b));
+  const orderedHeaders=order.map(ci=>headers[ci]);
+  const orderedRows=rows.map(row=>order.map(ci=>row[ci]));
+  return table(orderedHeaders,orderedRows,empty);
+}
+function materialReadinessTable(lines){return smartTable(["物料编码","物料名称","订单毛需求","可用库存","在途总量","有效在途","排除在途","订单缺料","安全库存","补库缺口","最终采购建议","齐套状态"],lines.map(l=>[l.material_code||l.component_item,cnMaterial(l.material_code||l.component_item,l.material_name||l.component_name),l.gross_required_qty??l.required_quantity??"—",l.available_qty??0,l.open_po_total_qty??l.open_po_qty??0,l.open_po_qty??0,l.open_po_excluded_qty??0,l.order_shortage_qty??l.shortage_qty??l.net_required_qty??0,l.safety_stock_qty??l.base_stock_reserved??0,l.replenishment_gap_qty??l.shortage_qty??0,l.suggest_purchase_qty??0,labelStatus(l.readiness)]))}
+function openPoTable(rows){return table(["物料编码","在途数量","预计交期","供应商"],rows.map(r=>[r.material_code,r.open_po_qty,r.promise_date,r.supplier_id]),"本场景没有在途采购")}
+function substituteTable(rows){return table(["原物料","替代物料","可用数量","风险","审核要求"],rows.map(r=>[r.material_code,`${r.substitute_material_code} · ${r.substitute_material_name}`,r.available_qty,labelStatus(r.risk_level),r.engineering_approval_required?"需要工程审核":"无需工程审核"]),"本场景没有替代料建议")}
+function bomTable(lines){return table(["物料编码","物料名称","单位用量","订单需求","单位"],lines.map(l=>[l.material_code||l.component_item,cnMaterial(l.material_code||l.component_item,l.material_name||l.component_name),l.qty_per??"—",l.gross_required_qty??l.required_quantity??"—",l.uom||l.unit||"—"]))}
+function suggestionTable(rows){return table(["物料编码","物料名称","采购数量","单位","要求到货","供应商","状态"],rows.map(e=>{const m=e.metadata||{};return[m.item_code||e.business_id,cnMaterial(m.item_code,m.item_name),m.quantity??"—",m.unit||"—",m.required_date||"未提供",m.supplier_name||"未提供",labelStatus(e.status)]}),"没有需要采购的物料")}
+function purchaseOrderTable(rows){return table(["采购单号","供应商","明细数","订购数量","已到货","状态"],rows.map(e=>{const m=e.metadata||{},items=Array.isArray(m.items)?m.items:[],ordered=items.reduce((total,item)=>total+numberValue(item.quantity),0),received=items.reduce((total,item)=>total+numberValue(item.received_quantity),0);return[m.purchase_order_number||e.business_id||e.local_id||"未提供",m.supplier_name||m.supplier_id||"未提供",items.length,displayQuantity(ordered),displayQuantity(received),labelStatus(e.status)]}),"当前没有已持久化采购单")}
+function metric(k,v){return`<div class="metric"><span>${k}</span><b>${esc(v)}</b></div>`}
+function step(n,title,body,module,state="pending"){const labels={done:"点击查看详情",failed:"执行失败",blocked:"已阻塞",attention:"需关注",running:"执行中",pending:"待处理"},warn=state!=="done";return`<article class="step" data-module="${module}" tabindex="0" role="button" aria-label="查看${title}详情"><div class="step-kicker">${n}</div><h3>${title}</h3><p>${body}</p><span class="chip ${warn?"warn":""}">${labels[state]||labels.pending}</span></article>`}
+function labelEntityType(type,module,id){const names={bom:module==="m2"?"历史 BOM":"当前 BOM",order:"订单号",project:"项目",procurement_plan:"生产计划",purchase_suggestion:"采购建议",purchase_order:"采购单",purchase_import_batch:"采购导入批次",document_task:"订单输入文档",orchestrator_job:"编排任务",run:"模块运行"};return names[type]||type}
+function labelStatus(status){const names={valid:"有效",active:"进行中",completed:"已完成",observed:"已观测",pending:"等待处理",failed:"失败",ok:"成功",needs_review:"需要人工核对",human_input_required:"需要人工输入",draft_pending_buyer_review:"草稿，等待买方审核",draft_pending_engineering_review:"草稿，等待工程审核",draft:"草稿",approved:"已批准",rejected:"已拒绝",cancelled:"已取消",ready:"已齐套",shortage:"缺料",partial_shortage:"部分缺料",low:"低风险",medium:"中风险",high:"高风险",not_started:"未开始",queued:"排队中",running:"进行中",succeeded:"已完成",blocked:"已阻塞",scheduled:"已排程",locked:"已锁定",released:"已下发",allocated_by_fifo:"按先进先出分配",covered_by_stock_or_open_po:"库存或有效在途覆盖",inventory:"库存",arrival:"M5 已记录到货",unknown:"未知",DRAFT:"草稿"};return names[status]||status||"未提供"}
+function hasDisplayValue(value){return value!==undefined&&value!==null&&value!==""}
+function displayQuantity(value){if(!hasDisplayValue(value))return"未提供";const parsed=Number(value);return Number.isFinite(parsed)?quantity(parsed):String(value)}
+function displayDate(value){return hasDisplayValue(value)?date(value):"未提供"}
+function m5MaterialStatus(line){
+  const shortage=line?.order_shortage_qty??line?.shortage_qty;
+  if(hasDisplayValue(shortage))return numberValue(shortage)>0?"shortage":"ready";
+  return line?.readiness||line?.line_status||"unknown";
+}
+function m5MaterialSummary(lines){
+  const statuses=lines.map(m5MaterialStatus),isShortage=status=>["shortage","partial_shortage"].includes(status),isReady=status=>["ready","covered_by_stock_or_open_po","allocated_by_fifo"].includes(status),known=statuses.filter(status=>isShortage(status)||isReady(status)),ready=statuses.filter(isReady).length,shortage=statuses.filter(isShortage).length,total=lines.length;
+  return{total,known:known.length,ready,shortage,rate:total&&known.length===total?`${Math.round(ready/total*1000)/10}%`:"数据不足"};
+}
+function m5MaterialReadinessPanel(lines,item){
+  const summary=m5MaterialSummary(lines),persistedInputCount=item?.input?.material_availability_count,metrics=`<div class="m5-progress-metrics"><div><span>M3 物料行齐套率</span><b>${esc(summary.total?summary.rate:"暂无数据")}</b></div><div><span>M3 已判定齐套物料</span><b>${esc(summary.known?`${summary.ready} / ${summary.known}`:"暂无数据")}</b></div><div><span>M3 订单缺料物料</span><b>${esc(`${summary.shortage} 种物料`)}</b></div><div><span>M5 已持久化物料输入</span><b>${esc(hasDisplayValue(persistedInputCount)?`${persistedInputCount} 条`:"未提供")}</b></div></div>`,rows=lines.map(line=>{const code=line.material_code||line.component_item||line.item_code||"未提供";return[code,cnMaterial(code,line.material_name||line.component_name||line.item_name),displayQuantity(line.gross_required_qty??line.required_quantity),displayQuantity(line.available_qty),displayQuantity(line.open_po_qty),displayQuantity(line.order_shortage_qty??line.shortage_qty),displayDate(line.expected_available_date),labelStatus(line.readiness||line.line_status||m5MaterialStatus(line))]});
+  return`<section><h4>物料就绪快照</h4><p class="panel-note">M3 的本订单物料结论与 M5 已持久化的库存输入计数。齐套率按物料行计算，且仅在所有物料行都有可判定状态时显示；不能用未知行推断订单已齐套。</p>${metrics}<div class="table-caption">M3 → M5 物料就绪快照</div>${smartTable(["物料编码","物料名称","订单需求","M3 可用库存（传入 M5）","M3 在途（仅参考）","订单缺料","预计可用日期","M3 状态"],rows,"Tracking 快照中没有可展示的 M3 物料行")}<div class="m5-data-boundary">M3 在途采购和 M4 采购建议均不是已确认的 M5 到货；本页未将它们作为 M5 到货排程约束。</div></section>`;
+}
+function m5MissingMaterials(materials){return Array.isArray(materials)&&materials.length?materials.map(item=>typeof item==="string"?item:item?.material_id||item?.material_code||item?.item_code||"未提供").join("、"):"无"}
+function m5KittingSource(source){return({mrp:"M5 MRP",external:"外部提供"})[source]||source||"未提供"}
+function m5KittingPanel(schedule,scheduleError){
+  if(scheduleError)return`<section><h4>M5 按订单齐套结果</h4><p class="panel-note">按订单的齐套结论、最早齐套时间和分配记录均来自当前持久化排程。</p><div class="notice">M5 按订单齐套结果读取失败：${esc(scheduleError)}。未将读取失败解释为订单已齐套。</div></section>`;
+  const kitting=Array.isArray(schedule?.order_kitting)?schedule.order_kitting:[],rows=kitting.map(record=>[record.order_id,labelStatus(record.status),displayDate(record.earliest_kitting_time),m5MissingMaterials(record.missing_materials),displayDate(record.calculated_at),m5KittingSource(record.source)]),allocationRows=kitting.flatMap(record=>(record.allocations||[]).map(allocation=>[record.order_id,allocation.material_id,allocation.supply_material_id,displayQuantity(allocation.quantity),displayQuantity(allocation.primary_equivalent_quantity),displayDate(allocation.available_time),labelStatus(allocation.supply_type),allocation.warehouse_id||"未提供",allocation.batch_id||"未提供",allocation.is_substitute?"替代料":"原物料"]));
+  return`<section><h4>M5 按订单齐套结果</h4><p class="panel-note">以下是 M5 当前持久化计划的齐套计算，不以 M3 在途或 M4 建议替代已确认到货。</p><div class="table-caption">订单齐套结论</div>${table(["订单","齐套状态","最早齐套时间","缺失物料","计算时间","来源"],rows,"当前计划未记录按订单齐套结果；不能据此推断订单已齐套")}<div class="table-caption">M5 物料分配明细</div>${table(["订单","需求物料","供应物料","分配数量","主料等效量","可用时间","供应来源","仓库","批次","替代"],allocationRows,"当前计划没有已记录的物料分配明细")}</section>`;
+}
+function m5ProgressPercent(value){const parsed=Number(value);return Number.isFinite(parsed)?Math.max(0,Math.min(100,parsed)):null}
+function m5ExecutionCount(value){return typeof value==="number"&&Number.isInteger(value)&&value>=0?value:null}
+function m5CompletionRate(value){return typeof value==="number"&&Number.isFinite(value)&&value>=0&&value<=100?value:null}
+function m5CompletionRateLabel(value){if(value===null)return"未返回";const rounded=Math.round(value*10)/10;return`${Number.isInteger(rounded)?rounded:rounded.toFixed(1)}%`}
+function m5ExecutionSourceLabel(source){const labels={mes:"MES",manual:"人工录入",simulation:"模拟回传",external:"外部系统"},label=labels[source];return label?`${label}（${source}）`:source}
+function m5ExecutionSourceRows(execution){
+  const counts=execution?.source_event_counts;
+  if(!counts||typeof counts!=="object"||Array.isArray(counts))return null;
+  return Object.entries(counts).map(([source,count])=>[source,m5ExecutionSourceLabel(source),m5ExecutionCount(count)]).filter(([, ,count])=>count!==null).sort(([,left],[,right])=>left.localeCompare(right));
+}
+function m5StageLabel(stage){return({input:"输入持久化",scheduling:"排程生成",validation:"排程校验",approval:"计划审批",dispatch:"派发确认",execution:"执行回传"})[stage?.key]||stage?.label||stage?.key||"未提供"}
+function m5ProcessAndExecutionPanel(item,execution,executionError){
+  const progress=m5ProgressPercent(item.progress_percent),stages=item.stages||[],stageRows=stages.map(stage=>[m5StageLabel(stage),labelStatus(stage.status),hasDisplayValue(stage.completed)||hasDisplayValue(stage.total)?`${stage.completed??0} / ${stage.total??0}`:"未提供",stage.message||"未提供"]),executionSummary=execution?table(["执行事件（原始）","最近事件","延期工序","异常事件","暂停工序","异常工序","报废数量（原始）"],[[execution.event_count??"未提供",displayDate(execution.latest_event_at),execution.late_operation_count??"未提供",execution.exception_count??"未提供",execution.paused_operation_count??"未提供",execution.exception_operation_count??"未提供",displayQuantity(execution.scrap_quantity)]],"当前没有执行回传摘要"):`<div class="m5-data-boundary">${executionError?`执行回传摘要读取失败：${esc(executionError)}`:"当前计划尚未返回执行回传摘要。"}</div>`;
+  const planned=m5ExecutionCount(execution?.planned_operation_count),started=m5ExecutionCount(execution?.started_operation_count),completed=m5ExecutionCount(execution?.completed_operation_count),rate=m5CompletionRate(execution?.completion_rate_percent),sourceRows=m5ExecutionSourceRows(execution),sourceEventCount=sourceRows?.reduce((total,[,,count])=>total+count,0)??null,hasCompletionSummary=planned!==null&&started!==null&&completed!==null,hasFeedback=sourceEventCount!==null?(sourceEventCount>0||started>0||completed>0):started>0||completed>0,noFeedback=hasCompletionSummary&&planned>0&&!hasFeedback;
+  const siteProgress=!execution?"":!hasCompletionSummary?'<div class="m5-data-boundary"><strong>现场工序完成汇总尚未返回</strong>：不能将执行事件数、排程流程进度或计划生命周期当作生产完成率。</div>':planned===0?`<div class="m5-site-progress"><div class="m5-site-progress-head"><span>现场工序完成</span><b>没有已计划工序 · 完成率不适用</b></div><p class="m5-site-progress-detail">后端返回的计划工序数为 0，因此不显示虚构的完成百分比。</p></div>`:`<div class="m5-site-progress ${noFeedback?"no-feedback":""}"><div class="m5-site-progress-head"><span>现场工序完成</span><b>${esc(`${completed} / ${planned} · ${noFeedback?"暂无现场反馈":m5CompletionRateLabel(rate)}`)}</b></div><p class="m5-site-progress-detail">现场已开工 ${esc(`${started} / ${planned}`)} 道工序 · ${noFeedback?"尚未收到可归因的现场反馈事件":rate===null?"后端尚未返回完成率":"按后端去重的实际完工汇总计算"}</p><div class="m5-site-bar"><i class="m5-site-fill" style="width:${!noFeedback&&rate!==null?rate:0}%"></i></div><div class="m5-progress-metrics"><div><span>已完成 / 已计划</span><b>${esc(`${completed} / ${planned}`)}</b></div><div><span>已开工 / 已计划</span><b>${esc(`${started} / ${planned}`)}</b></div><div><span>现场完成率</span><b>${esc(noFeedback?"暂无现场反馈":m5CompletionRateLabel(rate))}</b></div><div><span>可归因反馈事件</span><b>${esc(sourceEventCount===null?"来源未返回":`${sourceEventCount} 条`)}</b></div></div></div>`;
+  const sourceEvidence=sourceRows===null?'<div class="m5-data-boundary">现场反馈来源尚未返回，不能据此判断反馈来自哪个系统。</div>':table(["反馈来源","事件数"],sourceRows.map(([,label,count])=>[label,count]),"暂无现场反馈事件"),simulationWarning=sourceRows?.some(([source])=>source==="simulation")?'<div class="m5-data-boundary"><strong>模拟数据来源</strong>：本计划含 simulation 反馈，仅用于联调验证，不能作为真实车间生产完成证明。</div>':"";
+  return`<section><h4>生产实绩与排程阶段</h4><p class="panel-note">排程流程与现场工序完成分开显示，避免将计划状态误读为生产实绩。</p><div class="m5-process-progress"><div class="m5-process-progress-head"><span>排程流程进度</span><b>${esc(progress===null?"未提供":`${progress}%`)}</b></div><div class="m5-process-bar"><i class="m5-process-fill" style="width:${progress===null?0:progress}%"></i></div></div><div class="m5-data-boundary">排程流程进度仅反映输入持久化、求解、校验、审批和派发，不代表生产完成率。</div>${siteProgress}<div class="table-caption">执行回传摘要</div>${executionSummary}<div class="table-caption">现场反馈来源</div>${sourceEvidence}${simulationWarning}<div class="table-caption">排程流程阶段</div>${table(["阶段","状态","完成 / 总数","说明"],stageRows,"当前 M5 看板没有流程阶段记录")}</section>`;
+}
+function procurementLines(s){
+  const found=[];
+  for(const e of s.entities||[])if(e.entity_type==="purchase_suggestion"&&e.metadata)found.push(e.metadata);
+  const walk=v=>{if(Array.isArray(v)){if(v.some(x=>x&&typeof x==="object"&&(x.component_item||x.material_code||x.item_code)))found.push(...v);v.forEach(walk);return}if(v&&typeof v==="object")Object.values(v).forEach(walk)};
+  (s.events||[]).filter(e=>["m3","m4"].includes(e.module)).forEach(e=>walk(e.payload));
+  return found.filter((v,i,a)=>{const k=[v.component_item||v.material_code||v.item_code,v.required_date||v.due_date,v.gross_purchase_quantity||v.purchase_quantity||v.shortage_quantity].join("|");return a.findIndex(x=>[x.component_item||x.material_code||x.item_code,x.required_date||x.due_date,x.gross_purchase_quantity||x.purchase_quantity||x.shortage_quantity].join("|")===k)===i});
+}
+function planDueDate(s){let found="";const walk=v=>{if(found||!v)return;if(Array.isArray(v))return v.forEach(walk);if(typeof v==="object"){if(v.due_date)found=v.due_date;else Object.values(v).forEach(walk)}};(s.events||[]).filter(e=>e.module==="m3").forEach(e=>walk(e.payload));return found}
+function moduleIo(s,module){const event=(s.events||[]).find(e=>e.module===module&&e.payload?.metadata?.capture==="acceptance_real_input_output");return event?.payload?.metadata||jobEvidence.get(s.task.task_id)?.[module]||{input:{},output:{}}}
+function unwrapResult(value){return value?.result||((value?.success&&value?.data)||value)||{}}
+function ioBox(title,note,body){return`<div class="io-box"><div class="io-title"><b>${esc(title)}</b><span>${esc(note)}</span></div>${body}</div>`}
+function m1FileActions(input){
+  const filename=input["文件名"];
+  if(!filename)return"";
+  const url=`/uploads/${encodeURIComponent(filename)}`;
+  return`<div class="file-actions"><button class="secondary-button preview-file" type="button" data-file="${esc(filename)}">在线预览原始文件</button><a class="file-link" href="${url}" target="_blank" rel="noopener">打开或下载原文件</a></div>`;
+}
+function historyBomFilename(input,output){
+  const configured=input.history_bom_paths?.[0];
+  if(configured)return configured.split(/[\\/]/).pop();
+  const data=unwrapResult(output),source=data.bom_generation?.standard_bom?.bom_header?.[0]?.source_basis||"";
+  return source.match(/^structured_history_wiki:([^/]+)\//)?.[1]||"";
+}
+function m2FileActions(input,output){
+  const filename=historyBomFilename(input,output);
+  if(!filename)return"";
+  const url=`/history-bom/${encodeURIComponent(filename)}`;
+  return`<div class="file-actions"><button class="secondary-button preview-bom" type="button">预览历史 BOM</button><a class="file-link" href="${url}" download>下载历史 BOM</a></div>`;
+}
+function moduleInputTable(module,input){
+  if(module==="m1"){const o=input["订单"]||{};return table(["文件名","订单号","项目号","产品名称","数量","单位","交期"],[[input["文件名"]||"未提供",o.order_id,o.project_id,o.product_name,o.order_qty,o.unit,o.due_date]])}
+  if(module==="m2"){const p=input.product_profile||{};return table(["产品编码","产品名称","需求说明","模板确认","编号规则"],[[p.product_code,p.product_name,input.requirement_text,input.template_confirmation?.confirmed?"已确认":"未确认",input.template_confirmation?.numbering_policy_id||"未提供"]])}
+  if(module==="m3"){const o=input.order||{},stock=input.inventory_snapshot||[],po=input.open_purchase_orders||[];return`<div class="table-caption">订单与 BOM</div>${table(["订单号","项目号","BOM","数量","交期"],[[o.order_id,o.project_id,o.bom_id,o.order_qty,o.due_date]])}<div class="table-caption">计算前库存</div>${table(["物料编码","物料名称","可用库存","锁定数量","仓库"],stock.map(r=>[r.material_code,cnMaterial(r.material_code,r.material_name),r.available_qty,r.locked_qty,r.warehouse]))}<div class="table-caption">在途采购</div>${openPoTable(po)}`}
+  const rows=input.suggestions||[];return table(["物料编码","物料名称","采购数量","单位","要求到货","供应商"],rows.map(r=>[r.item_code,cnMaterial(r.item_code,r.item_name),r.quantity,r.unit,r.required_date,r.supplier_name]))
+}
+function moduleOutputTable(module,output){
+  const data=unwrapResult(output);
+  if(module==="m1"){const lines=data.document?.lines||[];return`<div class="table-caption">识别结果</div>${table(["文件状态","文档类型","是否需复核","识别任务"],[[labelStatus(data.status),data.doc_type,data.needs_review?"需要":"不需要",data.task_id]])}<div class="table-caption">识别出的订单行</div>${table(["产品名称","标准名称","数量","单位","订单号","项目号","交期"],lines.map(r=>[r.name_raw,r.name_normalized,r.quantity,r.unit,r.raw_columns?.["订单号"],r.raw_columns?.["项目号"],r.raw_columns?.["交期"]]))}`}
+  if(module==="m2"){const bom=data.bom_generation?.standard_bom||{},header=bom.bom_header?.[0]||{};return`<div class="table-caption">历史 BOM 匹配结果</div>${table(["BOM 编号","父项编码","产品名称","版本","状态","证据来源"],[[header.bom_id,header.parent_item,header.parent_name,header.parent_revision,labelStatus(header.status),header.source_basis]])}<div class="table-caption">BOM 物料明细</div>${bomTable(bom.bom_lines||[])}`}
+  if(module==="m3"){return`<div class="table-caption">采购计划结论</div>${table(["采购计划","订单号","BOM","齐套结论","物料数","订单缺料数","计划日期"],[[data.procurement_plan_id,data.order_id,data.bom_id,labelStatus(data.availability_status),(data.lines||[]).length,(data.shortage_lines||[]).length,data.planning_date||"未提供"]])}<div class="table-caption">订单齐套与补库计算结果</div>${materialReadinessTable(data.lines||[])}`}
+  const items=data.items||[];return`<div class="table-caption">导入结果</div>${table(["采购批次","总行数","有效行","无效行","状态","TaskID"],[[data.id,data.total_rows,data.valid_rows,data.invalid_rows,labelStatus(data.status),data.tracking_task_id]])}<div class="table-caption">已入库采购建议</div>${table(["物料编码","物料名称","采购数量","单位","要求到货","供应商","校验状态"],items.map(r=>[r.item_code,cnMaterial(r.item_code,r.item_name),r.quantity,r.unit,r.required_date,r.supplier_name,labelStatus(r.validation_status)]))}`
+}
+function numberValue(value){const parsed=Number(value);return Number.isFinite(parsed)?parsed:0}
+function quantity(value){return numberValue(value).toLocaleString("zh-CN",{maximumFractionDigits:4})}
+function matchingMetric(label,value){return`<div class="matching-metric"><span>${esc(label)}</span><b>${esc(value)}</b></div>`}
+function reviewKey(audit){const source=audit.source_material||{};return JSON.stringify([source.source_system||"historical_bom",source.material_code||"",source.material_name||"",source.uom||""])}
+function proposedCode(audit){return audit.effective_erp_material_code||audit.agent_decision?.recommended_erp_material_code||audit.deterministic_result?.selected?.erp_material?.material_code||null}
+function candidateMaterial(audit){const candidates=audit.deterministic_result?.candidates||[],code=proposedCode(audit);return candidates.find(candidate=>candidate.erp_material?.material_code===code)||audit.deterministic_result?.selected||candidates[0]||null}
+function matchingBadge(audit){
+  if(audit.application_mode==="deterministic_or_approved")return'<span class="match-badge applied">已正式应用</span>';
+  const saved=materialReviews[reviewKey(audit)];if(saved)return`<span class="match-badge reviewed">${saved.confirmed_unmatched?"人工确认无对应":"人工已确认"}</span>`;
+  if(audit.application_mode==="agent_estimate")return'<span class="match-badge agent">Agent 试算</span>';return'<span class="match-badge unresolved">未应用</span>';
+}
+function candidateList(audit){
+  const candidates=audit.deterministic_result?.candidates||[];if(!candidates.length)return'<span class="evidence-note">没有达到候选门槛的 ERP 物料</span>';
+  return`<details class="candidate-details"><summary>查看 ${candidates.length} 个 ERP 候选</summary><div class="candidate-list">${candidates.map((candidate,index)=>`<div class="candidate-row"><strong>${index+1}. ${esc(candidate.erp_material?.material_name||"未命名物料")}</strong><span class="material-code">${esc(candidate.erp_material?.material_code||"—")} · 规则分 ${Math.round(numberValue(candidate.score)*100)}%</span><span class="evidence-note">${esc((candidate.conflicts||[]).join("；")||(candidate.reasons||[]).join("；")||"没有额外属性证据")}</span></div>`).join("")}</div></details>`;
+}
+function reviewControl(audit){
+  const key=reviewKey(audit),saved=materialReviews[key],candidates=audit.deterministic_result?.candidates||[],suggested=saved?.expected_erp_material_code??proposedCode(audit)??"";
+  const options=['<option value="">请选择 ERP 候选</option>',...candidates.map(candidate=>{const code=candidate.erp_material?.material_code||"",name=candidate.erp_material?.material_name||"未命名物料";return`<option value="${esc(code)}" ${code===suggested?"selected":""}>${esc(`${code} · ${name}`)}</option>`})].join("");
+  const state=saved?(saved.confirmed_unmatched?`页面已采用：无对应物料 · ${saved.verified_by}`:`页面已采用：${saved.expected_erp_material_code} · ${saved.verified_by}`):"尚未人工核验";
+  return`<div class="review-control"><select class="review-select" aria-label="选择正确ERP物料">${options}</select><div class="review-actions"><button class="review-match" type="button">${saved?"更新页面选择":"确认并应用到页面"}</button><button class="review-unmatched" type="button">确认无对应</button></div><span class="review-state ${saved?"verified":""}">${esc(state)}</span></div>`;
+}
+function reviewStatistics(audits){
+  const reviewed=audits.filter(audit=>materialReviews[reviewKey(audit)]),correct=reviewed.filter(audit=>{const saved=materialReviews[reviewKey(audit)],proposed=Object.prototype.hasOwnProperty.call(saved,"proposed_erp_material_code")?saved.proposed_erp_material_code:proposedCode(audit);return saved.confirmed_unmatched?!proposed:saved.expected_erp_material_code===proposed}).length;
+  return{reviewed:reviewed.length,correct,accuracy:reviewed.length?`${Math.round(correct/reviewed.length*1000)/10}%`:"待核验"};
+}
+function reviewAggregate(){
+  const labels=Object.values(materialReviews).filter(item=>item.label_status==="verified"),auditable=labels.filter(item=>Object.prototype.hasOwnProperty.call(item,"proposed_erp_material_code")),correct=auditable.filter(item=>item.confirmed_unmatched?item.proposed_erp_material_code==null:item.expected_erp_material_code===item.proposed_erp_material_code).length;
+  return{total:labels.length,accuracy:auditable.length?`${Math.round(correct/auditable.length*1000)/10}%`:"待核验"};
+}
+function matchingContext(s){
+  const io=moduleIo(s,"m3"),input=io.input||{},orderEntity=entity(s,"order")[0]||{},orderId=input.order?.order_id||orderEntity.business_id||orderEntity.local_id||"";
+  const item=historicalSamples.find(row=>row.task_id===s.task.task_id)||historicalSamples.find(row=>row.order_id===orderId)||{catalog_id:"",order_id:orderId||s.task.task_id,product_name:input.order?.product_name||s.task.task_summary||"当前订单"};
+  return{item,config:candidateRuns.find(row=>row.catalog_id===item.catalog_id),input};
+}
+function m3ModuleFrame(s,activeView,body){
+  const run=(s.module_runs||[]).find(value=>value.module==="m3");
+  document.querySelectorAll(".overview-only").forEach(el=>el.classList.add("is-hidden"));
+  $("#module-detail").innerHTML=`<div class="detail-actions"><div><h3>M3 · 物料与补库计算</h3><p class="panel-note">先判断订单是否缺料，再计算恢复安全库存所需的补库量 · ${run?`${run.event_count} 个事件，状态 ${labelStatus(run.status)}`:"暂无执行记录"}</p></div><button id="back-overview" class="secondary-button" type="button">返回全链路总览</button></div><div class="module-tabs" role="tablist" aria-label="M3 业务视图"><button class="module-tab ${activeView==="io"?"active":""}" type="button" data-view="io" role="tab">业务输入输出</button><button class="module-tab ${activeView==="matching"?"active":""}" type="button" data-view="matching" role="tab">物料匹配与人工核验</button></div><div id="m3-module-body">${body}</div>`;
+  $("#back-overview").addEventListener("click",()=>showOverview());
+}
+function showM3InputOutput(s){const io=moduleIo(s,"m3");m3ModuleFrame(s,"io",`<div class="io-grid">${ioBox("模块输入","实际请求数据",moduleInputTable("m3",io.input||{}))}${ioBox("模块输出","实际返回数据",moduleOutputTable("m3",io.output||{}))}</div>`)}
+function saveMaterialReview(row,confirmedUnmatched){
+  if(!row||!lastMatchingTrial)return;const verifiedBy=reviewerName(),message=$("#review-message");
+  if(!verifiedBy){message.textContent="请先填写核验人姓名，再保存人工结论。";$("#reviewer-name")?.focus();return}
+  const key=row.dataset.reviewKey,selected=row.querySelector(".review-select")?.value||"";if(!confirmedUnmatched&&!selected){message.textContent="请先选择正确的 ERP 候选。";return}
+  const audit=lastMatchingTrial.body.material_matching.find(item=>reviewKey(item)===key),source=audit?.source_material||{};
+  materialReviews[key]={source_system:source.source_system||"historical_bom",source_material_code:source.material_code||"",source_material_name:source.material_name||"",source_uom:source.uom||"",expected_erp_material_code:confirmedUnmatched?null:selected,confirmed_unmatched:confirmedUnmatched,proposed_erp_material_code:proposedCode(audit),proposed_application_mode:audit?.application_mode||"",proposed_confidence:audit?.agent_decision?.confidence??audit?.deterministic_result?.confidence??null,label_status:"verified",verified_by:verifiedBy,verified_at:new Date().toISOString(),order_ids:[lastMatchingTrial.item.order_id],note:"Business页面人工核验"};
+  persistReviews();renderM3MatchingTrial(lastMatchingTrial.snapshot,lastMatchingTrial.item,lastMatchingTrial.body);$("#review-message").textContent="页面已采用人工选择；正式映射写库和库存重算将在后端接口接入后完成。";
+}
+function exportVerifiedReviews(){
+  const verifiedBy=reviewerName(),message=$("#review-message");if(!verifiedBy){message.textContent="请先填写核验人姓名。";$("#reviewer-name")?.focus();return}
+  const labels=Object.values(materialReviews).filter(item=>item.label_status==="verified");if(!labels.length){message.textContent="当前还没有已核验物料。";return}
+  const payload={schema_version:1,label_status:"verified",generated_at:new Date().toISOString(),verified_by:verifiedBy,labels},blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"}),link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=`m3-material-gold-labels-${new Date().toISOString().slice(0,10)}.json`;link.click();URL.revokeObjectURL(link.href);message.textContent=`已导出 ${labels.length} 条核验结论。`;
+}
+async function importVerifiedReviews(file){
+  const message=$("#review-message");
+  try{const payload=JSON.parse(await file.text()),labels=payload?.labels;if(payload?.schema_version!==1||payload?.label_status!=="verified"||!Array.isArray(labels)||!labels.length)throw Error("文件必须包含已核验标签");const imported={};for(const label of labels){if(!label.verified_by||!label.verified_at)throw Error("标签缺少核验人或时间");const key=JSON.stringify([label.source_system||"historical_bom",label.source_material_code||"",label.source_material_name||"",label.source_uom||""]);imported[key]={...label,label_status:"verified"}}materialReviews={...materialReviews,...imported};persistReviews();message.textContent=`已导入 ${Object.keys(imported).length} 条核验结论。`;if(lastMatchingTrial)renderM3MatchingTrial(lastMatchingTrial.snapshot,lastMatchingTrial.item,lastMatchingTrial.body)}
+  catch(error){message.textContent=`导入失败：${error.message}`}
+}
+function renderM3MatchingTrial(s,item,body){
+  lastMatchingTrial={snapshot:s,item,body};const audits=body.material_matching||[],plan=body.data||{},reviewTotal=reviewAggregate(),reviewStats=reviewStatistics(audits),catalogCount=body.supply_source?.material_catalog_count??plan.supply_source?.material_catalog_count??0,candidateLines=audits.filter(audit=>(audit.deterministic_result?.candidates||[]).length>0).length;
+  const rows=audits.map(audit=>{const source=audit.source_material||{},saved=materialReviews[reviewKey(audit)],candidate=saved&&!saved.confirmed_unmatched?(audit.deterministic_result?.candidates||[]).find(c=>c.erp_material?.material_code===saved.expected_erp_material_code):candidateMaterial(audit),erp=candidate?.erp_material||{},confidence=audit.agent_decision?.confidence??audit.deterministic_result?.confidence??0,inventory=audit.supply_evidence?.inventory||[],openPo=audit.supply_evidence?.open_purchase_orders||[],review=saved?"人工已确认":audit.requires_human_review?"需要人工复核":"规则已确认";
+    return`<tr data-review-key="${esc(reviewKey(audit))}"><td><span class="material-title">${esc(source.material_name||"未命名物料")}</span><span class="material-code">${esc(source.material_code||"—")} · ${esc(source.uom||"—")}</span></td><td><span class="material-title">${esc(saved?.confirmed_unmatched?"人工确认无对应物料":erp.material_name||"未找到 ERP 候选")}</span><span class="material-code">${esc(saved?.confirmed_unmatched?"—":erp.material_code||"—")} · ${esc(saved?.confirmed_unmatched?"—":erp.uom||"—")}</span>${candidateList(audit)}</td><td>${matchingBadge(audit)}<span class="evidence-note">${esc(saved?"当前浏览器人工结论":`置信度 ${Math.round(numberValue(confidence)*100)}%`)}</span></td><td><span class="evidence-number">${quantity(inventory.reduce((sum,row)=>sum+numberValue(row.book_qty),0))}</span><span class="evidence-note">${inventory.length?`${inventory.length} 条库存记录`:"没有匹配库存记录"}</span></td><td><span class="evidence-number">${quantity(inventory.reduce((sum,row)=>sum+numberValue(row.confirmed_available_qty),0))}</span></td><td><span class="evidence-number">${quantity(openPo.reduce((sum,row)=>sum+numberValue(row.open_po_qty),0))}</span></td><td><span class="material-title">${esc(review)}</span></td><td>${reviewControl(audit)}</td></tr>`}).join("");
+  const content=`<div class="matching-intro"><h4>物料、库存与在途逐行核验</h4></div><div class="matching-metrics">${matchingMetric("BOM 采购物料",audits.length)}${matchingMetric("ERP 物料主档",catalogCount)}${matchingMetric("候选覆盖率",audits.length?`${Math.round(candidateLines/audits.length*1000)/10}%`:"待计算")}${matchingMetric("待人工核验",audits.filter(a=>a.requires_human_review).length)}${matchingMetric("已人工核验",`${reviewStats.reviewed} / ${audits.length}`)}${matchingMetric("全局标签",reviewTotal.total)}</div><div class="matching-legend"><span class="match-badge applied">已正式应用</span><span class="match-badge reviewed">人工已确认</span><span class="match-badge agent">Agent 试算</span><span class="match-badge unresolved">未应用</span></div><div class="matching-metrics">${matchingMetric("核验一致",reviewStats.correct)}${matchingMetric("当前准确率",reviewStats.accuracy)}${matchingMetric("全局准确率",reviewTotal.accuracy)}${matchingMetric("采购计划行",plan.lines?.length||0)}${matchingMetric("缺料物料",plan.shortage_lines?.length||0)}${matchingMetric("质量问题",body.quality_report?.summary?.total||0)}</div><div class="review-toolbar"><input id="reviewer-name" value="${esc(reviewerName())}" placeholder="核验人姓名（确认前必填）"><button class="secondary-button import-reviews" type="button">导入核验标签</button><input id="review-import" type="file" accept=".json,application/json" hidden><button class="secondary-button export-reviews" type="button">导出核验标签</button><button class="secondary-button auto-fill-best" type="button">一键采用最高匹配</button><span id="review-message" class="review-message">填写核验人、选择候选，然后逐行确认；确认后点「继续 M4 → M5」把人工结论写回服务端并续跑。</span></div><div class="table-caption">物料匹配明细</div><div class="table-wrap"><table class="matching-table"><thead><tr>${["原 BOM 物料","ERP 匹配候选","应用方式","账面库存","确认可用","候选在途","审核结论","人工核验"].map(header=>`<th>${esc(header)}</th>`).join("")}</tr></thead><tbody>${rows||'<tr><td colspan="8">没有返回物料匹配数据</td></tr>'}</tbody></table></div><details class="raw"><summary>查看本次 M3 原始 JSON 有界摘要（支持上下左右滚动）</summary><pre>${esc(boundedJsonText(body))}</pre></details><div class="review-actions"><button class="primary-button continue-m3-flow" type="button">继续 M4 → M5</button></div>`;
+  m3ModuleFrame(s,"matching",content);
+}
+async function openM3Matching(s){
+  const context=matchingContext(s),{item,config}=context;
+  if(lastMatchingTrial?.snapshot?.task?.task_id===s.task.task_id){renderM3MatchingTrial(s,item,lastMatchingTrial.body);return}
+  if(!config&&!context.input?.bom?.lines?.length){m3ModuleFrame(s,"matching",'<div class="matching-loading matching-error"><b>当前订单缺少 M3 试算输入</b><span>需要订单对应的 BOM 物料行或候选运行配置。</span></div>');return}
+  m3ModuleFrame(s,"matching",'<div class="matching-loading"><b>M3 正在匹配物料、库存与在途采购</b><span>规则生成 Top-K，Agent 仅在候选范围内复核。</span></div>');
+  try{let payload=context.input?.bom?.lines?.length?structuredClone(context.input):null;if(!payload){const response=await fetch(config.m3_input_url,{cache:"no-store"});if(!response.ok)throw Error(`读取订单输入失败：HTTP ${response.status}`);payload=await response.json()}payload.source_module=payload.source_module||"M2";const body=await jsonRequest("/api/m3/procurement-plan:run-json?use_m3_supply=true&allow_agent_estimates=false&use_demo_supplements=false",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});if(body.success===false)throw Error(body.error?.message||"M3 未完成物料匹配");renderM3MatchingTrial(s,item,body)}catch(error){m3ModuleFrame(s,"matching",`<div class="matching-loading matching-error"><b>M3 物料匹配未完成</b><span>${esc(error.message)}</span></div>`)}}
+
+function ensureM3ReviewContainer(){if(document.querySelector("#module-detail"))return;document.querySelectorAll(".overview-only").forEach(function(el){el.classList.add("is-hidden");});var c=document.querySelector("#content");if(!c)return;c.innerHTML='<section id="module-detail" class="panel detail-panel"><h3>物料匹配与人工核验</h3></section>';var d=document.querySelector("#module-detail");if(d)d.innerHTML='<div class="matching-loading"><b>正在准备核验视图</b></div>';}
+async function openM3Review(item){   ensureM3ReviewContainer();   const config=candidateRuns.find(row=>row.catalog_id===item.catalog_id);   if(!config){m3ModuleFrame({},"matching",'<div class="matching-loading matching-error"><b>当前订单缺少 M3 试算输入</b><span>需要订单对应的 BOM 物料行或候选运行配置。</span></div>');return}   m3ModuleFrame({},"matching",'<div class="matching-loading"><b>M3 正在匹配物料、库存与在途采购</b><span>规则生成 Top-K，Agent 仅在候选范围内复核。</span></div>');   try{const resp=await fetch(config.m3_input_url,{cache:"no-store"});if(!resp.ok)throw Error(`读取订单输入失败：HTTP ${resp.status}`);const payload=await resp.json();payload.source_module=payload.source_module||"M2";const body=await jsonRequest("/api/m3/procurement-plan:run-json?use_m3_supply=true&allow_agent_estimates=false&use_demo_supplements=false",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});if(body.success===false)throw Error(body.error?.message||"M3 未完成物料匹配");renderM3MatchingTrial({},item,body)}catch(error){m3ModuleFrame({},"matching",`<div class="matching-loading matching-error"><b>M3 物料匹配未完成</b><span>${esc(error.message)}</span></div>`)}}
+function openM3MatchingPending(){
+  if(!pendingM3Flow)return;
+  const audits=pendingM3Flow.m3Result.material_matching||[];
+  renderM3MatchingTrial({},pendingM3Flow.item,{data:pendingM3Flow.m3Result,material_matching:audits});
+  const continueBtn=document.querySelector(".continue-m3-flow");
+  if(continueBtn)continueBtn.style.display="inline-block";
+  m3ModuleFrame({},"matching",document.querySelector("#m3-module-body")?.innerHTML||"");
+}
+function autoFillBestCandidates(){
+  if(!lastMatchingTrial)return;
+  const verifiedBy=reviewerName(),message=$("#review-message");
+  if(!verifiedBy){message.textContent="请先填写核验人姓名，再一键采用最高匹配。";$("#reviewer-name")?.focus();return}
+  const rows=document.querySelectorAll(".matching-table tbody tr");let filled=0;
+  rows.forEach(row=>{
+    const key=row.dataset.reviewKey;if(!key)return;
+    if(materialReviews[key])return;
+    const audit=lastMatchingTrial.body.material_matching.find(item=>reviewKey(item)===key);
+    if(!audit)return;
+    const candidates=audit.deterministic_result?.candidates||[];
+    
+    const select=row.querySelector(".review-select");
+    if(select&&candidates.length){
+      const best=candidates.find(candidate=>!String(candidate.conflicts||[]).includes("unit_dimension"))||candidates[0];
+      const hasUomConflict=String(best.conflicts||[]).includes("unit_dimension");
+      select.value=best.erp_material?.material_code||best.material_code||select.options[0]?.value||"";
+      if(select.value&&!hasUomConflict){saveMaterialReview(row,false);filled++}
+      else if(hasUomConflict){saveMaterialReview(row,true);filled++}
+    } else if(!candidates.length&&(audit.deterministic_result?.status==="unmatched")){
+      saveMaterialReview(row,true);filled++;
+    }
+  });
+  message.textContent=`已自动采用 ${filled} 条最高匹配候选；保存权威核验结果后，请重新提交根业务流程。`;
+  if(lastMatchingTrial)renderM3MatchingTrial(lastMatchingTrial.snapshot,lastMatchingTrial.item,lastMatchingTrial.body);
+}
+async function continueAfterReview(){
+  const item=lastMatchingTrial&&lastMatchingTrial.item;
+  if(!item||!item.flow_run_id){alert("请先运行订单进入链路，再进行物料核验。");return}
+  const overrides={};
+  Object.values(materialReviews||{}).forEach(label=>{
+    if(!label||label.label_status!=="verified"||!label.source_material_code)return;
+    overrides[label.source_material_code]={
+      source_material_code:label.source_material_code,
+      expected_erp_material_code:label.expected_erp_material_code||null,
+      confirmed_unmatched:!!label.confirmed_unmatched,
+    };
+  });
+  if(!Object.keys(overrides).length){alert("还没有已核验的物料结论，请先逐行确认物料。");return}
+  const count=Object.keys(overrides).length;
+  if(!confirm(`将把 ${count} 条人工核验结论写回服务端并继续 M4 → M5，确定继续？`))return;
+  await continueBusinessFlow(item,{},null,overrides);
+}
+function showModule(module,s,m5State){
+  if(module==="m5"){showM5Module(s,m5State);return}
+  if(module==="m3"){showM3InputOutput(s);return}
+  const names={m1:["M1 · 订单输入","把订单文件识别为结构化订单数据"],m2:["M2 · 历史 BOM 匹配","根据产品要求匹配历史 BOM，并形成受控草稿"],m3:["M3 · 物料与补库计算","先判断订单是否缺料，再计算恢复安全库存所需的补库量"],m4:["M4 · 采购建议入库","把 M3 的最终采购建议以 TaskID 和幂等键持久化"]};
+  const [title,note]=names[module],io=moduleIo(s,module),run=(s.module_runs||[]).find(x=>x.module===module);
+  document.querySelectorAll(".overview-only").forEach(el=>el.classList.add("is-hidden"));
+  const fileActions=module==="m1"?m1FileActions(io.input||{}):module==="m2"?m2FileActions(io.input||{},io.output||{}):"";
+  $("#module-detail").innerHTML=`<div class="detail-actions"><div><h3>${title}</h3><p class="panel-note">${note} · ${run?`${run.event_count} 个事件，状态 ${labelStatus(run.status)}`:"暂无执行记录"}</p></div><button id="back-overview" class="secondary-button" type="button">返回全链路总览</button></div><div class="io-grid">${ioBox("模块输入","实际请求数据",moduleInputTable(module,io.input||{})+fileActions)}${ioBox("模块输出","实际返回数据",moduleOutputTable(module,io.output||{}))}</div>`;
+  $("#back-overview").addEventListener("click",()=>showOverview());
+  const preview=$("#module-detail .preview-file");
+  if(preview)preview.addEventListener("click",()=>previewFile(preview.dataset.file));
+  const bomPreview=$("#module-detail .preview-bom");
+  if(bomPreview)bomPreview.addEventListener("click",()=>previewHistoricalBom(io.input||{},io.output||{}));
+}
+function showM5Module(s,m5State){
+  document.querySelectorAll(".overview-only").forEach(el=>el.classList.add("is-hidden"));
+  const item=m5State?.item;
+  if(!item){
+    const reason=m5State?.error?`M5 查询失败：${m5State.error}`:"接口已返回，但没有匹配此 TaskID 的持久化 M5 排程数据";
+    $("#module-detail").innerHTML=`<div class="detail-actions"><div><h3>M5 · 生产排程</h3><p class="panel-note">M1 → M4 数据已保留；${esc(reason)}</p></div><button id="back-overview" class="secondary-button" type="button">返回全链路总览</button></div><div class="notice">${esc(reason)}。HTTP 可达不代表业务已打通。</div>`;
+    $("#back-overview").addEventListener("click",()=>showOverview());
+    return;
+  }
+  const input=item.input||{},output=item.output||{},tracking=item.tracking||{},jobs=item.jobs||[],scenarioPurpose=input.scenario_purpose==="pressure_only"?"压力测试":"生产",plan=selectProcurementPlan(s.entities||[]),m3Lines=findM3Lines(s,plan);
+  const inputSummary=table(["场景","场景用途","订单","工艺步骤","资源","物料可用性","BOM 物料"],[[input.scenario_id,scenarioPurpose,input.order_count,input.routing_step_count,input.resource_count,input.material_availability_count,input.bom_item_count]]);
+  const orders=table(["订单号","产品","数量","单位","交期","优先级","加急"],(input.orders||[]).map(order=>[order.order_id,order.product_id,order.quantity,order.unit,order.due_time||"未提供",order.priority||"未提供",order.is_expedited?"是":"否"]),"M5 输入中没有订单明细");
+  const outputSummary=table(["计划版本","父版本","求解状态","硬约束校验","生命周期","排程工序","排程订单","排程资源","派发确认","执行事件（原始）"],[[item.plan_version,item.parent_plan_version||"根版本",output.solver_status,output.validation_passed?"通过":"失败",output.lifecycle_status,output.scheduled_operation_count,output.scheduled_order_count,output.scheduled_resource_count,`${output.dispatch_acknowledged_count}/${output.dispatch_item_count}`,output.execution_event_count]]);
+  const trackingSummary=table(["TaskID","模式","事件","已发送","等待","重试","处理中","死信","最近错误"],[[tracking.tracking_task_id||"未绑定",tracking.mode,tracking.event_count,tracking.sent_count,tracking.pending_count,tracking.retry_count,tracking.processing_count,tracking.dead_letter_count,tracking.latest_error||"无"]]);
+  const jobSummary=table(["Job ID","类型","状态","结果版本","匹配当前版本","尝试","错误"],jobs.map(job=>[job.id,job.job_type,job.status,job.result_plan_version||"未生成",job.matches_plan_version?"是":"否",`${job.attempts}/${job.max_attempts}`,job.error||"无"]),"此计划没有异步 Job");
+  const visualization=m5ScheduleVisualization(m5State.schedule||{operations:output.operations||[]},m5State.scheduleError),scenarioNotice=input.scenario_purpose==="pressure_only"?'<div class="notice">当前为压力测试排程，未进入生产发布。订单和设备来自真实输入；BOM、工艺、班次或库存中的测试补充数据仍需上游确认。</div>':"",businessProgress=`<div class="m5-business-progress">${m5MaterialReadinessPanel(m3Lines,item)}${m5KittingPanel(m5State.schedule,m5State.scheduleError)}${m5ProcessAndExecutionPanel(item,m5State.execution,m5State.executionError)}</div>`;
+  $("#module-detail").innerHTML=`<div class="detail-actions"><div><h3>M5 · 生产排程</h3><p class="panel-note">同一 Tracking TaskID 的持久化输入、排程结果与事务 Outbox · ${esc(scenarioPurpose)}场景 · 排程流程 ${esc(item.progress_percent)}%</p></div><button id="back-overview" class="secondary-button" type="button">返回全链路总览</button></div>${scenarioNotice}<div class="io-grid">${ioBox("M5 输入","已持久化数据",inputSummary+orders)}${ioBox("M5 输出","排程与业务确认",outputSummary+trackingSummary+jobSummary)}</div>${businessProgress}${visualization}`;
+  $("#back-overview").addEventListener("click",()=>showOverview());
+}
+function m5OperationName(value){return({"cutting":"切割","assembly":"装配","inspection":"检验","packing":"包装"})[String(value).toLowerCase()]||value}
+function m5Duration(milliseconds){
+  const minutes=Math.max(0,Math.round(milliseconds/60000)),hours=Math.floor(minutes/60),rest=minutes%60;
+  return hours?`${hours}小时${rest?rest+"分钟":""}`:`${rest}分钟`;
+}
+function m5ScheduleVisualization(detail,error){
+  if(error)return`<section class="m5-schedule-visualization"><div class="notice">设备排程可视化读取失败：${esc(error)}</div></section>`;
+  const operations=(detail?.operations||[]).map(operation=>({...operation,startMs:Date.parse(operation.start_time),endMs:Date.parse(operation.end_time)})).filter(operation=>Number.isFinite(operation.startMs)&&Number.isFinite(operation.endMs)&&operation.endMs>operation.startMs).sort((a,b)=>a.startMs-b.startMs);
+  if(!operations.length)return'<section class="m5-schedule-visualization"><div class="empty-table">当前计划没有可绘制的排程工序</div></section>';
+  const start=Math.min(...operations.map(operation=>operation.startMs)),end=Math.max(...operations.map(operation=>operation.endMs)),windowMs=end-start;
+  const resourceIds=[...new Set(operations.map(operation=>operation.resource_id))],orderIds=[...new Set(operations.map(operation=>operation.order_id))];
+  const orderClass=orderId=>`m5-order-${Math.max(0,orderIds.indexOf(orderId))%4}`;
+  const legend=orderIds.map(orderId=>`<span class="m5-order-key ${orderClass(orderId)}"><i></i>${esc(orderId)}</span>`).join("");
+  const lanes=resourceIds.map(resourceId=>{
+    const rows=operations.filter(operation=>operation.resource_id===resourceId);
+    const bars=rows.map(operation=>{
+      const left=(operation.startMs-start)/windowMs*100,width=(operation.endMs-operation.startMs)/windowMs*100,label=`${operation.order_id} · ${m5OperationName(operation.operation_name)}`;
+      return`<span class="m5-gantt-bar ${orderClass(operation.order_id)}" style="left:${left.toFixed(3)}%;width:${Math.max(width,.8).toFixed(3)}%" aria-label="${esc(`${resourceId} ${label} ${date(operation.start_time)} 至 ${date(operation.end_time)}`)}">${esc(label)}</span>`;
+    }).join("");
+    return`<div class="m5-gantt-lane"><div class="m5-resource-label"><b>${esc(resourceId)}</b><span>${rows.length} 道工序</span></div><div class="m5-gantt-track">${bars}</div></div>`;
+  }).join("");
+  const loads=resourceIds.map(resourceId=>{
+    const loadMs=operations.filter(operation=>operation.resource_id===resourceId).reduce((total,operation)=>total+operation.endMs-operation.startMs,0),percent=Math.min(100,loadMs/windowMs*100);
+    return`<div class="m5-load-row"><span class="m5-load-label">${esc(resourceId)}</span><span class="m5-load-track"><i class="m5-load-fill" style="width:${percent.toFixed(2)}%"></i></span><span class="m5-load-value">${esc(m5Duration(loadMs))} · ${percent.toFixed(0)}%</span></div>`;
+  }).join("");
+  const operationRows=operations.map(operation=>[operation.resource_id,operation.order_id,operation.product_id||"未提供",m5OperationName(operation.operation_name),date(operation.start_time),date(operation.end_time),m5Duration(operation.endMs-operation.startMs),operation.status]);
+  return`<section class="m5-schedule-visualization"><div class="m5-schedule-head"><div><h4>设备排程泳道</h4><p>计划窗口 ${esc(date(start))} 至 ${esc(date(end))} · ${esc(m5Duration(windowMs))}</p></div><div class="m5-order-legend">${legend}</div></div><div class="m5-gantt-scroll"><div class="m5-gantt"><div class="m5-gantt-axis"><span>设备 / 资源</span><div class="m5-axis-track"><span>${esc(date(start))}</span><span>${esc(date(start+windowMs/2))}</span><span>${esc(date(end))}</span></div></div>${lanes}</div></div><div class="table-caption">设备窗口占用</div><div class="m5-load-list">${loads}</div><div class="m5-personnel-gap"><strong>人员级安排尚无数据</strong>：当前排程只绑定到设备资源，没有提供具体人员或班组身份，因此不推断人员排班。</div><div class="table-caption">工序明细</div><div class="m5-operation-table">${table(["设备","订单","产品","工序","开始","结束","时长","状态"],operationRows)}</div></section>`;
+}
+function showOverview(){
+  document.querySelectorAll(".overview-only").forEach(el=>el.classList.remove("is-hidden"));
+  document.querySelectorAll(".step").forEach(el=>el.classList.remove("selected"));
+  $("#module-detail").innerHTML="<h3>点击上方模块查看输入与输出</h3><p class=\"panel-note\">表格来自各模块本次真实请求和真实返回，不使用前端示例值。</p>";
+}
+function parseCsv(text){
+  const rows=[];let row=[],cell="",quoted=false;
+  for(let i=0;i<text.length;i++){const c=text[i],next=text[i+1];if(c==='"'&&quoted&&next==='"'){cell+='"';i++}else if(c==='"'){quoted=!quoted}else if(c===","&&!quoted){row.push(cell);cell=""}else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&next==="\n")i++;row.push(cell);if(row.some(v=>v!==""))rows.push(row);row=[];cell=""}else cell+=c}
+  row.push(cell);if(row.some(v=>v!==""))rows.push(row);return rows;
+}
+async function previewFile(filename){
+  const modal=$("#preview-modal"),body=$("#preview-body"),url=`/uploads/${encodeURIComponent(filename)}`,extension=filename.toLowerCase().split(".").pop()||"";
+  $("#preview-title").textContent=`原始上传文件 · ${filename}`;body.innerHTML="<p>正在读取文件…</p>";modal.classList.remove("hidden");
+  if(["pdf"].includes(extension)){body.innerHTML=`<iframe class="preview-frame" src="${url}" title="${esc(filename)}"></iframe>`;return}
+  if(["png","jpg","jpeg","gif","webp","bmp"].includes(extension)){body.innerHTML=`<img class="preview-image" src="${url}" alt="${esc(filename)}">`;return}
+  if(["xlsx","xls","docx","doc","pptx","ppt"].includes(extension)){body.innerHTML=`<div class="preview-help"><b>该 Office 原件暂不支持浏览器内原样渲染</b><p>M1 的模块输出已用表格展示实际识别结果。原件可下载核对；后续接入本地 Office 转 PDF 服务后，可在此处显示完整排版。</p><a class="file-link" href="${url}" download>下载原文件</a></div>`;return}
+  try{
+    const response=await fetch(url,{cache:"no-store"});if(!response.ok)throw Error(`${response.status} ${response.statusText}`);
+    const text=(await response.text()).replace(/^\uFEFF/,"");
+    if(extension==="csv"){const rows=parseCsv(text),headers=rows.shift()||[];body.innerHTML=table(headers,rows,"文件没有数据")}
+    else if(["txt","json","xml","html","htm","md","log"].includes(extension))body.innerHTML=`<pre class="preview-raw">${esc(text)}</pre>`;
+    else body.innerHTML=`<div class="preview-help"><b>暂不支持在线预览该文件格式</b><p>请下载原文件核对，M1 的识别结果仍会在模块输出表格中完整展示。</p><a class="file-link" href="${url}" download>下载原文件</a></div>`;
+  }catch(error){body.innerHTML=`<div class="notice">预览失败：${esc(error.message)}</div>`}
+}
+function previewHistoricalBom(input,output){
+  const filename=historyBomFilename(input,output),data=unwrapResult(output),bom=data.bom_generation?.standard_bom||{},header=bom.bom_header?.[0]||{},lines=bom.bom_lines||[];
+  $("#preview-title").textContent=`历史 BOM 预览 · ${filename||"未命名文件"}`;
+  $("#preview-body").innerHTML=`<p class="panel-note">以下内容来自 M2 对历史 BOM 文件的实际解析结果，共 ${lines.length} 条物料。</p><div class="table-caption">BOM 基本信息</div>${table(["BOM 编号","父项编码","产品名称","版本","状态","证据来源"],[[header.bom_id,header.parent_item,header.parent_name,header.parent_revision,labelStatus(header.status),header.source_basis]])}<div class="table-caption">历史 BOM 物料明细</div>${bomTable(lines)}`;
+  $("#preview-modal").classList.remove("hidden");
+}
+function closePreview(){$("#preview-modal").classList.add("hidden")}
+$("#preview-close").addEventListener("click",closePreview);
+$("#preview-modal").addEventListener("click",event=>{if(event.target.id==="preview-modal")closePreview()});
+document.addEventListener("keydown",event=>{if(event.key==="Escape")closePreview()});
+</script>
+</body>
+</html>

@@ -16,7 +16,7 @@ Skill 名称：`business-data-identification`
 输入二选一：
 
 ```json
-{"root_path":"/Volumes/外置硬盘/云湃业务数据","db_path":"runtime/yunpai-business-catalog.sqlite"}
+{"root_path":"/data/yunpai-business","db_path":"runtime/yunpai-business-catalog.sqlite"}
 ```
 
 或：

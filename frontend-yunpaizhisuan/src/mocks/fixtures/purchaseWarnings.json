@@ -1,0 +1,5 @@
+[
+  { "id": "P-1", "supplier": "供应商 A", "item": "轴承", "overdueDays": 2, "severity": "high", "status": "open" },
+  { "id": "P-2", "supplier": "供应商 B", "item": "电机", "overdueDays": 1, "severity": "medium", "status": "open" },
+  { "id": "P-3", "supplier": "供应商 C", "item": "传感器", "overdueDays": 3, "severity": "high", "status": "followed" }
+]

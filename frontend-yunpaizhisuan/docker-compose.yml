@@ -1,0 +1,22 @@
+services:
+  api-gateway:
+    build:
+      context: ./api-gateway
+    image: yunpaizhisuan-api-gateway:local
+    environment:
+      M3_GATEWAY_SERVICE_TOKEN: smoke-m3-gateway-token
+      M4_GATEWAY_SERVICE_TOKEN: smoke-m4-gateway-token
+    ports:
+      - "${API_GATEWAY_PORT:-8088}:8080"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/gateway/health"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+networks:
+  backend:
+    name: ${API_GATEWAY_NETWORK:-yunpaizhisuan-backend}

@@ -1003,7 +1003,7 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             "bom_items": lines,
             "routing_steps": routing_steps,
             "requirement_text": str(request.get("message") or request.get("requirement_text") or ""),
-            "rule_package_path": str(request.get("rule_package_path") or "/home/soft/yunpai/prod-39092/app/m8/material_numbering"),
+            "rule_package_path": str(request.get("rule_package_path") or os.getenv("YUNPAI_RULE_PACKAGE_PATH", "runtime/rule_packages/material_numbering")),
             "document_no": str(request.get("document_no") or product_code or "M2-DRAFT"),
             "history_bom_paths": request.get("history_bom_paths") or [],
             "history_sop_paths": request.get("history_sop_paths") or [],

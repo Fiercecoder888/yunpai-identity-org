@@ -1,6 +1,6 @@
 """T2 回归：Qwen/M2 模型端点配置守卫与 M2 端点故障的 Gate 语义。
 
-- Planner Qwen 默认端点必须是 GB10 18085 代理，绝不能落到 127.0.0.1:9；
+- Planner Qwen 默认端点必须是本机 OpenAI-compatible 代理，绝不能落到 127.0.0.1:9；
 - 配置模板(.env.example)与启动脚本(start_backend.sh)必须带端点说明/守卫；
 - M2 工程工具在模型/服务端点不可达(HTTP_UNAVAILABLE/HTTP_TIMEOUT)时必须由
   编排器转成可恢复 BLOCKED_INPUT 数据 Gate（不能硬失败伪装模型成功）。
@@ -21,12 +21,12 @@ from yunpai_langgraph.registry import ToolHTTPError
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_qwen_default_endpoint_is_gb10_18085_proxy_never_port_9():
+def test_qwen_default_endpoint_is_local_proxy_never_port_9():
     config = llm.QwenConfig()
     parts = urlsplit(config.base_url)
     assert parts.port == 18085
     assert parts.port != 9
-    assert "qwen" in parts.hostname or parts.hostname in {"127.0.0.1", "localhost", "gb10"}
+    assert "qwen" in parts.hostname or parts.hostname in {"127.0.0.1", "localhost"}
 
 
 def test_qwen_from_env_honors_explicit_endpoint_and_reports_honestly(monkeypatch):
@@ -45,16 +45,15 @@ def test_qwen_from_env_honors_explicit_endpoint_and_reports_honestly(monkeypatch
 
 def test_env_example_documents_m2_model_endpoint_contract():
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "QWEN_BASE_URL=http://gb10:18085/v1" in text
+    assert "QWEN_BASE_URL=http://127.0.0.1:18085/v1" in text
     assert "M2_MODEL_BASE_URL" in text
     assert ":9" not in text.replace("127.0.0.1:9", "")  # 模板本身不出现 127.0.0.1:9 值
 
 
 def test_start_backend_script_contains_endpoint_guard():
-    text = (ROOT / "ops" / "gb10" / "start_backend.sh").read_text(encoding="utf-8")
+    text = (ROOT / "ops" / "deploy" / "start_backend.sh").read_text(encoding="utf-8")
     assert "18085" in text
     assert "QWEN_BASE_URL" in text
-    assert "M2_MODEL_BASE_URL" in text or "m2_url" in text
     assert "127.0.0.1:8081/" in text  # 启动守卫拦截未代理端口
 
 

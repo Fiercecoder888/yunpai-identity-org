@@ -1,0 +1,15 @@
+{
+  "resources": [
+    { "id": "line-1", "name": "产线 1" },
+    { "id": "line-2", "name": "产线 2" },
+    { "id": "line-3", "name": "产线 3" }
+  ],
+  "tasks": [
+    { "id": "SCH-1", "title": "订单 A 粗加工", "resourceId": "line-1", "startDay": 0, "durationDays": 3, "status": "solved", "planVersion": "M5-PLAN-20260727-V2", "actualStartDay": 0, "actualDurationDays": 3, "critical": true, "workHours": 8 },
+    { "id": "SCH-2", "title": "订单 B 表面处理", "resourceId": "line-2", "startDay": 2, "durationDays": 3, "status": "conflict", "planVersion": "M5-PLAN-20260727-V2", "actualStartDay": 3, "actualDurationDays": 4 },
+    { "id": "SCH-3", "title": "订单 C 装配", "resourceId": "line-3", "startDay": 4, "durationDays": 2, "status": "draft", "planVersion": "M5-PLAN-20260727-V2", "workHours": 6 }
+  ],
+  "conflicts": [
+    { "id": "C-1", "taskId": "SCH-2", "level": "high", "message": "产线 2 与返工任务存在资源冲突。" }
+  ]
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "supplier_name": "华东五金供应商",
+    "contact_name": "张三",
+    "email": "zhangsan@example.com",
+    "phone": "13800000000",
+    "default_channel": "email",
+    "remark": "关键件常用供应商",
+    "status": "active"
+  },
+  {
+    "id": 2,
+    "supplier_name": "华南电子供应商",
+    "contact_name": "李四",
+    "email": "lisi@example.com",
+    "phone": "13900000000",
+    "default_channel": "wechat",
+    "remark": "电子件备选供应商",
+    "status": "active"
+  },
+  {
+    "id": 3,
+    "supplier_name": "西南机加供应商",
+    "contact_name": "王五",
+    "email": "wangwu@example.com",
+    "phone": "13700000000",
+    "default_channel": "dingtalk",
+    "remark": "交期波动需关注",
+    "status": "active"
+  }
+]

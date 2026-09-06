@@ -2,8 +2,8 @@
 
 ## 项目边界
 
-- 项目根目录：`/Users/murkydoubloon45/Desktop/yunpaigragh`
-- GitLab 远端：`origin`（以本地 `git remote -v` 的配置为准）
+- 项目根目录：本仓库检出目录（以 `git rev-parse --show-toplevel` 为准）
+- 远端：`origin`（以本地 `git remote -v` 的配置为准）
 - 开发集成分支：`dev`，对应远端 `origin/dev`
 - `main` 仅用于集成/发布基线；普通开发、修复和测试不得直接提交或推送到 `main`。
 - 不在仓库文件中写入密码、Token、私钥或其他凭据。
@@ -20,7 +20,7 @@
 
 每次执行测试后都必须完成下面的闭环：
 
-1. 使用项目虚拟环境运行后端测试：`.venv/bin/python -m pytest -q`。前端改动还要运行 `cd frontend && npm test -- --run`；构建相关改动还要运行 `cd frontend && npm run build`。
+1. 使用项目虚拟环境运行后端测试：`.venv/bin/python -m pytest -q`。前端改动还要运行 `cd frontend-yunpaizhisuan && npm test -- --run`；构建相关改动还要运行 `cd frontend-yunpaizhisuan && npm run build`。
 2. 只有测试命令全部以退出码 `0` 结束，才允许进入提交和推送步骤。任一测试失败、依赖缺失或测试未实际执行时，不得自动推送，并在反馈中说明原因。
 3. 测试通过后检查 `git diff --check`、`git status --short` 和待提交 diff；不得把无关文件、运行产物、密钥或本地数据库加入提交。
 4. 在当前 `dev` 分支提交本次改动，然后立即推送：`git push origin dev`。
@@ -35,7 +35,7 @@
 
 ## 前端对接契约（yunpaizhisuan-FE）
 
-- 企业版前端 `yunpaizhisuan-FE`（React19+Vite+antd，本地解压在 `frontend-yunpaizhisuan/`）与仓库内旧 `frontend/`（`yunpai-agent-workspace`）是**两套**，勿混淆。前端由他人单独开发，本仓库只做对接。
+- 正式前端为 `yunpaizhisuan-FE`（React19+Vite+antd，源码在 `frontend-yunpaizhisuan/`），由他人单独开发，本仓库负责对接；历史旧前端已从统一源码基线移除。
 - **原始文件上传必须发 `workflow: "m1_m5_document_to_plan"`，不是 `"m0_m5"`**。`m0_m5`（order_to_schedule）是"订单已入库后直接排程"，其 M1 步骤读 `request.document`（单数）且跑在 M0 之后；`m1_m5_document_to_plan` 才是"原始文件→M1 解析→复核→M0→M5"入口。前端写错 workflow 会导致 M1 `ingest_document` 415。
 - 前端 local 模式（`VITE_LOCAL_LANGGRAPH=true`）走 `POST /runs/stream` 与 `POST /runs/{id}/resume/stream`，事件协议为 NDJSON（`run_start/assistant_delta/step_start/step_result/gate_opened/run_error/run_done`），与后端 `graph.stream` 一一对应。
 - 前端 `documents` 附件数组每项必须带 `kind: "order"`（后端 `bridge_payload` 按 `item.kind=="order"` 取订单附件）；其余字段为 `filename/content_type/content_b64`。

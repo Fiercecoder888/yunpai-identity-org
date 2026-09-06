@@ -1,0 +1,4 @@
+[
+  { "id": "M1-REV-1", "taskId": "M1-TASK-001", "field": "交付日期", "recognizedValue": "2026-07-08", "confidence": 0.62, "status": "pending" },
+  { "id": "M1-REV-2", "taskId": "M1-TASK-001", "field": "材料牌号", "recognizedValue": "AL6061", "confidence": 0.58, "status": "pending" }
+]

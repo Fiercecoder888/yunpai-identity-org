@@ -1,0 +1,3 @@
+[
+  { "id": "LOG-1", "time": "2026-06-26 16:45", "actor": "demo-user", "action": "M1_UPLOAD_CREATED", "module": "M1", "targetId": "TASK-001", "result": "success", "detail": "创建 M1 上传任务" }
+]

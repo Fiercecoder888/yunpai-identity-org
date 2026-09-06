@@ -393,7 +393,7 @@ def build_default_skill_registry() -> SkillRegistry:
     ))
     registry.register(SkillSpec(
         name="yunpai-m5-pmc-lifecycle",
-        description="面向 39085 M5 Flow Board 的版本历史、重排、派工和执行回传操作；只调用已注册 M5 Tool，不伪造生产状态。",
+        description="面向 M5 Flow Board 的版本历史、重排、派工和执行回传操作；只调用已注册 M5 Tool，不伪造生产状态。",
         handler=m5_lifecycle_control,
         tags=("m5", "lifecycle", "flow-board", "dispatch", "execution"),
         tools=("ingest_m5_planning_snapshot", "get_m5_schedule", "list_m5_schedules",

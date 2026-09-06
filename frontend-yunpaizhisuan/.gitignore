@@ -1,0 +1,17 @@
+node_modules/
+node_modules
+dist/
+coverage/
+playwright-report/
+test-results/
+archive/
+传入指令/
+前端Demo*.md
+feature-pages-*.png
+.env
+.env.local
+.env.*.local
+*.tsbuildinfo
+
+# Local cross-module validation topology, copied/adapted per workspace.
+docker-compose.current-repo-e2e.local.yml

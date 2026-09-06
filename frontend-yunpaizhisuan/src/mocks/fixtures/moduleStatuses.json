@@ -1,0 +1,10 @@
+[
+  { "id": "m1", "name": "M1 多模态识别", "status": "running", "metric": 18, "riskLevel": "medium" },
+  { "id": "m2", "name": "M2 BOM/SOP 生成", "status": "warning", "metric": 6, "riskLevel": "medium" },
+  { "id": "m3", "name": "M3 MRP 库存联动", "status": "normal", "metric": 12, "riskLevel": "low" },
+  { "id": "m4", "name": "M4 采购追踪", "status": "error", "metric": 4, "riskLevel": "high" },
+  { "id": "m5", "name": "M5 PMC 排程", "status": "running", "metric": 9, "riskLevel": "medium" },
+  { "id": "m6", "name": "M6 财务审计", "status": "pending", "metric": 3, "riskLevel": "low" },
+  { "id": "m7", "name": "M7 法务合规", "status": "error", "metric": 2, "riskLevel": "high" },
+  { "id": "m8", "name": "M8 ID 设计与分解", "status": "warning", "metric": 5, "riskLevel": "medium" }
+]

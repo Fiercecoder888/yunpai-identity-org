@@ -1,0 +1,34 @@
+export const LOCAL_ORDER_REGISTRY_KEY = 'yunpai.local-agent-orders';
+
+export type LocalOrderRecord = {
+  orderId: string;
+  filename?: string;
+  productName?: string;
+  quantity?: number;
+  dueDate?: string;
+  conversationId?: string;
+  updatedAt: string;
+};
+
+const readRaw = (): LocalOrderRecord[] => {
+  try {
+    const parsed = JSON.parse(globalThis.localStorage?.getItem(LOCAL_ORDER_REGISTRY_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is LocalOrderRecord => Boolean(item && typeof item === 'object' && typeof (item as LocalOrderRecord).orderId === 'string'));
+  } catch {
+    return [];
+  }
+};
+
+export const readLocalOrders = () => readRaw();
+
+export const rememberLocalOrder = (record: Omit<LocalOrderRecord, 'updatedAt'>) => {
+  const next: LocalOrderRecord = { ...record, updatedAt: new Date().toISOString() };
+  const existing = readRaw().filter((item) => item.orderId !== next.orderId);
+  try {
+    globalThis.localStorage?.setItem(LOCAL_ORDER_REGISTRY_KEY, JSON.stringify([next, ...existing].slice(0, 200)));
+  } catch {
+    // A browser storage failure must not block the Agent request.
+  }
+  return next;
+};

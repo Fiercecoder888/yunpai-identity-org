@@ -1,0 +1,5 @@
+[
+  { "id": "T-1001", "title": "确认订单图纸低置信度字段", "owner": "工艺员", "status": "need_review", "riskLevel": "high", "updatedAt": "2026-06-26T09:20:00+08:00" },
+  { "id": "T-1002", "title": "复核 BOM 草稿异常物料", "owner": "计划员", "status": "running", "riskLevel": "medium", "updatedAt": "2026-06-26T10:12:00+08:00" },
+  { "id": "T-1003", "title": "跟进供应商交期回复", "owner": "采购员", "status": "failed", "riskLevel": "high", "updatedAt": "2026-06-26T11:05:00+08:00" }
+]

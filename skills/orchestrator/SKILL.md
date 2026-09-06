@@ -15,7 +15,7 @@ description: Route Yunpai manufacturing conversations through planner, worker, a
 - 其他文本：返回解释，不创建业务副作用。
 
 ## 状态合同
-输入包含 `message|task|workflow|tool|tools` 之一及相应载荷。上传资料识别可使用 `business_data_root`（外置硬盘目录）或 `documents/files`（上传文件）。输出为 `RunState`：`run_id/task_id/status/workflow_id/workflow_version/plan/next_step_index/outputs/evidence/steps/pending_gate/approvals/errors/trace`。需要调用具体模块工具时，读取相应 `skills/m0` 至 `skills/m5` 的 `references/tools.md`。
+输入包含 `message|task|workflow|tool|tools` 之一及相应载荷。上传资料识别可使用 `business_data_root`（业务数据目录）或 `documents/files`（上传文件）。输出为 `RunState`：`run_id/task_id/status/workflow_id/workflow_version/plan/next_step_index/outputs/evidence/steps/pending_gate/approvals/errors/trace`。需要调用具体模块工具时，读取相应 `skills/m0` 至 `skills/m5` 的 `references/tools.md`。
 
 ## Gate 语义
 `waiting_human` 必须携带 `pending_gate.type/module/tool/step_index/message/actions`。恢复请求使用 `decision=approve|allow|continue|retry|reject|stop`；`retry` 合并 `supplement` 后重跑原步骤，批准从下一步骤继续，拒绝终止但保留完整 trace。

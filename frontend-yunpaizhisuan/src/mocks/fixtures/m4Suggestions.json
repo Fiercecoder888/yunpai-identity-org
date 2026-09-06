@@ -1,0 +1,47 @@
+[
+  {
+    "id": 101,
+    "batch_id": 1,
+    "row_number": 2,
+    "item_code": "MAT-001",
+    "item_name": "轴承",
+    "quantity": "100",
+    "unit": "pcs",
+    "supplier_name": "华东五金供应商",
+    "required_date": "2026-07-15",
+    "project_code": "PRJ-001",
+    "remark": "急需",
+    "validation_status": "valid",
+    "error_message": ""
+  },
+  {
+    "id": 102,
+    "batch_id": 1,
+    "row_number": 3,
+    "item_code": "MAT-002",
+    "item_name": "传感器",
+    "quantity": "60",
+    "unit": "pcs",
+    "supplier_name": "华南电子供应商",
+    "required_date": "2026-07-18",
+    "project_code": "PRJ-001",
+    "remark": "",
+    "validation_status": "valid",
+    "error_message": ""
+  },
+  {
+    "id": 103,
+    "batch_id": 1,
+    "row_number": 4,
+    "item_code": "MAT-003",
+    "item_name": "联轴器",
+    "quantity": "24",
+    "unit": "set",
+    "supplier_name": "西南机加供应商",
+    "required_date": "2026-07-16",
+    "project_code": "PRJ-002",
+    "remark": "供应商库存紧张",
+    "validation_status": "duplicate",
+    "error_message": "重复采购建议"
+  }
+]

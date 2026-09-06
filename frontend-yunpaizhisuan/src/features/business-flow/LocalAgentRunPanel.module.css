@@ -1,0 +1,61 @@
+.panel { position: relative; z-index: 2; padding: 12px 28px 10px; border-bottom: 1px solid #e4e7ec; background: #fff; }
+.context { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.contextMain { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.title { color: #1d2939; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.orderCount { color: #667085; font-size: 12px; white-space: nowrap; }
+.orderSelect { width: min(460px, 42vw); }
+.actions { flex: 0 0 auto; }
+.body { padding-top: 10px; }
+.orderHint { margin-bottom: 10px; color: #98a2b3; font-size: 11px; }
+.orderToolbar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: #667085; font-size: 12px; }
+.orderToolbar b { color: #344054; font-size: 13px; }
+.orderList { display: flex; gap: 8px; max-height: 92px; margin-bottom: 12px; overflow-x: auto; padding: 2px 2px 6px; }
+.orderItem { display: grid; grid-template-columns: minmax(135px, 1fr) auto auto; align-items: center; gap: 12px; flex: 1 0 300px; min-width: 300px; padding: 9px 11px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #344054; text-align: left; cursor: pointer; }
+.orderItem:hover { border-color: #98a2b3; background: #f9fafb; }
+.orderItemSelected { border-color: #1677ff; background: #f0f7ff; box-shadow: 0 0 0 1px rgba(22, 119, 255, 0.1); }
+.orderIdentity { display: flex; flex-direction: column; min-width: 0; }
+.orderIdentity b { overflow: hidden; color: #1d2939; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.orderIdentity small { overflow: hidden; color: #667085; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.orderStages { display: flex; gap: 3px; }
+.miniStage { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 20px; border: 1px solid #d0d5dd; border-radius: 4px; color: #98a2b3; font-size: 9px; font-weight: 700; }
+.mini-ok { border-color: #12b76a; background: #ecfdf3; color: #027a48; }
+.mini-running { border-color: #1677ff; background: #eff8ff; color: #175cd3; }
+.mini-attention { border-color: #f79009; background: #fffaeb; color: #b54708; }
+.mini-failed { border-color: #f04438; background: #fef3f2; color: #b42318; }
+.focusedOrderHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 2px 0 8px; color: #667085; font-size: 12px; }
+.focusedOrderHeading div { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.focusedOrderHeading b { color: #1d2939; font-size: 13px; }
+.focusedOrderHeading span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { margin-bottom: 8px; color: #667085; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
+.flowTrack { display: flex; align-items: stretch; }
+.stageWrap { display: flex; align-items: center; flex: 1 1 0; min-width: 0; }
+.stage { display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto auto auto; gap: 3px 8px; flex: 1 1 0; min-width: 0; min-height: 96px; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; }
+.stageIcon { grid-row: span 2; align-self: start; padding-top: 1px; color: #667085; font-size: 17px; }
+.stageHead { display: flex; flex-direction: column; min-width: 0; }
+.stageHead b { color: #1d2939; font-size: 14px; line-height: 1.2; }
+.stageHead small { color: #667085; font-size: 11px; white-space: nowrap; }
+.stage :global(.ant-tag) { margin-inline-end: 0; align-self: start; font-size: 11px; }
+.summary { grid-column: 2 / 4; overflow: hidden; color: #667085; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.stageHistoryButton { display: inline-flex; grid-column: 2 / 4; align-items: center; gap: 4px; width: fit-content; padding: 0; border: 0; background: transparent; color: #1677ff; font-size: 11px; cursor: pointer; }
+.stageHistoryButton:hover { color: #0958d9; text-decoration: underline; }
+.connector { flex: 0 0 34px; height: 4px; margin: 0 6px; border-radius: 3px; background: #d0d5dd; }
+.is-ok { border-color: #12b76a; }
+.is-ok .stageIcon { color: #12b76a; }
+.is-running { border-color: #1677ff; }
+.is-running .stageIcon { color: #1677ff; }
+.is-attention { border-color: #f79009; }
+.is-attention .stageIcon { color: #f79009; }
+.is-failed { border-color: #f04438; }
+.is-failed .stageIcon { color: #f04438; }
+.stageRecords { margin-top: 10px; padding: 10px 12px; border: 1px solid #dbe7f5; border-radius: 8px; background: #f8fbff; }
+.stageRecordsHeader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #1d2939; font-size: 12px; }
+.stageRecordsHeader button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; background: transparent; color: #667085; cursor: pointer; }
+.stageRecord { display: flex; flex-direction: column; gap: 5px; padding: 8px 0; border-top: 1px solid #eaecf0; color: #475467; font-size: 12px; }
+.stageRecord:first-of-type { border-top: 0; }
+.stageRecord > div { display: flex; align-items: center; gap: 8px; }
+.stageRecord > div span { color: #98a2b3; font-size: 11px; }
+.stageRecord b { color: #344054; font-size: 12px; }
+.stageRecord p { margin: 0; overflow-wrap: anywhere; color: #667085; font-size: 11px; line-height: 1.45; }
+.scheduleNote { margin-top: 8px; color: #027a48; font-size: 12px; }
+.historyLoading { padding: 16px 0; color: #667085; font-size: 12px; text-align: center; }
+@media (max-width: 900px) { .panel { padding-inline: 14px; } .context { align-items: flex-start; flex-direction: column; } .contextMain { width: 100%; flex-wrap: wrap; } .orderSelect { width: min(100%, 420px); flex: 1 1 240px; } .actions { align-self: flex-end; } .flowTrack { overflow-x: auto; padding-bottom: 6px; } .stageWrap { flex: 0 0 180px; } .focusedOrderHeading { align-items: flex-start; flex-direction: column; gap: 4px; } }

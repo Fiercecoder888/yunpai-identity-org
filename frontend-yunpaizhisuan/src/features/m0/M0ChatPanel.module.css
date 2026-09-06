@@ -1,0 +1,109 @@
+.uploadRow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.dragger {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.cameraTools {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  flex: 0 0 168px;
+  padding: 10px;
+  border: 1px dashed #d9d9d9;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+/* 拍照上传的原生 file input：视觉隐藏但保留可聚焦/可被测试工具操作，
+   capture="environment" 由 input 属性直接携带（移动端调起后置相机）。 */
+.cameraInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cameraButton,
+.burstButton {
+  min-height: 40px;
+}
+
+.cameraHint {
+  color: #98a2b3;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* 桌面端：m0 上传弹窗内文件列表给一个合理高度限制，避免长列表撑爆弹窗 */
+:global(.m0-import-modal .upload-file-list) {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+/* 移动端适配：上传弹窗近全屏、按钮可点、文件列表可滚动 */
+@media (max-width: 480px) {
+  .uploadRow {
+    flex-direction: column;
+  }
+
+  .dragger {
+    flex: none;
+    width: 100%;
+  }
+
+  .cameraTools {
+    flex: none;
+    width: 100%;
+  }
+
+  .cameraButton,
+  .burstButton {
+    min-height: 44px;
+    font-size: 15px;
+  }
+
+  :global(.m0-import-modal.ant-modal) {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    top: 0;
+    margin: 0;
+    padding-bottom: 0;
+  }
+
+  :global(.m0-import-modal .ant-modal-content) {
+    border-radius: 0;
+    min-height: 100vh;
+  }
+
+  :global(.m0-import-modal .ant-modal-header) {
+    padding: 14px 16px 8px;
+  }
+
+  :global(.m0-import-modal .ant-modal-body) {
+    padding: 12px 16px 20px;
+  }
+
+  :global(.m0-import-modal .upload-file-list) {
+    max-height: 38vh;
+    overflow-y: auto;
+  }
+
+  :global(.m0-import-modal .ant-upload-drag-container) {
+    padding: 8px 4px;
+  }
+}

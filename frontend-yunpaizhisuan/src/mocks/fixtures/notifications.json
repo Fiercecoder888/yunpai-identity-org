@@ -1,0 +1,32 @@
+[
+  {
+    "id": "NOTIF-001",
+    "type": "m4_overdue",
+    "title": "M4 逾期采购预警 1 项",
+    "detail": "PO-20260703-001 · 华东五金供应商 · 承诺 2026-07-20 · 逾期 4 天",
+    "severity": "high",
+    "link": "/modules/purchase-warnings",
+    "source": "api",
+    "createdAt": "2026-08-10T02:00:00.000Z"
+  },
+  {
+    "id": "NOTIF-002",
+    "type": "m5_attention",
+    "title": "M5 流程需关注 1 个版本",
+    "detail": "M5-PLAN-20260727-V2（80%）",
+    "severity": "medium",
+    "link": "/modules/m5-flow",
+    "source": "api",
+    "createdAt": "2026-08-10T01:30:00.000Z"
+  },
+  {
+    "id": "NOTIF-003",
+    "type": "system_health",
+    "title": "模块巡检完成",
+    "detail": "订单到排程 共 6 个模块，全部正常",
+    "severity": "info",
+    "link": "/dashboard",
+    "source": "system",
+    "createdAt": "2026-08-10T01:00:00.000Z"
+  }
+]

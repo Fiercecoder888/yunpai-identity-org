@@ -1,0 +1,23 @@
+.stack {
+  width: 100%;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--yp-space-sm);
+  margin-top: var(--yp-space-md);
+}
+
+.archivePicker {
+  display: inline-flex;
+}
+
+.failedList {
+  margin: var(--yp-space-xs) 0 0;
+  padding-left: 18px;
+}
+
+.fileHint {
+  color: var(--yp-color-text-muted);
+}

@@ -1,13 +1,13 @@
 ---
 name: yunpai-m5-pmc-lifecycle
-description: Operate the 39085-style M5 plan lifecycle in 39092 through registered schedule tools: inspect versions, replan, dispatch, and read execution feedback without bypassing approval or production gates.
+description: Operate the M5 plan lifecycle through registered schedule tools: inspect versions, replan, dispatch, and read execution feedback without bypassing approval or production gates.
 ---
 
 # M5 PMC 生命周期
 
 ## 适用场景
 
-当用户需要查看排程版本、比较当前计划、按生产事件重排、创建派工记录、查看报工/执行偏差，或使用 39085 M5 Flow Board 的运营能力时，由 Planner Agent 选择本 Skill。
+当用户需要查看排程版本、比较当前计划、按生产事件重排、创建派工记录、查看报工/执行偏差，或使用 M5 Flow Board 的运营能力时，由 Planner Agent 选择本 Skill。
 
 ## 工具映射
 

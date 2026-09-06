@@ -19,7 +19,7 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class QwenConfig:
     enabled: bool = True
-    base_url: str = "http://gb10:18085/v1"
+    base_url: str = "http://127.0.0.1:18085/v1"
     model: str = "qwen3.6-35b-a3b-fp8-gpu0-200k"
     api_key: str = ""
     timeout_s: float = 45.0
@@ -28,7 +28,7 @@ class QwenConfig:
     def from_env(cls) -> "QwenConfig":
         return cls(
             enabled=_env_bool("QWEN_ROUTER_ENABLED", True),
-            base_url=os.getenv("QWEN_BASE_URL", "http://gb10:18085/v1").rstrip("/"),
+            base_url=os.getenv("QWEN_BASE_URL", "http://127.0.0.1:18085/v1").rstrip("/"),
             model=os.getenv("QWEN_MODEL", "qwen3.6-35b-a3b-fp8-gpu0-200k"),
             api_key=os.getenv("QWEN_API_KEY", ""),
             timeout_s=float(os.getenv("QWEN_TIMEOUT_S", "45")),
@@ -81,7 +81,7 @@ class QwenRouter:
                 "chat_template_kwargs": {"enable_thinking": False},
                 "response_format": {"type": "json_object"},
             }
-            # trust_env=False prevents an HTTP proxy from intercepting the private GB10 address.
+            # trust_env=False prevents an HTTP proxy from intercepting the private model address.
             async with httpx.AsyncClient(timeout=self.config.timeout_s, trust_env=False) as client:
                 response = await client.post(f"{self.config.base_url}/chat/completions", headers=headers, json=body)
                 response.raise_for_status()

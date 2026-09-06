@@ -1,0 +1,38 @@
+[
+  {
+    "id": 501,
+    "alert_type": "overdue",
+    "purchase_order_no": "PO-20260703-001",
+    "supplier_name": "华东五金供应商",
+    "item_code": "MAT-001",
+    "item_name": "轴承",
+    "promised_date": "2026-07-01",
+    "days_overdue": 4,
+    "urge_message": "请确认采购单 PO-20260703-001 中轴承的当前交付进度和风险原因。",
+    "status": "open"
+  },
+  {
+    "id": 502,
+    "alert_type": "due_soon",
+    "purchase_order_no": "PO-20260703-002",
+    "supplier_name": "华南电子供应商",
+    "item_code": "MAT-002",
+    "item_name": "传感器",
+    "promised_date": "2026-07-08",
+    "days_overdue": 0,
+    "urge_message": "传感器临近承诺交期，请确认是否可按期交付。",
+    "status": "processing"
+  },
+  {
+    "id": 503,
+    "alert_type": "supplier_exception",
+    "purchase_order_no": "PO-20260703-003",
+    "supplier_name": "西南机加供应商",
+    "item_code": "MAT-003",
+    "item_name": "联轴器",
+    "promised_date": "2026-07-06",
+    "days_overdue": 0,
+    "urge_message": null,
+    "status": "open"
+  }
+]

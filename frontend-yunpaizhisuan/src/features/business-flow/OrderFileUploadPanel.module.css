@@ -1,0 +1,43 @@
+.stack {
+  width: 100%;
+}
+
+.intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  row-gap: 2px;
+  gap: 12px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.introHint {
+  color: #98a2b3;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.confirmCard {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid #d9dee8;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.recognizedMeta {
+  display: grid;
+  gap: 4px;
+  color: #475467;
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

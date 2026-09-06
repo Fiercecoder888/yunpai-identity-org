@@ -1,0 +1,163 @@
+[
+  {
+    "plan_version": "M5-PLAN-20260727-V2",
+    "parent_plan_version": "M5-PLAN-20260727-V1",
+    "tracking_task_id": "task_m5_acceptance_20260727",
+    "overall_status": "attention",
+    "progress_percent": 80,
+    "input": {
+      "scenario_id": "SCENARIO-LINE-A-0727",
+      "received_at": "2026-07-27T08:00:00+08:00",
+      "order_count": 2,
+      "orders": [
+        {
+          "order_id": "SO-20260727-001",
+          "product_id": "CABINET-A12",
+          "quantity": 120,
+          "unit": "pcs",
+          "due_time": "2026-07-30T18:00:00+08:00",
+          "priority": "high",
+          "status": "confirmed",
+          "is_expedited": true
+        },
+        {
+          "order_id": "SO-20260727-002",
+          "product_id": "CABINET-B08",
+          "quantity": 80,
+          "unit": "pcs",
+          "due_time": "2026-08-01T18:00:00+08:00",
+          "priority": "normal",
+          "status": "confirmed",
+          "is_expedited": false
+        }
+      ],
+      "routing_step_count": 8,
+      "resource_count": 5,
+      "material_availability_count": 24,
+      "bom_item_count": 36
+    },
+    "output": {
+      "plan_version": "M5-PLAN-20260727-V2",
+      "solver_status": "optimal",
+      "validation_passed": true,
+      "lifecycle_status": "released",
+      "scheduled_operation_count": 8,
+      "scheduled_order_count": 2,
+      "scheduled_resource_count": 5,
+      "dispatch_count": 1,
+      "failed_dispatch_count": 0,
+      "dispatch_item_count": 8,
+      "dispatch_acknowledged_count": 7,
+      "dispatch_failed_count": 0,
+      "execution_event_count": 3,
+      "approved_at": "2026-07-27T08:06:00+08:00",
+      "released_at": "2026-07-27T08:08:00+08:00"
+    },
+    "stages": [
+      { "key": "input", "label": "输入持久化", "status": "succeeded", "completed": 1, "total": 1, "message": "订单、工艺、资源、物料已写入 M5 业务库" },
+      { "key": "scheduling", "label": "排程生成", "status": "succeeded", "completed": 8, "total": 8, "message": "求解完成并持久化 8 道工序" },
+      { "key": "validation", "label": "硬约束校验", "status": "succeeded", "completed": 1, "total": 1, "message": "资源、工序和物料硬约束通过" },
+      { "key": "approval", "label": "计划审批", "status": "succeeded", "completed": 1, "total": 1, "message": "计划已批准并发布" },
+      { "key": "dispatch", "label": "派发确认", "status": "running", "completed": 7, "total": 8, "message": "MES 已确认 7/8 道工序" },
+      { "key": "execution", "label": "执行回传", "status": "running", "completed": 3, "total": 8, "message": "已接收 3 条现场执行事件" }
+    ],
+    "jobs": [
+      {
+        "id": "job-m5-schedule-0727",
+        "job_type": "schedule",
+        "status": "succeeded",
+        "result_plan_version": "M5-PLAN-20260727-V2",
+        "persist_requested": true,
+        "matches_plan_version": true,
+        "attempts": 1,
+        "max_attempts": 3,
+        "error": null,
+        "created_at": "2026-07-27T08:00:00+08:00",
+        "started_at": "2026-07-27T08:00:01+08:00",
+        "finished_at": "2026-07-27T08:00:05+08:00"
+      }
+    ],
+    "tracking": {
+      "mode": "shadow",
+      "tracking_task_id": "task_m5_acceptance_20260727",
+      "event_count": 4,
+      "by_status": { "sent": 3, "retry": 1 },
+      "sent_count": 3,
+      "pending_count": 0,
+      "retry_count": 1,
+      "processing_count": 0,
+      "dead_letter_count": 0,
+      "latest_error": "tracking endpoint timeout; retry scheduled",
+      "last_updated_at": "2026-07-27T08:09:00+08:00"
+    },
+    "updated_at": "2026-07-27T08:09:00+08:00"
+  },
+  {
+    "plan_version": "M5-PLAN-20260727-V1",
+    "parent_plan_version": null,
+    "tracking_task_id": "task_m5_acceptance_20260727",
+    "overall_status": "complete",
+    "progress_percent": 100,
+    "input": {
+      "scenario_id": "SCENARIO-LINE-A-0727",
+      "received_at": "2026-07-27T07:40:00+08:00",
+      "order_count": 1,
+      "orders": [
+        {
+          "order_id": "SO-20260727-001",
+          "product_id": "CABINET-A12",
+          "quantity": 120,
+          "unit": "pcs",
+          "due_time": "2026-07-30T18:00:00+08:00",
+          "priority": "high",
+          "status": "confirmed",
+          "is_expedited": true
+        }
+      ],
+      "routing_step_count": 4,
+      "resource_count": 3,
+      "material_availability_count": 12,
+      "bom_item_count": 18
+    },
+    "output": {
+      "plan_version": "M5-PLAN-20260727-V1",
+      "solver_status": "optimal",
+      "validation_passed": true,
+      "lifecycle_status": "released",
+      "scheduled_operation_count": 4,
+      "scheduled_order_count": 1,
+      "scheduled_resource_count": 3,
+      "dispatch_count": 1,
+      "failed_dispatch_count": 0,
+      "dispatch_item_count": 4,
+      "dispatch_acknowledged_count": 4,
+      "dispatch_failed_count": 0,
+      "execution_event_count": 4,
+      "approved_at": "2026-07-27T07:45:00+08:00",
+      "released_at": "2026-07-27T07:46:00+08:00"
+    },
+    "stages": [
+      { "key": "input", "label": "输入持久化", "status": "succeeded", "completed": 1, "total": 1, "message": "输入已持久化" },
+      { "key": "scheduling", "label": "排程生成", "status": "succeeded", "completed": 4, "total": 4, "message": "4 道工序已持久化" },
+      { "key": "validation", "label": "硬约束校验", "status": "succeeded", "completed": 1, "total": 1, "message": "硬约束校验通过" },
+      { "key": "approval", "label": "计划审批", "status": "succeeded", "completed": 1, "total": 1, "message": "计划已发布" },
+      { "key": "dispatch", "label": "派发确认", "status": "succeeded", "completed": 4, "total": 4, "message": "MES 已确认 4/4 道工序" },
+      { "key": "execution", "label": "执行回传", "status": "running", "completed": 4, "total": 4, "message": "已接收 4 条现场执行事件" }
+    ],
+    "jobs": [],
+    "tracking": {
+      "mode": "shadow",
+      "tracking_task_id": "task_m5_acceptance_20260727",
+      "event_count": 3,
+      "by_status": { "sent": 3 },
+      "sent_count": 3,
+      "pending_count": 0,
+      "retry_count": 0,
+      "processing_count": 0,
+      "dead_letter_count": 0,
+      "latest_error": null,
+      "last_updated_at": "2026-07-27T07:47:00+08:00"
+    },
+    "updated_at": "2026-07-27T07:47:00+08:00"
+  }
+]

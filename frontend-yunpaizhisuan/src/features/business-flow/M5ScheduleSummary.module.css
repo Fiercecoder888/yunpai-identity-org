@@ -1,0 +1,429 @@
+.card {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.loading {
+  margin-top: 8px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.emptyState {
+  margin-top: 10px;
+}
+
+.metricsRow {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.metric span {
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.metric b {
+  color: #1d2939;
+  font-size: 16px;
+}
+
+.segmented {
+  margin-top: 10px;
+}
+
+.execRow {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.execHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.execTitle {
+  color: #1d2939;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.execCounts {
+  color: #667085;
+  font-size: 12px;
+}
+
+.ganttRows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.ganttHeader,
+.opRow {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 70px minmax(160px, 2fr) 120px;
+  gap: 8px;
+  align-items: center;
+}
+
+.ganttHeader {
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.opName {
+  overflow: hidden;
+  color: #1d2939;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opResource {
+  color: #667085;
+  font-size: 12px;
+}
+
+.opTrack {
+  position: relative;
+  height: 24px;
+  border-radius: 4px;
+  background: #f2f4f7;
+}
+
+.opBar {
+  position: absolute;
+  top: 1px;
+  height: 10px;
+  border-radius: 4px;
+  background: #1677ff;
+}
+
+.actualBar {
+  position: absolute;
+  top: 14px;
+  height: 8px;
+  min-width: 4px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(45deg, #344054, #344054 4px, #667085 4px, #667085 8px);
+}
+
+.ganttLegend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  color: #667085;
+  font-size: 11px;
+}
+
+.ganttLegend i {
+  display: inline-block;
+  width: 20px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 2px;
+}
+
+.planLegend {
+  background: #1677ff;
+}
+
+.actualLegend {
+  background: repeating-linear-gradient(45deg, #344054, #344054 4px, #667085 4px, #667085 8px);
+}
+
+.opBar.isLate {
+  background: #f04438;
+}
+
+.opTime {
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ganttAxis {
+  margin-top: 12px;
+}
+
+.axisTrack {
+  position: relative;
+  height: 34px;
+  border-radius: 8px;
+  background: #f2f4f7;
+  overflow: hidden;
+}
+
+.axisSeg {
+  position: absolute;
+  top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  overflow: hidden;
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.axisLabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid #f79009;
+  border-radius: 4px;
+  background: #fffbf0;
+  color: #8a5c16;
+  font-size: 12px;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.footNote {
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+.orderProgress {
+  margin-top: 12px;
+}
+
+.sectionTitle {
+  margin-bottom: 6px;
+  color: #1d2939;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.orderTableScroll {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+}
+
+.orderTable {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.orderTable th {
+  padding: 7px 10px;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  background: #f8fafc;
+}
+
+.orderTable th:first-child {
+  width: 26%;
+}
+
+.orderTable th:nth-child(2),
+.orderTable th:nth-child(3) {
+  width: 12%;
+}
+
+.orderTable th:nth-child(4) {
+  width: 20%;
+}
+
+.orderTable th:nth-child(5) {
+  width: 12%;
+}
+
+.orderTable th:nth-child(6) {
+  width: 18%;
+}
+
+.orderGroup td {
+  padding: 0;
+  border-top: 1px solid #e4e7ec;
+}
+
+.orderToggle {
+  display: grid;
+  grid-template-columns: 20px minmax(150px, 26fr) minmax(72px, 12fr) minmax(72px, 12fr) minmax(120px, 20fr) minmax(72px, 12fr) minmax(120px, 18fr);
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 10px;
+  overflow: hidden;
+  border: 0;
+  color: #344054;
+  text-align: left;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.orderToggle:hover {
+  background: #f8fafc;
+}
+
+.orderToggle > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orderIdentity,
+.operationDetailRow > span:first-child {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.orderIdentity b,
+.orderIdentity small,
+.operationDetailRow b,
+.operationDetailRow small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orderIdentity small,
+.operationDetailRow small {
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+.orderRate :global(.ant-progress) {
+  margin: 0;
+}
+
+.operationDetails {
+  padding: 4px 10px 8px 38px;
+  background: #f8fafc;
+}
+
+.operationDetailRow {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) minmax(100px, 1fr) 84px minmax(110px, 1fr) 78px minmax(170px, 1.4fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  border-top: 1px dashed #d0d5dd;
+  color: #475467;
+  font-size: 12px;
+}
+
+.operationDetailRow:first-child {
+  border-top: 0;
+}
+
+.operationDetailRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operationTime {
+  color: #667085;
+}
+
+.operationEmpty {
+  padding: 10px 0;
+  color: #98a2b3;
+  font-size: 12px;
+}
+
+@media (max-width: 1080px) {
+  .metricsRow {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .ganttHeader,
+  .opRow {
+    grid-template-columns: minmax(80px, 1fr) 56px minmax(120px, 2fr);
+  }
+
+  .ganttHeader .opTime,
+  .opRow .opTime {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .metricsRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .execHead,
+  .foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .orderTable {
+    min-width: 620px;
+  }
+
+  .secondaryColumn {
+    display: none;
+  }
+
+  .orderToggle {
+    grid-template-columns: 20px minmax(140px, 2fr) 80px 80px minmax(110px, 1.2fr) 78px;
+  }
+
+  .operationDetails {
+    min-width: 620px;
+  }
+}

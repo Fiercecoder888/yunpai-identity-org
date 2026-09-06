@@ -1,0 +1,5 @@
+[
+  { "id": "BOM-1", "code": "MAT-001", "name": "铝型材", "quantity": 12, "unit": "根", "confidence": 0.94, "status": "normal" },
+  { "id": "BOM-2", "code": "MAT-017", "name": "紧固件套装", "quantity": 48, "unit": "套", "confidence": 0.61, "status": "warning" },
+  { "id": "BOM-3", "code": "MAT-033", "name": "轴承", "quantity": 8, "unit": "件", "confidence": 0.88, "status": "normal" }
+]

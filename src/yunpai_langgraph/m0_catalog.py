@@ -61,7 +61,7 @@ def publish_records(
             if endpoint.endswith("/validate") and isinstance(result, dict) and result.get("publishable") is False:
                 return {"status": "rejected", "published": 0, "validation": result}
         # A successful HTTP response is not proof that canonical facts were
-        # persisted.  The dedicated 39092 backend returns these counters from
+        # persisted.  The dedicated M0 backend returns these counters from
         # its transaction/readback boundary; reject ambiguous responses so a
         # candidate Gate cannot be marked complete while PostgreSQL is empty.
         required_counts = ("approved_candidates", "ledger_count", "outbox_count")

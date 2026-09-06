@@ -306,7 +306,7 @@
 
 ### `send_m4_purchase_order`
 
-[LEGACY/LOCAL] 旧版采购单发送记录，仅供无 TaskID 的本地兼容流程；39085 受控流程禁止调用。受控流程必须使用采购单审核、独立邮件审核和 record-simulated，且不得据此生成到货或库存事实。
+[LEGACY/LOCAL] 旧版采购单发送记录，仅供无 TaskID 的本地兼容流程；受控流程禁止调用。受控流程必须使用采购单审核、独立邮件审核和 record-simulated，且不得据此生成到货或库存事实。
 
 - 类型：`tool`
 - 执行：`sync`

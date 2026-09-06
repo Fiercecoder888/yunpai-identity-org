@@ -1,0 +1,133 @@
+{
+  "workflow_id": "m2-run-001",
+  "status": "human_input_required",
+  "run_id": "frontend-mock-m2-run",
+  "bom_generation": {
+    "standard_bom": {
+      "bom_header": [
+        {
+          "bom_id": "FG-USBC-1M-BLK-DRAFT-EBOM",
+          "bom_type": "EBOM",
+          "parent_item": "FG-USBC-1M-BLK",
+          "parent_revision": "DRAFT",
+          "parent_name": "USB-C 1M 黑色零售数据线",
+          "base_qty": 1,
+          "uom": "PCS",
+          "status": "DRAFT",
+          "effective_from": "2026-07-15",
+          "source_basis": "structured_history_wiki:usb_c_history.xlsx/USB-C 1M",
+          "confidence": "ESTIMATED"
+        }
+      ],
+      "bom_lines": [
+        {
+          "bom_id": "FG-USBC-1M-BLK-DRAFT-EBOM",
+          "line_no": 10,
+          "component_item": "CBL-USBC-1M",
+          "component_revision": "DRAFT",
+          "component_name": "USB-C cable assembly",
+          "qty_per": 1,
+          "uom": "PCS",
+          "scrap_pct": 0,
+          "item_category": "assembly",
+          "supply_type": "MAKE",
+          "notes": "historical_reference_only"
+        },
+        {
+          "bom_id": "FG-USBC-1M-BLK-DRAFT-EBOM",
+          "line_no": 20,
+          "component_item": "PKG-PE-BAG",
+          "component_revision": "DRAFT",
+          "component_name": "PE bag",
+          "qty_per": 1,
+          "uom": "PCS",
+          "scrap_pct": 0,
+          "item_category": "packaging",
+          "supply_type": "BUY",
+          "notes": "historical_reference_only"
+        }
+      ],
+      "item_master": [],
+      "assumptions": []
+    }
+  },
+  "sop_generation": {
+    "status": "demo_not_for_release",
+    "run_id": "frontend-mock-m2-run_sop",
+    "product_name": "USB-C 1M 黑色零售数据线",
+    "part_no": "FG-USBC-1M-BLK",
+    "document_no": "SOP-USBC-1M-BLK-001",
+    "station": "包装工站",
+    "generation_sequence": [
+      "parse_requirement",
+      "fill_word_tables",
+      "build_structured_flowchart",
+      "render_center_flowchart_png",
+      "validate_docx"
+    ],
+    "model": {
+      "content_source": "structured_request",
+      "normalization": {
+        "shape_normalization": [
+          {
+            "id": "OP01",
+            "name": "来料核对",
+            "model_shape": "diamond",
+            "rendered_shape": "diamond",
+            "changed": false
+          },
+          {
+            "id": "OP02",
+            "name": "线材盘绕",
+            "model_shape": "ellipse",
+            "rendered_shape": "ellipse",
+            "changed": false
+          },
+          {
+            "id": "OP03",
+            "name": "装箱",
+            "model_shape": "ellipse",
+            "rendered_shape": "ellipse",
+            "changed": false
+          }
+        ]
+      }
+    },
+    "validation": {
+      "top_level_tables": 8,
+      "has_png_media": true,
+      "contains_demo_boundary": true
+    },
+    "artifacts": {
+      "document_docx": "/app/outputs/mock/sop.docx",
+      "center_flowchart_png": "/app/outputs/mock/center_flowchart.png",
+      "parsed_sop_json": "/app/outputs/mock/parsed_sop.json",
+      "format_check_json": "/app/outputs/mock/format_check.json"
+    },
+    "warnings": [],
+    "ai_boundary": "demo_not_for_release; site measurements and human signoff are required"
+  },
+  "open_customer_questions": [
+    {
+      "question_id": "bomq-mock",
+      "question": "请确认旧物料编号是正式主编号还是历史别名。",
+      "field": "old_code_policy",
+      "blocking": true,
+      "reason": "旧码不能自动成为新主编号。",
+      "source": "template_onboarding"
+    }
+  ],
+  "artifacts": {
+    "bom_response_json": "/app/outputs/mock/bom_generation_response.json",
+    "bom_lines_csv": "/app/outputs/mock/bom_lines.csv",
+    "source_style_bom_xlsx": "/app/outputs/mock/source_style_bom.xlsx",
+    "sop_docx": "/app/outputs/mock/sop.docx",
+    "sop_center_flowchart_png": "/app/outputs/mock/center_flowchart.png",
+    "sop_parsed_sop_json": "/app/outputs/mock/parsed_sop.json",
+    "sop_format_check_json": "/app/outputs/mock/format_check.json"
+  },
+  "completeness_check": {
+    "bom_has_header_lines_item_master": true,
+    "sop_has_docx_png_manifest_parsed": true
+  }
+}

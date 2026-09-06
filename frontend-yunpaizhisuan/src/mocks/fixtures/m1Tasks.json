@@ -1,0 +1,22 @@
+[
+  {
+    "id": "M1-TASK-001",
+    "filename": "订单图纸-A102.pdf",
+    "status": "need_review",
+    "progress": 92,
+    "fileStatus": [
+      { "filename": "订单图纸-A102.pdf", "status": "need_review" },
+      { "filename": "补充图片-A102.png", "status": "completed" }
+    ]
+  },
+  {
+    "id": "M1-TASK-002",
+    "filename": "合同扫描件.zip",
+    "status": "running",
+    "progress": 48,
+    "fileStatus": [
+      { "filename": "合同-1.pdf", "status": "running" },
+      { "filename": "合同-2.pdf", "status": "pending" }
+    ]
+  }
+]

@@ -235,7 +235,7 @@ class YunpaiGraph:
             if step["tool"] == "run_bom_sop_workflow" and isinstance(exc, ToolHTTPError) and exc.code in {"HTTP_UNAVAILABLE", "HTTP_TIMEOUT", "HTTP_STATUS_ERROR", "HTTP_UNAVAILABLE_BACKEND"}:
                 result = {
                     "success": False, "code": "BLOCKED_INPUT",
-                    "errors": [{"code": "M2_MODEL_ENDPOINT_UNAVAILABLE", "message": f"M2 模型/服务端点不可用（{exc.code}）：{str(exc)[:400]}。请检查 M2_MODEL_BASE_URL 是否指向可达的 Qwen 端点（GB10 18085 代理），修复后补充数据重试", "details": []}],
+                    "errors": [{"code": "M2_MODEL_ENDPOINT_UNAVAILABLE", "message": f"M2 模型/服务端点不可用（{exc.code}）：{str(exc)[:400]}。请检查 M2_MODEL_BASE_URL 是否指向可达的 Qwen 端点，修复后补充数据重试", "details": []}],
                     "evidence": [{"module": "m2", "source_ref": step["tool"], "evidence_ref": f"m2:{step['tool']}:endpoint-unavailable", "detail": "M2 模型端点不可用：已停止并转为可恢复数据 Gate，未伪造模型成功"}],
                     "trace_id": f"{state['task_id']}:{step['tool']}",
                 }
@@ -887,7 +887,7 @@ class YunpaiGraph:
                 "bom_items": bom_items,
                 "routing_steps": routing_steps,
                 "requirement_text": str(request.get("requirement_text") or request.get("message") or ""),
-                "rule_package_path": str(request.get("rule_package_path") or "/home/soft/yunpai/prod-39092/app/m8/material_numbering"),
+                "rule_package_path": str(request.get("rule_package_path") or os.getenv("YUNPAI_RULE_PACKAGE_PATH", "runtime/rule_packages/material_numbering")),
                 "document_no": str(request.get("document_no") or m1_header.get("order_number") or product.get("product_code") or "M2-DRAFT"),
                 "history_bom_paths": request.get("history_bom_paths") or [],
                 "history_sop_paths": request.get("history_sop_paths") or [],

@@ -1,0 +1,76 @@
+{
+  "name": "yunpaizhisuan-fe-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "packageManager": "pnpm@10.14.0",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:docker-api": "node scripts/docker-api-smoke.mjs",
+    "test:real-mode-gate": "node scripts/frontend-real-mode-gate.mjs",
+    "test:real-e2e-topology-gate": "node scripts/frontend-real-e2e-topology-gate.mjs",
+    "test:build-metadata": "node --test scripts/build-metadata.node-test.mjs",
+    "test:release-provenance": "node scripts/verify-build-provenance.mjs",
+    "test:real-e2e-smoke": "node scripts/real-e2e-smoke.mjs",
+    "package:frontend-source": "node scripts/package-frontend-source.mjs",
+    "verify": "node scripts/verify.mjs",
+    "test:audit": "node scripts/audit-gate.mjs",
+    "sbom": "node scripts/sbom.mjs",
+    "test:provenance-gate": "node --test scripts/provenance-gate.node-test.mjs",
+    "test:chat-evidence": "node scripts/chat-evidence-gate.mjs --validate",
+    "test:p0-quality-gate": "node scripts/p0-quality-gate.mjs",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "openapi:generate": "openapi-typescript ./openapi.json -o src/generated/api.d.ts"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^5.6.1",
+    "@ant-design/x": "^1.4.0",
+    "@tanstack/react-query": "^5.80.7",
+    "@xyflow/react": "^12.6.4",
+    "antd": "^5.26.2",
+    "echarts": "^5.6.0",
+    "msw": "^2.10.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.2",
+    "zod": "^3.25.67",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.29.0",
+    "@playwright/test": "^1.53.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.0.3",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.5.2",
+    "eslint": "^9.29.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^15.15.0",
+    "jsdom": "^26.1.0",
+    "openapi-typescript": "^7.8.0",
+    "playwright": "^1.63.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.34.1",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.3"
+  },
+  "msw": {
+    "workerDirectory": [
+      "public"
+    ]
+  }
+}

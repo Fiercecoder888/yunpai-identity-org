@@ -426,10 +426,10 @@ def build_runtime_registry() -> ToolRegistry:
             for item in os.getenv("YUNPAI_HTTP_MODULES", "m0,m1,m2,m3,m4,m5").split(",")
             if item.strip()
         }
-        # 39092 may keep the M4 business capability inside this process.  The
-        # transport remains HTTP for the other modules, while M4 is served by
-        # the registered Tool handler and does not depend on a foreign M4
-        # container or service token.
+        # This orchestrator may keep the M4 business capability inside this
+        # process.  The transport remains HTTP for the other modules, while M4
+        # is served by the registered Tool handler and does not depend on a
+        # foreign M4 container or service token.
         local_m4 = os.getenv("YUNPAI_LOCAL_M4", "").strip().lower() in {"1", "true", "yes", "on"}
         if local_m4:
             selected.discard("m4")

@@ -1,9 +1,9 @@
-"""39092 专用 M0 Data Backend。
+"""M0 Data Backend（canonical 主数据服务）。
 
-该服务只承载 39092 的上传候选、人工审批、canonical 版本、ledger 和 outbox。
+该服务承载上传候选、人工审批、canonical 版本、ledger 和 outbox。
 本地默认使用 SQLite 进行可回滚开发；部署到 PostgreSQL 时执行
-``migrations/39092_m0_backend_v1.sql``，并把 ``YUNPAI_M0_DB`` 指向专用连接。
-它不读取或迁移 39085/MinerU 数据。
+``migrations/m0_backend_v1.sql``，并把 ``YUNPAI_M0_DB`` 指向专用连接。
+它不读取或迁移历史环境（MinerU 等）数据。
 """
 
 import hashlib
@@ -225,7 +225,7 @@ class M0Store:
 
 
 class PostgresM0Store:
-    """PostgreSQL implementation using the same 39092-only table contract."""
+    """PostgreSQL implementation using the same M0 table contract."""
 
     def __init__(self, dsn: str):
         try:
@@ -234,7 +234,7 @@ class PostgresM0Store:
             raise RuntimeError("PostgreSQL backend requires psycopg2") from exc
         self._psycopg2 = psycopg2
         self.dsn = dsn
-        self.path = "postgresql://yunpai_39092_m0@127.0.0.1/yunpai_39092_m0"
+        self.path = "postgresql://yunpai_m0@127.0.0.1/yunpai_m0"
         self._init()
 
     def _connect(self):
@@ -246,8 +246,8 @@ class PostgresM0Store:
         ).replace("INTEGER", "INTEGER")
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("CREATE SCHEMA IF NOT EXISTS yunpai_39092_m0")
-                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("CREATE SCHEMA IF NOT EXISTS yunpai_m0")
+                cur.execute("SET search_path TO yunpai_m0")
                 # Keep the deployed schema text-safe and independent from old M0.
                 cur.execute("""CREATE TABLE IF NOT EXISTS import_batches (
                     batch_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, task_id TEXT NOT NULL,
@@ -286,7 +286,7 @@ class PostgresM0Store:
         batch_id, now = uuid4().hex[:16], _now()
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("SET search_path TO yunpai_m0")
                 cur.execute("INSERT INTO import_batches VALUES (%s,%s,%s,%s,%s,%s)",
                             (batch_id, tenant_id, task_id, "awaiting_review", now, now))
                 for item in records:
@@ -312,7 +312,7 @@ class PostgresM0Store:
     def publish(self, batch_id: str, *, actor: str, reason: str = "", human_override: bool = False) -> dict[str, Any]:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("SET search_path TO yunpai_m0")
                 cur.execute("SELECT * FROM import_batches WHERE batch_id=%s", (batch_id,))
                 batch = cur.fetchone()
                 if not batch:
@@ -353,7 +353,7 @@ class PostgresM0Store:
     def readback(self, batch_id: str) -> dict[str, Any]:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("SET search_path TO yunpai_m0")
                 cur.execute("""SELECT e.entity_id,e.entity_type,e.canonical_key,v.version,v.payload_json,v.checksum
                     FROM canonical_entities e JOIN canonical_entity_versions v ON v.entity_id=e.entity_id AND v.version=e.current_version
                     JOIN canonical_ledger l ON l.entity_id=e.entity_id AND l.version=v.version WHERE l.batch_id=%s""", (batch_id,))
@@ -367,7 +367,7 @@ class PostgresM0Store:
     def list_entities(self, entity_type: str, tenant_id: str = "default") -> dict[str, Any]:
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SET search_path TO yunpai_39092_m0")
+                cur.execute("SET search_path TO yunpai_m0")
                 cur.execute("""SELECT e.entity_id,e.entity_type,e.canonical_key,v.version,v.payload_json,v.checksum
                     FROM canonical_entities e JOIN canonical_entity_versions v ON v.entity_id=e.entity_id AND v.version=e.current_version
                     WHERE e.entity_type=%s AND e.tenant_id=%s AND e.lifecycle_status='active' ORDER BY e.canonical_key""",
@@ -382,13 +382,13 @@ class PostgresM0Store:
 def create_app():
     from fastapi import FastAPI, Header, Request
 
-    app = FastAPI(title="Yunpai 39092 M0 Data Backend", version="1.0.0")
-    postgres_dsn = os.getenv("YUNPAI_39092_M0_POSTGRES_DSN")
-    store = PostgresM0Store(postgres_dsn) if postgres_dsn else M0Store(os.getenv("YUNPAI_M0_DB", "runtime/yunpai-39092-m0.sqlite"))
+    app = FastAPI(title="Yunpai M0 Data Backend", version="1.0.0")
+    postgres_dsn = os.getenv("YUNPAI_M0_POSTGRES_DSN")
+    store = PostgresM0Store(postgres_dsn) if postgres_dsn else M0Store(os.getenv("YUNPAI_M0_DB", "runtime/yunpai-m0.sqlite"))
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "service": "yunpai-39092-m0", "database": store.path}
+        return {"status": "ok", "service": "yunpai-m0", "database": store.path}
 
     @app.post("/api/m0/catalog/ingest/validate")
     async def validate(body: dict[str, Any]):
@@ -399,7 +399,7 @@ def create_app():
     async def import_upload(request: Request):
         raw_body = await request.body()
         form = await request.form()
-        print("39092-m0 upload", request.headers.get("content-type"), len(raw_body), len(form), flush=True)
+        print("m0 upload", request.headers.get("content-type"), len(raw_body), len(form), flush=True)
         files = [
             value for _, value in form.multi_items()
             if hasattr(value, "read") and hasattr(value, "filename")
@@ -427,7 +427,7 @@ def create_app():
                         "content_b64": item["content_b64"],
                     })
         tenant_id = request.headers.get("x-yunpai-tenant-id", "default")
-        task_id = request.headers.get("x-yunpai-task-id", "39092")
+        task_id = request.headers.get("x-yunpai-task-id", "default")
         return store.ingest(records, tenant_id=tenant_id, task_id=task_id)
 
     @app.post("/api/m0/import/batch/{batch_id}/commit")
@@ -449,7 +449,7 @@ def create_app():
     async def publish(body: dict[str, Any], x_yunpai_principal: str | None = Header(None)):
         records = body.get("records") if isinstance(body.get("records"), list) else []
         approval = body.get("approval") if isinstance(body.get("approval"), dict) else {}
-        result = store.ingest(records, tenant_id="default", task_id=str(body.get("task_id") or "39092"))
+        result = store.ingest(records, tenant_id="default", task_id=str(body.get("task_id") or "default"))
         return {"data": store.publish(
             result["batch_id"],
             actor=str(approval.get("approved_by") or x_yunpai_principal or "operator"),

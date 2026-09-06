@@ -1,0 +1,53 @@
+[
+  {
+    "id": 201,
+    "purchase_order_no": "PO-20260703-001",
+    "supplier_name": "华东五金供应商",
+    "status": "pending_send",
+    "required_date": "2026-07-15",
+    "items": [
+      {
+        "id": 301,
+        "item_code": "MAT-001",
+        "item_name": "轴承",
+        "quantity": "100",
+        "unit": "pcs",
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "id": 202,
+    "purchase_order_no": "PO-20260703-002",
+    "supplier_name": "华南电子供应商",
+    "status": "parse_pending_review",
+    "required_date": "2026-07-18",
+    "items": [
+      {
+        "id": 302,
+        "item_code": "MAT-002",
+        "item_name": "传感器",
+        "quantity": "60",
+        "unit": "pcs",
+        "status": "replied"
+      }
+    ]
+  },
+  {
+    "id": 203,
+    "purchase_order_no": "PO-20260703-003",
+    "supplier_name": "西南机加供应商",
+    "status": "tracking",
+    "required_date": "2026-07-16",
+    "items": [
+      {
+        "id": 303,
+        "item_code": "MAT-003",
+        "item_name": "联轴器",
+        "quantity": "24",
+        "unit": "set",
+        "status": "confirmed"
+      }
+    ]
+  }
+]

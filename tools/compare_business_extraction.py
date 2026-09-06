@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import shlex
 import re
 import subprocess
@@ -10,17 +11,21 @@ from pathlib import Path
 
 import httpx
 
-ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else "/Volumes/外置硬盘/云湃业务数据")
-BASE_URL = "http://192.168.110.19:39092/api"
-SSH_KEY = "/Users/murkydoubloon45/.ssh/id_ed25519_company"
-SSH_TARGET = "wjc@192.168.110.19"
+if len(sys.argv) > 1:
+    ROOT = Path(sys.argv[1])
+else:
+    sys.exit("用法: python tools/compare_business_extraction.py <业务数据根目录>")
+BASE_URL = os.getenv("YUNPAI_API_BASE", "http://127.0.0.1:9000/api")
+SSH_KEY = os.getenv("YUNPAI_SSH_KEY", os.path.expanduser("~/.ssh/id_ed25519"))
+SSH_TARGET = os.getenv("YUNPAI_SSH_TARGET", "127.0.0.1")
+REMOTE_CATALOG_DB = os.getenv("YUNPAI_REMOTE_CATALOG_DB", "runtime/yunpai-business-catalog.sqlite")
 EXTENSIONS = (".xlsx", ".xls", ".csv", ".tsv", ".json", ".md", ".txt", ".docx", ".pdf", ".dwg", ".zip", ".rar", ".et", ".ps1", ".py", ".7z")
 
 
 def remote_extraction(batch_id: str) -> dict:
     code = (
         "import sqlite3,json;"
-        "c=sqlite3.connect('/home/wjc/yunpai-langgraph/current/runtime/yunpai-business-catalog.sqlite');"
+        f"c=sqlite3.connect({REMOTE_CATALOG_DB!r});"
         "r=c.execute('select metadata_json from source_files where batch_id=? order by filename',("
         + repr(batch_id)
         + ",)).fetchall();"

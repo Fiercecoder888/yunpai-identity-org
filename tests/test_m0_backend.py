@@ -1,11 +1,11 @@
 from yunpai_langgraph.m0_backend import M0Store
 
 
-def test_39092_m0_backend_publishes_and_reads_back(tmp_path):
+def test_m0_backend_publishes_and_reads_back(tmp_path):
     store = M0Store(tmp_path / "m0.sqlite")
     batch = store.ingest(
-        [{"filename": "order.json", "entity_type": "order", "order_id": "SO-39092", "product_code": "W-H909"}],
-        tenant_id="tenant-39092",
+        [{"filename": "order.json", "entity_type": "order", "order_id": "SO-001", "product_code": "W-H909"}],
+        tenant_id="tenant-main",
         task_id="task-1",
     )
     result = store.publish(
@@ -35,19 +35,19 @@ def test_list_entities_reads_back_approved_resources_by_type(tmp_path):
          "person_code": "P-01", "skill_codes": ["stamping"],
          "calendar_ref": "CAL-A", "status": "available"},
     ]
-    batch = store.ingest(records, tenant_id="tenant-39092", task_id="task-2")
+    batch = store.ingest(records, tenant_id="tenant-main", task_id="task-2")
     result = store.publish(batch["batch_id"], actor="reviewer-1", reason="资源事实经人工审批")
     assert result["status"] == "published"
 
-    equipment = store.list_entities("equipment_master", tenant_id="tenant-39092")
+    equipment = store.list_entities("equipment_master", tenant_id="tenant-main")
     assert equipment["count"] == 1
     assert equipment["entities"][0]["canonical_key"] == "EQ-01"
     assert equipment["entities"][0]["payload_json"]["capacity_per_hour"] == "120"
 
-    stations = store.list_entities("station_master", tenant_id="tenant-39092")
+    stations = store.list_entities("station_master", tenant_id="tenant-main")
     assert stations["count"] == 1
     assert stations["entities"][0]["payload_json"]["station_code"] == "ST-01"
 
     # 未审批或其它 entity_type 不应串读
-    assert store.list_entities("production_calendar", tenant_id="tenant-39092")["count"] == 0
+    assert store.list_entities("production_calendar", tenant_id="tenant-main")["count"] == 0
     assert store.list_entities("equipment_master", tenant_id="other-tenant")["count"] == 0

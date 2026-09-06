@@ -1,0 +1,60 @@
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--yp-space-md);
+}
+
+.canvas {
+  width: 100%;
+  height: 400px;
+  min-height: 400px;
+  margin-bottom: var(--yp-space-md);
+  border: 1px solid var(--yp-color-border);
+  border-radius: var(--yp-radius-md);
+  background: var(--yp-color-surface);
+}
+
+.node {
+  width: 210px;
+  padding: var(--yp-space-sm);
+  border: 2px solid var(--yp-color-border);
+  border-radius: var(--yp-radius-md);
+  background: var(--yp-color-surface);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.nodeSelected {
+  border-color: var(--yp-color-primary);
+}
+
+.nodeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--yp-space-sm);
+  margin-bottom: var(--yp-space-sm);
+}
+
+.nodeTitle {
+  overflow: hidden;
+  color: var(--yp-color-text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeMeta {
+  display: flex;
+  min-height: 68px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--yp-space-xs);
+  margin-bottom: var(--yp-space-sm);
+  color: var(--yp-color-text-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.drawerStack {
+  width: 100%;
+}

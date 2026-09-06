@@ -8,7 +8,6 @@ M1 是独立领域服务；Orchestrator 不内置任何完整 M1 解析、TaskSt
 历史完整实现（任务书阶段 B 的主要来源）：
 
 ```text
-本地历史仓库：/Users/murkydoubloon45/Desktop/yunpai/yunpai-t8-extract-panel/m1
 交接归档：handoff/m1-tool-skill-completion-20260904/sources/t8-m1-clean.tar.gz
 ```
 
@@ -40,8 +39,9 @@ export M1_API_KEY=...                      # 作为 X-API-Key 头发送
 export M1_POLL_BUDGET_S=90
 ```
 
-`ops/gb10/start_backend.sh` 已把默认模块改为 `m1,m2` 并给出 `M1_URL` 默认值。
-若本机还没有运行 M1 服务，可临时用 `YUNPAI_HTTP_MODULES=m2` 保留旧本地 fixture 演示路径。
+默认部署是全本地（`ops/deploy/start_backend.sh`，transport=local、无 HTTP 模块）。
+需要接入真实 M1 服务时显式开启：`YUNPAI_TOOL_TRANSPORT=http YUNPAI_HTTP_MODULES=m1 M1_URL=http://127.0.0.1:8080`；
+未运行 M1 服务时保持本地 fixture 路径即可。
 
 ## 3. 传输与安全要点（本适配实现/测试覆盖）
 

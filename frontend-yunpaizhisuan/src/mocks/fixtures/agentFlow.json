@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    { "id": "m1", "label": "M1 多模态识别", "module": "M1", "status": "waiting_human" },
+    { "id": "m2", "label": "M2 BOM/SOP", "module": "M2", "status": "idle" },
+    { "id": "m4", "label": "M4 采购追踪", "module": "M4", "status": "running" },
+    { "id": "m5", "label": "M5 PMC 排程", "module": "M5", "status": "running" }
+  ],
+  "edges": [
+    { "id": "m1-m2", "source": "m1", "target": "m2" },
+    { "id": "m2-m4", "source": "m2", "target": "m4" },
+    { "id": "m4-m5", "source": "m4", "target": "m5" }
+  ]
+}

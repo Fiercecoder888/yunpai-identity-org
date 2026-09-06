@@ -3,7 +3,7 @@
 
 用法:
     .venv/bin/python scripts/upload_pmc_fixture_to_m0.py <fixture.json> \
-        [--db runtime/yunpai-39092-m0.sqlite] [--tenant tenant-39092]
+        [--db runtime/yunpai-m0.sqlite] [--tenant tenant-main]
 
 将 fixture 的 Machine/Station/Worker/WorkerQualification/Tooling/WorkerCalendar
 映射为 M0 的 equipment_master/station_master/worker_master/tooling_master/
@@ -11,7 +11,7 @@ production_calendar 实体，并附带 Order，ingest + publish 后 list_entitie
 
 注意：本数据包为 test_only 合成数据（fixture_metadata.promotion_to_production_allowed=false），
 所有资源实体统一保留 value_origin=synthetic_fixture 与 production_use_allowed=false，
-仅用于「39092 系统链路验收」，不得作为真实生产事实。
+仅用于「系统链路验收」，不得作为真实生产事实。
 """
 from __future__ import annotations
 
@@ -170,8 +170,8 @@ def build_records(fixture: dict) -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("fixture", help="fixture JSON 路径")
-    ap.add_argument("--db", default="runtime/yunpai-39092-m0.sqlite")
-    ap.add_argument("--tenant", default="tenant-39092")
+    ap.add_argument("--db", default="runtime/yunpai-m0.sqlite")
+    ap.add_argument("--tenant", default="tenant-main")
     args = ap.parse_args()
 
     fixture = json.load(open(args.fixture, encoding="utf-8"))

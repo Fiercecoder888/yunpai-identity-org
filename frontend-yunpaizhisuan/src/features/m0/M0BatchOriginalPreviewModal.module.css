@@ -1,0 +1,79 @@
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  min-height: min(72vh, 680px);
+  max-height: min(78vh, 760px);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.fileSelect {
+  min-width: min(440px, 60vw);
+}
+
+.previewArea {
+  flex: 1;
+  min-height: 0;
+  padding-top: 12px;
+}
+
+.frameWrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: min(60vh, 560px);
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 20px;
+  background: #fff;
+}
+
+.frame {
+  width: 100%;
+  height: 100%;
+  min-height: min(60vh, 560px);
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.fallback {
+  display: flex;
+  min-height: min(48vh, 420px);
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 640px) {
+  .modalBody {
+    min-height: 72vh;
+  }
+
+  .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .fileSelect {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .frameWrap,
+  .frame {
+    min-height: 56vh;
+  }
+}

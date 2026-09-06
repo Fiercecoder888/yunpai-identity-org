@@ -36,7 +36,7 @@ def _state():
     doc = {"order_id": "SO-1", "product_code": "P-1", "quantity": 2, "due_date": "2026-09-10"}
     encoded = base64.b64encode(json.dumps(doc).encode()).decode()
     return {
-        "task_id": "task-1", "tenant_id": "tenant-39092", "site_id": "default",
+        "task_id": "task-1", "tenant_id": "tenant-main", "site_id": "default",
         "request": {
             "workflow": "m1_m5_document_to_plan", "scenario_purpose": "production",
             "document": {"_encoded": encoded, **doc},
@@ -75,7 +75,7 @@ def _state():
 
 def test_bridge_assembles_six_class_bundle_with_m0_resource_facts(tmp_path, monkeypatch):
     store = M0Store(tmp_path / "m0.sqlite")
-    batch = store.ingest(RESOURCE_RECORDS, tenant_id="tenant-39092", task_id="t")
+    batch = store.ingest(RESOURCE_RECORDS, tenant_id="tenant-main", task_id="t")
     store.publish(batch["batch_id"], actor="reviewer", reason="审批资源")
 
     def _read(state, entity_type):
@@ -123,7 +123,7 @@ async def test_full_m0_to_m5_graph_completes_with_m0_resources(tmp_path, monkeyp
     monkeypatch.setenv("YUNPAI_M5_DB", str(tmp_path / "m5.sqlite"))
 
     store = M0Store(tmp_path / "m0.sqlite")
-    batch = store.ingest(RESOURCE_RECORDS, tenant_id="tenant-39092", task_id="t")
+    batch = store.ingest(RESOURCE_RECORDS, tenant_id="tenant-main", task_id="t")
     store.publish(batch["batch_id"], actor="reviewer", reason="审批资源")
 
     def _read(state, entity_type):
@@ -154,7 +154,7 @@ async def test_full_m0_to_m5_graph_completes_with_m0_resources(tmp_path, monkeyp
         "setup_matrix": {"OP-1": {"OP-1": 0}},
     }
     graph = YunpaiGraph()
-    state = await graph.run(new_state(request, tenant_id="tenant-39092"))
+    state = await graph.run(new_state(request, tenant_id="tenant-main"))
     while state["status"] == "waiting_human":
         gate_type = state["pending_gate"]["type"]
         if gate_type == "procurement":

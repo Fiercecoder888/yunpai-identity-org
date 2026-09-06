@@ -1,0 +1,5 @@
+[
+  { "id": "SOP-1", "title": "来料检查", "equipment": "检验台", "durationMinutes": 30, "note": "核对物料编码、数量和外观状态。" },
+  { "id": "SOP-2", "title": "CNC 粗加工", "equipment": "CNC-02", "durationMinutes": 180, "note": "按工艺卡设置夹具和加工参数。" },
+  { "id": "SOP-3", "title": "表面处理", "equipment": "阳极氧化线", "durationMinutes": null, "note": "工时待工艺工程师确认。" }
+]

@@ -1,0 +1,54 @@
+{
+  "status": "demo_not_for_release",
+  "metadata": {
+    "product_name": "USB-C 1M 黑色零售数据线",
+    "part_no": "FG-USBC-1M-BLK",
+    "document_no": "SOP-USBC-1M-BLK-001",
+    "station": "包装工站",
+    "version": "DRAFT"
+  },
+  "operation_order": "来料核对 -> 线材盘绕 -> 装箱",
+  "step_slots": [
+    {
+      "slot_no": 1,
+      "title": "来料核对",
+      "description": "按来料核对要求执行并记录异常",
+      "visual_type": "inspection"
+    },
+    {
+      "slot_no": 2,
+      "title": "线材盘绕",
+      "description": "按线材盘绕要求执行并记录异常",
+      "visual_type": "process"
+    },
+    {
+      "slot_no": 3,
+      "title": "装箱",
+      "description": "按装箱要求执行并记录异常",
+      "visual_type": "pack"
+    }
+  ],
+  "ie_time_study_rows": [
+    {
+      "action": "来料核对",
+      "machine_model": "封口机",
+      "standard_time_s": "11.0",
+      "time_source": "draft_estimate_not_for_release"
+    },
+    {
+      "action": "线材盘绕",
+      "machine_model": "标签打印机",
+      "standard_time_s": "13.2",
+      "time_source": "draft_estimate_not_for_release"
+    },
+    {
+      "action": "装箱",
+      "machine_model": "待确认",
+      "standard_time_s": "22.0",
+      "time_source": "draft_estimate_not_for_release"
+    }
+  ],
+  "notes": [
+    "结构化需求生成；demo_not_for_release"
+  ]
+}

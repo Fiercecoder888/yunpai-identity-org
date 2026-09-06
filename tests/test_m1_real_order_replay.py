@@ -1,7 +1,7 @@
 """真实订单结构回放：HTTP Adapter 补充候选 + review Gate + 本地图重放。
 
 用例使用 test_order_semantics.real_order_twin_bytes() 的**同构合成工作簿**
-复现 GB10 run-5b4eeb48 输入结构（真实样本本身不进仓库）；断言：
+复现实测 run 的输入结构（真实样本本身不进仓库）；断言：
 1. 外部 M1 返回“订单但 0 行/缺订单号”时，Adapter 附加本地确定性候选且
    保留外部原结果，并强制 needs_review；
 2. Reviewer 对该结果打开 type=review Gate；

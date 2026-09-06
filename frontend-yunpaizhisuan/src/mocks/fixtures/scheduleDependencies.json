@@ -1,0 +1,4 @@
+[
+  { "id": "DEP-1", "predecessorId": "SCH-1", "successorId": "SCH-2", "type": "finish_to_start", "lagDays": 0 },
+  { "id": "DEP-2", "predecessorId": "SCH-2", "successorId": "SCH-3", "type": "start_to_start", "lagDays": 1 }
+]
