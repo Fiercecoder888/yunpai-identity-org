@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import os
 import re
 from typing import Any
 
@@ -64,8 +66,20 @@ class PlannerAgent:
     async def aplan(self, request: dict[str, Any], registry: ToolRegistry) -> dict[str, Any]:
         """Ask Qwen for an intent/route proposal, then validate it against local contracts."""
         fallback = self._deterministic_plan(request, registry, self.skills)
-        model_result = await self.router.classify(request, registry)
         explicit_workflow = str(request.get("workflow") or "").strip()
+        # 无显式 workflow/tool/skill 且带非订单文件附件时，走 agent 识别分支：
+        # sample_file 采样 → map_to_canonical（多模态理解映射）→ ingest_canonical 落库。
+        # agent 不可用/低置信/映射失败时返回 None，回落到 classify + 确定性兜底
+        # （business_catalog 写死规则，仅作兜底）。
+        has_explicit_route = bool(
+            request.get("workflow") or request.get("tool") or request.get("skill")
+            or isinstance(request.get("tools"), list)
+        )
+        if explicit_workflow not in KNOWN_WORKFLOWS and not has_explicit_route and self._has_unrouted_file(request):
+            recognition = await self._agent_recognize_plan(request, registry)
+            if recognition is not None:
+                return recognition
+        model_result = await self.router.classify(request, registry)
         # An explicit workflow selection is authoritative. Attachments with
         # kind=master_data must not divert an end-to-end run to the business
         # data identification Skill.
@@ -152,6 +166,65 @@ class PlannerAgent:
             return True
         positions = [SKILL_USAGE_ORDER.index(name) for name in skill_names if name in SKILL_USAGE_ORDER]
         return positions == sorted(positions)
+
+    @staticmethod
+    def _has_unrouted_file(request: dict[str, Any]) -> bool:
+        """是否带「非订单、有 content_b64」的文件附件（订单走确定性主链，不识别）。"""
+        files = list(request.get("documents") or []) + list(request.get("attachments") or [])
+        contentful = [item for item in files if isinstance(item, dict) and item.get("content_b64")]
+        if not contentful:
+            return False
+        return any(str(item.get("kind") or "") != "order" for item in contentful)
+
+    async def _agent_recognize_plan(self, request: dict[str, Any], registry: ToolRegistry) -> dict[str, Any] | None:
+        """采样 + map_to_canonical（多模态理解映射）→ ingest_canonical 落库编排。
+
+        全程 agent 理解自主决策，不碰 business_catalog 写死规则；agent 不可用/
+        低置信/映射失败时返回 None 交给确定性兜底。
+        """
+        from .recognized_store import sample_file
+
+        files = [
+            item for item in list(request.get("documents") or []) + list(request.get("attachments") or [])
+            if isinstance(item, dict) and item.get("content_b64") and str(item.get("kind") or "") != "order"
+        ]
+        if not files:
+            return None
+        target = files[0]
+        try:
+            raw = base64.b64decode(str(target["content_b64"]), validate=True)
+        except (ValueError, TypeError):
+            return None
+        sample = sample_file(raw, str(target.get("filename") or "document.bin"))
+        if not sample.get("content_sampled"):
+            return None
+        result = await self.router.map_to_canonical(sample)
+        decision = result.get("decision") if result.get("ok") else None
+        if not isinstance(decision, dict):
+            return None
+        entity_type = str(decision.get("entity_type") or "")
+        records = decision.get("records")
+        confidence = float(decision.get("confidence") or 0.0)
+        threshold = float(os.getenv("YUNPAI_RECOGNITION_CONFIDENCE_THRESHOLD", "0.7"))
+        needs_review = bool(decision.get("needs_review")) or confidence < threshold
+        if not entity_type or not isinstance(records, list) or not records or needs_review:
+            return None
+        request.setdefault("payloads", {})["ingest_canonical"] = {
+            "entity_type": entity_type,
+            "records": records,
+            "filename": str(sample.get("filename") or target.get("filename") or ""),
+            "sha256": str(target.get("sha256") or sample.get("sha256") or ""),
+            "confidence": confidence,
+        }
+        steps = [{"id": "free-0", "module": "m0", "tool": "ingest_canonical", "mode": "free", "http_method": "POST"}]
+        return {
+            "route": "free",
+            "steps": steps,
+            "reason": f"agent 识别文件为 {entity_type}（confidence={confidence:.2f}）：{decision.get('reason') or ''}",
+            "intent": {"name": f"识别:{entity_type}", "confidence": confidence, "source": "agent_recognition"},
+            "route_decision": {"source": "agent_recognition", "model_status": result.get("status"), "model_proposal": decision},
+            "model": result.get("model", {}),
+        }
 
     def _deterministic_plan(self, request: dict[str, Any], registry: ToolRegistry, skills: SkillRegistry | None = None) -> dict[str, Any]:
         text = str(request.get("message") or request.get("task") or "").lower()
@@ -268,6 +341,9 @@ class ReviewerAgent:
     _POST_REVIEWED_DRAFT_TOOLS = {
         "data_import_run", "business-data-identification", "ingest_document", "run_bom_sop_workflow", "solve_scheduling",
     }
+    # 本地识别四件套：只写自描述/本地 canonical 表（幂等/可回滚）或只读，无外部副作用，
+    # 不做 pre-execution 授权门（低置信已在 planner 识别分支拦下）。
+    _SAFE_LOCAL_TOOLS = {"sample_file", "ingest_recognized", "query_recognized_table", "ingest_canonical"}
     _READ_ONLY_SKILL_OPERATIONS = {
         "yunpai-m0-data-foundation": {"preview"},
         "yunpai-m1-document-parser": M1_READ_ONLY_SKILL_OPERATIONS,
@@ -287,6 +363,8 @@ class ReviewerAgent:
             operation = str(skill_payload.get("operation") or "default") if isinstance(skill_payload, dict) else "default"
             if operation in self._READ_ONLY_SKILL_OPERATIONS.get(str(step["tool"]), set()):
                 return None
+        if step["tool"] in self._SAFE_LOCAL_TOOLS:
+            return None
         method = str(step.get("http_method") or "POST").upper()
         if method not in {"GET", "HEAD", "OPTIONS"} and step["tool"] not in self._POST_REVIEWED_DRAFT_TOOLS:
             return {

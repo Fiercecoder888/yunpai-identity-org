@@ -121,6 +121,46 @@
       "side_effect": "none",
       "review_gate": "none",
       "execution": "sync"
+    },
+    {
+      "name": "ingest_canonical",
+      "description": "把 agent 映射后的 canonical 记录落库（我们自己的格式）。确定性安全网：schema 校验（字段名/必填/类型）、身份类 PII 遮罩、sha256 幂等。数值型业务字段（数量/单价/库存）不遮罩，供后续模块计算。只写自描述 canonical 表，生产 transport 下由 M0 facade 接管。",
+      "input_schema": {
+        "type": "object",
+        "required": ["entity_type", "records"],
+        "properties": {
+          "entity_type": { "type": "string", "description": "canonical 实体类型（material/inventory/equipment/station/worker/supplier/tooling/route/order/product/bom/operation/calendar/document 等）。" },
+          "records": { "type": "array", "items": { "type": "object" }, "description": "已映射到 canonical 字段的记录数组。" },
+          "filename": { "type": "string" },
+          "sha256": { "type": "string", "description": "源文件 sha256（幂等）。" },
+          "confidence": { "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 1.0 },
+          "redact": { "type": "boolean", "default": true }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "success": { "type": "boolean" },
+          "code": { "type": ["string", "null"] },
+          "data": {
+            "type": "object",
+            "properties": {
+              "inserted_rows": { "type": "integer" },
+              "duplicate": { "type": "boolean" },
+              "sha256": { "type": "string" },
+              "entity_type": { "type": "string" },
+              "redacted_fields": { "type": "integer" }
+            }
+          },
+          "errors": { "type": "array" },
+          "trace_id": { "type": "string" },
+          "evidence": { "type": "array" }
+        }
+      },
+      "capability": "canonical_write",
+      "side_effect": "local_write",
+      "review_gate": "none",
+      "execution": "sync"
     }
   ]
 }

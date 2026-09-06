@@ -91,6 +91,7 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
     verdict = sniff_format(raw, filename)
     headers: list[str] = []
     sample_rows: list[dict[str, Any]] = []
+    images: list[str] = []
     row_count: int | None = None
     fmt = verdict.detected_format
 
@@ -153,15 +154,30 @@ def sample_file(raw: bytes, filename: str, *, max_rows: int = 10) -> dict[str, A
         # 采样失败不伪造；回退到只给嗅探 + 说明。
         headers, sample_rows, row_count = [], [], None
 
+    # 图片/PDF：确定性降采样成 base64，交给多模态 agent 读（不走 OCR）。
+    try:
+        if fmt in {"png", "jpg", "jpeg"}:
+            from .media_sample import downscale_image
+
+            images = [downscale_image(raw)]
+        elif fmt == "pdf":
+            from .media_sample import render_pdf_pages
+
+            images = render_pdf_pages(raw)
+    except Exception:
+        # 渲染失败不伪造内容；agent 退化为只看嗅探 + 说明。
+        images = []
+
     return {
         "filename": filename,
         "sniff": {"detected_format": verdict.detected_format, "mime_type": verdict.mime_type, "match": verdict.match},
         "headers": headers,
         "sample_rows": sample_rows,
+        "images": images,
         "row_count": row_count,
         "size_bytes": len(raw),
         "sha256": hashlib.sha256(raw).hexdigest(),
-        "content_sampled": bool(sample_rows) or bool(headers),
+        "content_sampled": bool(sample_rows) or bool(headers) or bool(images),
     }
 
 

@@ -729,6 +729,27 @@ async def query_recognized_table(payload: dict[str, Any], ctx: dict[str, Any]) -
             "evidence": [_evidence("catalog", "query_recognized_table", f"returned {len(rows)} rows")]}
 
 
+async def ingest_canonical(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """确定性落库：agent 映射后的 canonical 记录，schema 校验 + PII + sha256 幂等。"""
+    from .canonical_ingest import CanonicalLandingStore
+
+    entity_type = str(payload.get("entity_type") or "")
+    filename = str(payload.get("filename") or "")
+    sha256 = str(payload.get("sha256") or "")
+    records = payload.get("records")
+    confidence = float(payload.get("confidence") or 0.0)
+    if not entity_type or not isinstance(records, list):
+        return {"success": False, "code": "MISSING_REQUIRED",
+                "errors": [{"code": "MISSING_REQUIRED", "message": "entity_type/records 必填", "details": []}],
+                "data": {}, "trace_id": _trace(ctx, "ingest_canonical")}
+    store = CanonicalLandingStore(ctx.get("canonical_db"))
+    result = store.ingest(entity_type=entity_type, records=records, filename=filename,
+                          sha256=sha256, confidence=confidence)
+    return {**result,
+            "trace_id": _trace(ctx, "ingest_canonical"),
+            "evidence": [_evidence("catalog", "ingest_canonical", f"{entity_type} rows={result['data'].get('inserted_rows')} dup={result['data'].get('duplicate')}")]}
+
+
 HANDLERS = {
     "data_import_run": m0_import,
     "data_import_status": m0_status,
@@ -763,4 +784,5 @@ HANDLERS = {
     "sample_file": sample_file,
     "ingest_recognized": ingest_recognized,
     "query_recognized_table": query_recognized_table,
+    "ingest_canonical": ingest_canonical,
 }

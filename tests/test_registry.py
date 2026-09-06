@@ -10,17 +10,17 @@ from yunpai_langgraph.m3_m4_tooling import M3_ADAPTER_TOOL_NAMES, M4_ADAPTER_TOO
 from yunpai_langgraph.registry import ToolRegistry, build_default_registry, build_runtime_registry
 
 
-EXPECTED = {"m0": 31, "m1": 17, "m2": 7, "m3": 17, "m4": 26, "m5": 20}
+EXPECTED = {"m0": 32, "m1": 17, "m2": 7, "m3": 17, "m4": 26, "m5": 20}
 
 
 def test_registry_loads_all_original_m0_m5_contracts():
     registry = build_default_registry()
-    assert len(registry.specs) == 118
+    assert len(registry.specs) == 119
     assert {module: len(registry.tools_for(module)) for module in EXPECTED} == EXPECTED
     # 合并 main(M3/M4 adapter) + pmctooldev(M5 PMC v2) + M1 专用 adapter 后真实绑定：
-    # m0 8 + m1 17 + m2 1 + m3 16 + m4 24 + m5 18 = 84；m3/m4 两个 receive_* 排除。
-    # m0 新增 3 个本地识别工具（sample_file/ingest_recognized/query_recognized_table）。
-    assert len(registry.handlers) == 84
+    # m0 9 + m1 17 + m2 1 + m3 16 + m4 24 + m5 18 = 85；m3/m4 两个 receive_* 排除。
+    # m0 新增 4 个本地识别工具（sample_file/ingest_recognized/query_recognized_table/ingest_canonical）。
+    assert len(registry.handlers) == 85
     assert {"data_import_run", "data_import_status", "data_import_preview", "data_import_resolve", "data_import_commit"} <= set(registry.handlers)
     assert all(name in registry.handlers for name in M3_ADAPTER_TOOL_NAMES)
     assert all(name in registry.handlers for name in M4_ADAPTER_TOOL_NAMES)
@@ -88,7 +88,7 @@ def test_catalog_reports_bound_state():
 def test_full_http_runtime_keeps_missing_receivers_unbound(monkeypatch):
     monkeypatch.setenv("YUNPAI_TOOL_TRANSPORT", "http")
     registry = build_runtime_registry()
-    assert len(registry.handlers) == 116
+    assert len(registry.handlers) == 117
     assert "receive_m3_material_demand" not in registry.handlers
     assert "receive_m4_schedule_impact_proposal" not in registry.handlers
 

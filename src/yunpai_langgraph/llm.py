@@ -166,3 +166,111 @@ class QwenRouter:
             "reason": str(value.get("reason") or ""),
             "answer": str(value.get("answer") or ""),
         }
+
+    async def map_to_canonical(self, sample: dict[str, Any]) -> dict[str, Any]:
+        """把文件样本映射成 canonical 记录（多模态：表格看表头/行，图片/PDF 看图）。
+
+        只做「理解 + 映射 + 分类」，数值从文件照抄；结构由调用方经
+        ``canonical_schema.validate_canonical`` 确定性校验。
+        """
+        started = time.perf_counter()
+        metadata = self.config.public()
+        if not self.config.enabled:
+            return {"ok": False, "status": "disabled", "model": {**metadata, "status": "disabled"}}
+        if not self.config.api_key:
+            return {"ok": False, "status": "not_configured", "model": {**metadata, "status": "not_configured"}}
+        try:
+            import httpx
+
+            headers = {"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"}
+            body = {
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": self._canonical_system_prompt()},
+                    {"role": "user", "content": self._canonical_prompt(sample)},
+                ],
+                "temperature": 0,
+                "max_tokens": 2048,
+                "stream": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "response_format": {"type": "json_object"},
+            }
+            async with httpx.AsyncClient(timeout=self.config.timeout_s, trust_env=False) as client:
+                response = await client.post(f"{self.config.base_url}/chat/completions", headers=headers, json=body)
+                response.raise_for_status()
+                payload = response.json()
+            decision = self._parse_canonical(self._content(payload))
+            elapsed = round((time.perf_counter() - started) * 1000, 1)
+            logger.info("qwen.map_to_canonical status=ok model=%s latency_ms=%s entity_type=%s records=%s", self.config.model, elapsed, decision.get("entity_type"), len(decision.get("records", [])))
+            return {"ok": True, "status": "ok", "decision": decision, "model": {**metadata, "status": "ok", "latency_ms": elapsed}}
+        except Exception as exc:
+            elapsed = round((time.perf_counter() - started) * 1000, 1)
+            logger.warning("qwen.map_to_canonical status=error model=%s latency_ms=%s error=%s", self.config.model, elapsed, exc)
+            return {"ok": False, "status": "error", "error": str(exc), "model": {**metadata, "status": "error", "latency_ms": elapsed}}
+
+    @staticmethod
+    def _canonical_system_prompt() -> str:
+        from .canonical_schema import CANONICAL_SCHEMA
+
+        lines = []
+        for entity_type, spec in CANONICAL_SCHEMA.items():
+            lines.append(f"- {entity_type}: 必填[{','.join(spec['required'])}] 允许[{','.join(spec['fields'])}]")
+        schema_text = "\n".join(lines)
+        return (
+            "你是云湃制造系统的数据映射器。根据给定的文件样本（表格看 headers/sample_rows，图片/PDF 直接看图）"
+            "判断业务实体类型，并把内容抽取成我们 canonical 格式的记录。"
+            "只输出一个 JSON 对象，字段为 entity_type、records、confidence、needs_review、reason。"
+            "entity_type 只能是下列之一；records 每条是对象，字段名只能用该类型「允许」集合内的字段；"
+            "数值必须从文件照抄，绝不编造；每条记录可带 _source（sheet/row/col/raw 或 page/image）定位证据。"
+            "confidence 是 0 到 1 浮点；不确定（<0.7）或关键字段缺失时 needs_review=true。reason 一句话说明依据。"
+            "\ncanonical schema：\n" + schema_text
+        )
+
+    @staticmethod
+    def _canonical_prompt(sample: dict[str, Any]) -> list[dict[str, Any]]:
+        text = json.dumps({
+            "filename": str(sample.get("filename") or ""),
+            "detected_format": str((sample.get("sniff") or {}).get("detected_format") or ""),
+            "headers": list(sample.get("headers") or []),
+            "sample_rows": list(sample.get("sample_rows") or []),
+            "row_count": sample.get("row_count"),
+        }, ensure_ascii=False)
+        parts: list[dict[str, Any]] = [
+            {"type": "text", "text": "文件样本：\n" + text + "\n请判断 entity_type 并抽取 canonical 记录。"},
+        ]
+        for image_b64 in (sample.get("images") or []):
+            parts.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + str(image_b64)}})
+        return parts
+
+    @staticmethod
+    def _parse_canonical(content: str) -> dict[str, Any]:
+        from .canonical_schema import CANONICAL_SCHEMA
+
+        cleaned = content.strip()
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+        try:
+            value = json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+            if not match:
+                raise ValueError("Qwen canonical response is not valid JSON")
+            value = json.loads(match.group(0))
+        if not isinstance(value, dict):
+            raise ValueError("Qwen canonical decision must be an object")
+        entity_type = str(value.get("entity_type") or "")
+        if entity_type not in CANONICAL_SCHEMA:
+            raise ValueError(f"invalid entity_type: {entity_type}")
+        records = value.get("records", [])
+        if not isinstance(records, list) or not records or not all(isinstance(record, dict) for record in records):
+            raise ValueError("Qwen records must be a non-empty object array")
+        try:
+            confidence = max(0.0, min(1.0, float(value.get("confidence", 0))))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return {
+            "entity_type": entity_type,
+            "records": records,
+            "confidence": confidence,
+            "needs_review": bool(value.get("needs_review")) or confidence < 0.7,
+            "reason": str(value.get("reason") or ""),
+        }

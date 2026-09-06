@@ -1,0 +1,97 @@
+"""canonical 落库：确定性校验 + 身份 PII 脱敏 + sha256 幂等 + 自描述 canonical 表。
+
+agent 负责「理解 + 映射」，这里负责「守门」：schema 校验（字段合法/必填齐全/
+类型正确）、身份类 PII 遮罩、sha256 幂等（同文件不重复建行）。数值型业务字段
+（数量/单价/库存等）不遮罩，供后续模块计算。
+"""
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from datetime import datetime, timezone
+from typing import Any
+
+from .canonical_schema import required_fields, validate_canonical
+from .recognized_store import redact_row
+
+
+def _default_db_path() -> str:
+    return os.getenv("YUNPAI_CANONICAL_DB", "runtime/yunpai-canonical.sqlite")
+
+
+class CanonicalLandingStore:
+    """本地 canonical 落库（sandbox/测试）；生产 transport 下由 HTTP M0 facade 接管。"""
+
+    def __init__(self, db_path: str | None = None):
+        self.db_path = str(db_path or _default_db_path())
+        if os.path.dirname(self.db_path):
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self._init()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init(self) -> None:
+        with self._connect() as db:
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS canonical_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entity_type TEXT NOT NULL,
+                    business_key TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )"""
+            )
+            db.execute("CREATE INDEX IF NOT EXISTS idx_canonical_sha256 ON canonical_records(sha256)")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_canonical_entity ON canonical_records(entity_type)")
+
+    def ingest(self, *, entity_type: str, records: list[dict[str, Any]], filename: str,
+               sha256: str, confidence: float, redact: bool = True) -> dict[str, Any]:
+        """校验 + 脱敏 + 落库；同 sha256 幂等。返回 {success, data, errors}。"""
+        if not sha256 or len(sha256) != 64:
+            return {"success": False, "code": "INVALID_SHA256", "errors": [{"code": "INVALID_SHA256", "message": "sha256 必须是 64 位十六进制"}], "data": {}}
+        validated = validate_canonical(entity_type, records)
+        if validated["errors"]:
+            return {"success": False, "code": "SCHEMA_INVALID", "errors": validated["errors"], "data": {}}
+        identity_field = required_fields(entity_type)[0] if required_fields(entity_type) else ""
+        stored: list[dict[str, Any]] = []
+        redacted_count = 0
+        for clean in validated["clean_records"]:
+            before = json.dumps(clean, ensure_ascii=False, sort_keys=True)
+            out = redact_row(clean) if redact else dict(clean)
+            if json.dumps(out, ensure_ascii=False, sort_keys=True) != before:
+                redacted_count += 1
+            stored.append(out)
+        created = datetime.now(timezone.utc).isoformat()
+        with self._connect() as db:
+            exists = db.execute("SELECT 1 FROM canonical_records WHERE sha256=?", (sha256,)).fetchone()
+            if exists:
+                return {"success": True, "data": {"inserted_rows": 0, "duplicate": True, "sha256": sha256, "entity_type": entity_type, "redacted_fields": 0}, "errors": []}
+            for out in stored:
+                business_key = str(out.get(identity_field) or "") if identity_field else ""
+                db.execute(
+                    "INSERT INTO canonical_records(entity_type, business_key, filename, sha256, payload, confidence, created_at) VALUES(?,?,?,?,?,?,?)",
+                    (entity_type, business_key, filename, sha256, json.dumps(out, ensure_ascii=False), float(confidence), created),
+                )
+        return {"success": True, "data": {"inserted_rows": len(stored), "duplicate": False, "sha256": sha256, "entity_type": entity_type, "redacted_fields": redacted_count}, "errors": []}
+
+    def query(self, *, entity_type: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        with self._connect() as db:
+            sql = "SELECT entity_type, business_key, filename, sha256, payload, confidence, created_at FROM canonical_records"
+            params: list[Any] = []
+            if entity_type:
+                sql += " WHERE entity_type=?"
+                params.append(entity_type)
+            sql += " ORDER BY id LIMIT ?"
+            params.append(int(limit))
+            for row in db.execute(sql, params).fetchall():
+                payload = json.loads(row["payload"])
+                rows.append({"entity_type": row["entity_type"], "business_key": row["business_key"], "filename": row["filename"], "sha256": row["sha256"], "confidence": row["confidence"], **payload})
+        return rows

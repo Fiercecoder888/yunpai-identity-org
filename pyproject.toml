@@ -28,6 +28,12 @@ parsers = [
   "xlrd>=2.0.1",    # .xls (BIFF) 真实表头/行/Sheet 抽取
   "py7zr>=1.0",     # 7z 归档安全解包
 ]
+# 多模态采样（图片降采样 + 扫描 PDF 渲染成图，喂给 Qwen-VL；缺库时 sample_file
+# 明确回退为只给嗅探结果，绝不静默降级成二进制摘要）
+vision = [
+  "Pillow>=10.0",   # 图片降采样
+  "pymupdf>=1.24",  # PDF 页渲染 + 文本层抽取
+]
 
 [project.scripts]
 yunpai-mcp = "yunpai_langgraph.mcp:main"
