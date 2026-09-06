@@ -120,7 +120,7 @@ class PlannerAgent:
         if route == "chat":
             return {"route": "chat", "steps": [], "reason": decision.get("reason") or "Qwen 判定为解释性对话", "response": decision.get("answer") or ""}
         if route == "workflow":
-            workflow_id = str(decision.get("workflow") or decision.get("workflow_id") or "m0_m5")
+            workflow_id = str(decision.get("workflow") or decision.get("workflow_id") or "m1_m5_document_to_plan")
             if workflow_id not in KNOWN_WORKFLOWS:
                 return {"_invalid_reason": f"模型提案含未知 workflow: {workflow_id}"}
             workflow = load_workflow(workflow_id)
@@ -182,9 +182,9 @@ class PlannerAgent:
             for keywords, skill_name in INTENT_TO_SKILL:
                 if skill_name in skills.specs and any(keyword in text for keyword in keywords):
                     return {"route": "free", "steps": [{"id": "skill-0", "module": "orchestrator", "tool": skill_name, "kind": "skill", "mode": "free"}], "reason": f"语义匹配高阶 Skill: {skill_name}"}
-        full = request.get("workflow") == "m0_m5" or "全链路" in text or all(word in text for word in ("订单", "采购", "排程"))
+        full = request.get("workflow") == "m1_m5_document_to_plan" or "全链路" in text or all(word in text for word in ("订单", "采购", "排程"))
         if full:
-            workflow = load_workflow("m0_m5")
+            workflow = load_workflow("m1_m5_document_to_plan")
             steps = [{**step, "mode": "workflow"} for step in workflow["steps"]]
             return {"route": "workflow", "steps": steps, "workflow_id": workflow["workflow_id"], "workflow_version": workflow["version"], "reason": "识别为 M0→M5 受控业务目标"}
         requested_tools: list[str] = []

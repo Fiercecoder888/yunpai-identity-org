@@ -6,15 +6,16 @@ from pathlib import Path
 from typing import Any
 
 #: 版本化受控工作流（文件名即稳定 id）。
+#: 已删除旧版 m0_m5（M0 在前、M1 读 request.document 单数 bug、M5 只有 solve），
+#: 统一由 m1_m5_document_to_plan 承担原始文件入口。
 KNOWN_WORKFLOWS = (
-    "m0_m5",
     "m1_m5_document_to_plan",
     "canonical_to_m5",
 )
 
 
 @lru_cache(maxsize=8)
-def load_workflow(workflow_id: str = "m0_m5") -> dict[str, Any]:
+def load_workflow(workflow_id: str = "m1_m5_document_to_plan") -> dict[str, Any]:
     path = Path(__file__).with_name("workflows") / f"{workflow_id}.json"
     if not path.exists():
         raise KeyError(f"unknown workflow: {workflow_id}")

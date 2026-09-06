@@ -44,10 +44,10 @@ def test_order_attachment_does_not_bind_identification_skill_by_kind():
     decision = planner.plan({
         "message": "根据订单附件执行订单到排程",
         "attachments": [{"kind": "order", "filename": "order.xlsx", "content_b64": "AA=="}],
-        "workflow": "m0_m5",
+        "workflow": "m1_m5_document_to_plan",
     }, build_default_registry())
     assert decision["route"] == "workflow"
-    assert decision["steps"][0]["tool"] == "data_import_run"
+    assert decision["steps"][0]["tool"] == "ingest_document"
 
 
 def test_skill_catalog_exposes_versioned_skill_ids():

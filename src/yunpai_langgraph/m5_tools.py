@@ -120,6 +120,28 @@ async def m5_ingest_snapshot(payload: dict[str, Any], ctx: dict[str, Any]) -> di
 
 async def m5_get_schedule(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     plan_version = str(payload.get("plan_version") or "")
+    # 预览/本地模式：桥接已从 RunState 直接提供 schedule，不读 M5 repository
+    # （preview 不落库），返回等价读回结构，不冒充已发布 canonical。
+    if payload.get("preview"):
+        return {
+            "success": True,
+            "data": {
+                "scenario_purpose": "production",
+                "next_event_sequence": 1,
+                "plan_version": plan_version,
+                "scenario_id": payload.get("scenario_id") or "",
+                "lifecycle_status": payload.get("lifecycle_status") or "released",
+                "schedule": payload.get("schedule") or {},
+                "is_current_head": True,
+                "head_revision": 0,
+                "lifecycle_events": [],
+                "validation_report": {"status": "preview"},
+                "preview": True,
+            },
+            "errors": [],
+            "trace_id": _trace(ctx, "m5-get-schedule"),
+            "evidence": [_evidence("m5", "plan", f"preview readback for {plan_version}")],
+        }
     repo = _repo(ctx)
     plan = repo.get_plan(plan_version) if plan_version else None
     if plan is None:

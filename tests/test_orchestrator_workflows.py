@@ -45,7 +45,8 @@ def test_new_workflows_reference_only_registered_tools():
 
 
 def test_known_workflows_include_legacy_and_new_entries():
-    assert "m0_m5" in KNOWN_WORKFLOWS
+    # 旧 m0_m5 已删除，只保留原始文件入口 m1_m5_document_to_plan 与 canonical_to_m5。
+    assert "m0_m5" not in KNOWN_WORKFLOWS
     assert set(NEW_WORKFLOWS) <= set(KNOWN_WORKFLOWS)
 
 
@@ -138,7 +139,7 @@ def test_health_reports_per_module_spec_and_bound():
     # 主链每个 workflow 步骤工具逐模块已 bound
     from yunpai_langgraph.registry import build_default_registry
     registry = build_default_registry()
-    for workflow_id in ("m0_m5", "m1_m5_document_to_plan", "canonical_to_m5"):
+    for workflow_id in ("m1_m5_document_to_plan", "canonical_to_m5"):
         for step in load_workflow(workflow_id)["steps"]:
             assert step["tool"] in registry.handlers, (
                 f"{workflow_id}/{step['id']} 的 {step['tool']} 未绑定")

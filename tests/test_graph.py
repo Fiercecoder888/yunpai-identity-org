@@ -7,16 +7,48 @@ from yunpai_langgraph.models import new_state
 
 
 def workflow_request(*, shortage: bool = True):
+    import json as _json
+
+    order = {"order_id": "SO-001", "product_code": "P-1", "quantity": 2, "due_date": "2026-09-10", "confidence": 1.0}
+    encoded = b64encode(_json.dumps(order).encode()).decode()
     return {
-        "workflow": "m0_m5",
-        "documents": [{"filename": "order.json", "records": [{"kind": "order"}]}],
-        "document": {"order_id": "SO-001", "product_code": "P-1", "quantity": 2, "due_date": "2026-09-10", "confidence": 1.0},
+        "workflow": "m1_m5_document_to_plan",
+        "documents": [{"kind": "order", "filename": "order.json", "content_type": "application/json", "content_b64": encoded}],
+        "document": {"_encoded": encoded, **order, "confidence": 1.0},
         "product": {"product_code": "P-1", "product_name": "Widget"},
         "bom_lines": [{"material_code": "MAT-1", "material_name": "Material", "quantity_per": 3, "unit": "pcs"}],
-        "inventory": [{"material_code": "MAT-1", "quantity": 2 if shortage else 6}],
-        "routing_steps": [{"operation_id": "OP-1", "sequence": 1, "processing_minutes": 5}],
+        "inventory": [{"material_code": "MAT-1", "warehouse": "WH-1", "lot_no": "LOT-1", "available_qty": 2 if shortage else 6, "locked_qty": 0, "qc_status": "released", "received_at": "2026-09-01"}],
+        "routing_steps": [{"operation_id": "OP-1", "sequence": 1, "standard_minutes": 5,
+                           "required_equipment_codes": ["EQ-1"], "required_person_codes": ["P-1"],
+                           "required_station_codes": ["ST-1"]}],
         "resources": [{"resource_id": "R-1", "status": "available"}],
-        # The m0_m5 chain runs on fixture/demo data only; PMC solve on this
+        # m1_m5_document_to_plan 的 M5 six-class bundle 需要权威资源/日历快照；
+        # fixture 直接给显式 snapshot（等价 M0 回读），避免依赖本地 M0 canonical 表。
+        "resource_snapshot": {
+            "snapshot_id": "SNAP-RES", "revision": 1,
+            "equipment": [{"equipment_code": "EQ-1", "equipment_type": "press", "capability_codes": ["P"],
+                           "capacity_per_hour": "60", "efficiency_factor": "1", "status": "ACTIVE", "calendar_ref": "CAL-1"}],
+            "stations": [{"station_code": "ST-1", "work_center_code": "WC-1", "parallel_slots": 1,
+                          "status": "ACTIVE", "calendar_ref": "CAL-1"}],
+            "persons": [{"person_code": "P-1", "skill_codes": ["P"], "max_parallel_tasks": 1,
+                         "status": "ACTIVE", "calendar_ref": "CAL-1"}],
+            "tooling": [],
+        },
+        "calendar_snapshot": {
+            "snapshot_id": "SNAP-CAL", "revision": 1,
+            "working_intervals": [{"calendar_ref": "CAL-1", "shift_code": "DAY",
+                                   "start_at": "2026-09-05T08:00:00+08:00", "end_at": "2026-09-05T17:00:00+08:00"}],
+            "unavailability": [],
+        },
+        "calendar_windows": [{"calendar_ref": "CAL-1", "shift_code": "DAY",
+                              "start_at": "2026-09-05T08:00:00+08:00", "end_at": "2026-09-05T17:00:00+08:00"}],
+        "supply_entries": [{"order_line_id": "SO-001::L1", "readiness": "READY",
+                            "requirement_ref": "MAT-1", "inventory_snapshot_ref": "INV-1"}],
+        "setup_matrix": {"OP-1": {"OP-1": 0}},
+        "route_approval_ref": "APPROVED-SIM-001", "route_code": "ROUTE-P1", "route_version": "v1",
+        "scenario_purpose": "production",
+        "planning_start": "2026-09-05T08:00:00+08:00",
+        # The m1_m5_document_to_plan chain runs on fixture/demo data only; PMC solve on this
         # path must stay an explicit preview/sandbox run (P0-2 boundary).
         "legacy_preview": True,
     }
@@ -46,8 +78,9 @@ async def test_full_workflow_gates_and_completes():
     assert state["outputs"]["run_m3_procurement_requirements"]["data"]["shortage_lines"][0]["shortage_qty"] == 4
     assert state["outputs"]["solve_scheduling"]["data"]["schedule"]["metrics"]["makespan_minutes"] == 10
     assert [step["tool"] for step in state["steps"] if step["status"] == "completed"] == [
-        "data_import_run", "data_import_commit", "ingest_document", "run_bom_sop_workflow",
-        "run_m3_procurement_requirements", "import_m4_purchase_suggestions_json", "solve_scheduling",
+        "ingest_document", "data_import_run", "data_import_commit", "run_bom_sop_workflow",
+        "run_m3_procurement_requirements", "import_m4_purchase_suggestions_json",
+        "ingest_m5_planning_snapshot", "solve_scheduling", "get_m5_schedule",
     ]
     assert len(state["approvals"]) == 4
     assert {entry["event"] for entry in state["trace"]} >= {"react.thought", "react.action", "react.observation", "react.review", "run.completed"}
@@ -127,7 +160,7 @@ async def test_m5_payload_preserves_all_m1_order_lines():
 
 def test_m0_commit_payload_unwraps_http_batch_response():
     graph = YunpaiGraph()
-    state = new_state({"workflow": "m0_m5", "message": "提交 M0 批次"})
+    state = new_state({"workflow": "m1_m5_document_to_plan", "message": "提交 M0 批次"})
     state["outputs"] = {
         "data_import_run": {
             "success": True,
@@ -139,7 +172,7 @@ def test_m0_commit_payload_unwraps_http_batch_response():
 
 def test_human_override_is_carried_to_m0_commit_payload():
     graph = YunpaiGraph()
-    state = new_state({"workflow": "m0_m5"})
+    state = new_state({"workflow": "m1_m5_document_to_plan"})
     state["outputs"] = {"data_import_run": {"batch_id": "batch-human-001"}}
     state["approvals"] = [{
         "actor": "steward-1",
@@ -173,7 +206,7 @@ async def test_data_gate_human_override_is_explicitly_audited():
 
 def test_m2_payload_uses_m1_product_name_when_request_has_no_product():
     graph = YunpaiGraph()
-    state = new_state({"workflow": "m0_m5", "message": "匹配订单 BOM 和 SOP"})
+    state = new_state({"workflow": "m1_m5_document_to_plan", "message": "匹配订单 BOM 和 SOP"})
     state["outputs"] = {
         "ingest_document": {
             "document": {

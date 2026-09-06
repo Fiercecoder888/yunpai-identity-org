@@ -32,3 +32,6 @@ runtime-local/
 
 # Local distribution archives are generated artifacts, not source
 *.zip
+
+# test runtime sandbox
+tests/runtime/

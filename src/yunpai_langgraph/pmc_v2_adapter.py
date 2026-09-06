@@ -79,6 +79,10 @@ def _resources(payload: dict[str, Any], calendar: dict[str, Any]) -> dict[str, A
     items = payload.get("resources") or []
     explicit = payload.get("resource_snapshot")
     if isinstance(explicit, dict):
+        # 显式 snapshot 若未携带 checksum，则补齐（校验器要求 checksum），
+        # 与 orchestration_bridge 的 finalize 语义保持一致。
+        if not explicit.get("checksum"):
+            explicit = finalize_snapshot(explicit)
         return explicit
     cal_ref = str((calendar.get("working_intervals") or [{}])[0].get("calendar_ref") or "CAL-DEFAULT")
     equipment, persons, tooling, stations = [], [], [], []

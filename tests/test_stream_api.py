@@ -20,7 +20,9 @@ def test_stream_api_emits_gate_and_resume_events():
     assert response.headers["content-type"].startswith("application/x-ndjson")
     events = read_events(response)
     assert [event["type"] for event in events] == [
-        "run_start", "assistant_delta", "state_snapshot", "assistant_delta", "step_start", "step_result", "gate_opened", "state_snapshot", "run_done",
+        "run_start", "assistant_delta", "state_snapshot", "assistant_delta",
+        "step_start", "step_result", "state_snapshot", "assistant_delta",
+        "step_start", "step_result", "gate_opened", "state_snapshot", "run_done",
     ]
     assert events[0]["run_id"] == events[-1]["run_id"]
     assert events[0]["task_id"] == events[-1]["task_id"]

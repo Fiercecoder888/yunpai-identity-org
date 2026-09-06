@@ -14,7 +14,7 @@
    trace_id, evidence:[...]}。
 
 本桥接只服务于受控 workflow（m1_m5_document_to_plan / canonical_to_m5）；
-旧 m0_m5 保留为兼容路径，仍走 graph._payload_for。
+旧 m0_m5 已删除，不再有兼容路径。
 """
 from __future__ import annotations
 
@@ -889,10 +889,13 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
                 "sequence": step.get("sequence") or 1,
                 "eligible_resources": eligible_resources,
             })
+        # 求解器合同的扁平 resources 优先用 M0 回读事实；本地/fixture 无 M0 时
+        # 回退到请求里显式的 resource_snapshot（与 _assemble_m5_bundle 同源）。
+        resource_facts = read_m5_resource_facts(state) or request_payload.get("resource_snapshot") or {}
         resources = []
         for section, key in (("equipment", "equipment_code"), ("stations", "station_code"),
                              ("persons", "person_code"), ("tooling", "tooling_code")):
-            for item in (read_m5_resource_facts(state) or {}).get(section, []):
+            for item in (resource_facts or {}).get(section, []):
                 code = item.get(key)
                 if code:
                     resources.append({"resource_id": str(code), "name": str(code), "status": "available"})
@@ -916,5 +919,14 @@ def bridge_payload(state: RunState, tool: str) -> dict[str, Any]:
             return blocked(state, source_module="m5", tool=tool,
                            missing_fields=["solve_scheduling 输出的 plan_version"],
                            required_tool="solve_scheduling")
-        return {"plan_version": str(plan_version)}
+        payload = {"plan_version": str(plan_version)}
+        # 预览/本地模式：M5 repository 未持久化计划，读回直接从 RunState 的 solve
+        # 输出提供 schedule + lifecycle，避免 PLAN_NOT_FOUND；不冒充已发布 canonical。
+        if bool(request.get("legacy_preview")):
+            schedule = solve.get("schedule") if isinstance(solve.get("schedule"), dict) else {}
+            payload["preview"] = True
+            payload["schedule"] = schedule
+            payload["scenario_id"] = str(schedule.get("scenario_id") or solve.get("scenario_id") or "")
+            payload["lifecycle_status"] = str(solve.get("lifecycle_status") or "released")
+        return payload
     return {}

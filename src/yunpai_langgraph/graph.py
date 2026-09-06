@@ -625,6 +625,24 @@ class YunpaiGraph:
                     raise ValueError(f"M0 canonical publish failed: {publication.get('error')}")
             else:
                 result["m0_catalog_publish"] = {"status": "needs_mapping", "published": 0, "reason": "缺少显式 product_code 或可发布候选"}
+            # 本地 sandbox：candidate Gate 批准即视为该批次候选已裁决，把未裁决候选
+            # 标记为 approved，对齐 HTTP M0 行为，避免 data_import_commit 因
+            # "候选未裁决"被拒（本地 sandbox 需要显式 resolve，生产 M0 在候选批准时已裁决）。
+            batch_id = str(data.get("batch_id") or data.get("id") or "")
+            if batch_id:
+                try:
+                    import os as _os
+
+                    from .m0_sandbox import M0SandboxStore
+
+                    db_path = _os.getenv("YUNPAI_M0_SANDBOX_DB") or "runtime/yunpai-m0-sandbox.sqlite"
+                    store = M0SandboxStore(db_path)
+                    for doc in (store.preview(batch_id).get("documents") or []):
+                        if doc.get("review_status") not in ("approved", "rejected"):
+                            store.resolve(batch_id=batch_id, candidate_id=doc.get("candidate_id"), action="approve", actor=actor)
+                except Exception:
+                    # 本地 store 无该批次/候选时忽略，保持现有 publish 结果。
+                    pass
             return {"applied": True, "message": "业务资料候选已审核并提交 M0 canonical", "readback": result.get("m0_catalog_publish")}
         if gate["type"] == "apply":
             return self._apply_m5_release(state, gate, result, data, actor=actor)
