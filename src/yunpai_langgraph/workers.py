@@ -730,8 +730,14 @@ async def query_recognized_table(payload: dict[str, Any], ctx: dict[str, Any]) -
 
 
 async def ingest_canonical(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-    """确定性落库：agent 映射后的 canonical 记录，schema 校验 + PII + sha256 幂等。"""
-    from .canonical_ingest import CanonicalLandingStore
+    """确定性落库：agent 映射后的 canonical 记录，schema 校验 + PII + sha256 幂等。
+
+    生产 transport（配置了 M0_URL）时，校验通过后经 M0 canonical 发布
+    （validate + publish + 回读核验）；本地/单元测试无 M0_URL 时只写 sandbox SQLite。
+    """
+    import os
+
+    from .canonical_ingest import CanonicalLandingStore, to_m0_records
 
     entity_type = str(payload.get("entity_type") or "")
     filename = str(payload.get("filename") or "")
@@ -745,7 +751,27 @@ async def ingest_canonical(payload: dict[str, Any], ctx: dict[str, Any]) -> dict
     store = CanonicalLandingStore(ctx.get("canonical_db"))
     result = store.ingest(entity_type=entity_type, records=records, filename=filename,
                           sha256=sha256, confidence=confidence)
+    m0_publication: dict[str, Any] | None = None
+    if result.get("success") and os.getenv("M0_URL"):
+        try:
+            from .m0_catalog import publish_records
+
+            m0_records = to_m0_records(
+                entity_type, result.get("data", {}).get("clean_records") or [],
+                filename=filename, sha256=sha256,
+                tenant_id=str(ctx.get("tenant_id") or "default"),
+                actor=str(ctx.get("actor") or "operator"),
+            )
+            m0_publication = publish_records(
+                m0_records,
+                tenant_id=str(ctx.get("tenant_id") or "default"),
+                task_id=str(ctx.get("task_id") or "task"),
+                actor=str(ctx.get("actor") or "operator"),
+            )
+        except Exception as exc:  # noqa: BLE001 - M0 不可达不阻断本地落库，如实上报
+            m0_publication = {"status": "failed", "published": 0, "error": str(exc)}
     return {**result,
+            "m0_publication": m0_publication,
             "trace_id": _trace(ctx, "ingest_canonical"),
             "evidence": [_evidence("catalog", "ingest_canonical", f"{entity_type} rows={result['data'].get('inserted_rows')} dup={result['data'].get('duplicate')}")]}
 

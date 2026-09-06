@@ -79,7 +79,7 @@ class CanonicalLandingStore:
                     "INSERT INTO canonical_records(entity_type, business_key, filename, sha256, payload, confidence, created_at) VALUES(?,?,?,?,?,?,?)",
                     (entity_type, business_key, filename, sha256, json.dumps(out, ensure_ascii=False), float(confidence), created),
                 )
-        return {"success": True, "data": {"inserted_rows": len(stored), "duplicate": False, "sha256": sha256, "entity_type": entity_type, "redacted_fields": redacted_count}, "errors": []}
+        return {"success": True, "data": {"inserted_rows": len(stored), "duplicate": False, "sha256": sha256, "entity_type": entity_type, "redacted_fields": redacted_count, "clean_records": validated["clean_records"]}, "errors": []}
 
     def query(self, *, entity_type: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -95,3 +95,25 @@ class CanonicalLandingStore:
                 payload = json.loads(row["payload"])
                 rows.append({"entity_type": row["entity_type"], "business_key": row["business_key"], "filename": row["filename"], "sha256": row["sha256"], "confidence": row["confidence"], **payload})
         return rows
+
+
+def to_m0_records(entity_type: str, clean_records: list[dict[str, Any]], *, filename: str,
+                  sha256: str, tenant_id: str, actor: str = "operator") -> list[dict[str, Any]]:
+    """把校验后的 canonical 记录转成 m0.ingest.v1 记录（供 M0 canonical 发布）。"""
+    identity_field = required_fields(entity_type)[0] if required_fields(entity_type) else ""
+    records: list[dict[str, Any]] = []
+    for record in clean_records:
+        business_key = str(record.get(identity_field) or "") if identity_field else ""
+        records.append({
+            "schema_version": "m0.ingest.v1",
+            "tenant_id": tenant_id,
+            "idempotency_key": f"upload:{sha256}:{entity_type}:{business_key}",
+            "source": {"system": "yunpai-agent-recognition", "external_id": f"{filename}::{entity_type}::{business_key}", "sha256": sha256},
+            "identity": {"business_key": business_key, "version_id": ""},
+            "evidence": [{"key": "source", "locator": {"filename": filename, "sha256": sha256}, "excerpt": filename}],
+            "review_status": "approved",
+            "reviewed_by": actor,
+            "entity_type": entity_type,
+            "payload": record,
+        })
+    return records
