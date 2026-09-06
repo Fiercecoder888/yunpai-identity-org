@@ -92,14 +92,37 @@ async def test_ingest_recognized_redacts_pii_and_sensitive_columns(tmp_path):
     assert result["success"] is True
     assert result["data"]["inserted_rows"] == 1
     assert result["data"]["duplicate"] is False
-    # 读回验证脱敏结果：姓名保留，工资/手机号遮罩。
+    # 读回验证脱敏结果：姓名/工资保留（供跨表计算），手机号（身份类 PII）遮罩。
     rows = await registry.call(
         "query_recognized_table", {"kind": "wage"}, _ctx(tmp_path)
     )
     row = rows["data"]["rows"][0]
     assert row["姓名"] == "张三"
-    assert row["实发工资"] != 7846 and "*" in str(row["实发工资"])
+    assert row["实发工资"] == 7846
     assert "13812345678" not in str(row["手机号"]) and "*" in str(row["手机号"])
+
+
+@pytest.mark.asyncio
+async def test_ingest_recognized_redact_can_be_disabled(tmp_path):
+    registry = build_default_registry()
+    sha = hashlib.sha256(b"wage-no-redact").hexdigest()
+    await registry.call(
+        "ingest_recognized",
+        {
+            "kind": "wage",
+            "filename": "工资表.xlsx",
+            "sha256": sha,
+            "columns": ["姓名", "手机号"],
+            "rows": [{"姓名": "张三", "手机号": "13812345678"}],
+            "redact": False,
+        },
+        _ctx(tmp_path),
+    )
+    rows = await registry.call(
+        "query_recognized_table", {"kind": "wage"}, _ctx(tmp_path)
+    )
+    row = rows["data"]["rows"][0]
+    assert row["手机号"] == "13812345678"
 
 
 @pytest.mark.asyncio

@@ -60,7 +60,7 @@
 - 确定性。输入 `{filename, sha256, kind, columns_mapping, rows, confidence}`。
 - 职责：
   - JSON schema 校验（kind 枚举、rows 结构、columns_mapping 结构）。
-  - PII 脱敏（身份证 18 位、银行卡、手机号、工资字段 → 遮罩）。
+  - 身份类 PII 脱敏（身份证 18 位、银行卡、手机号 → 遮罩，可 `redact=false` 关闭）；工资/计件单价等数值型业务字段**不遮罩**，保留供跨表计算。
   - 自描述表落库：`recognized_tables(kind, filename, sha256, columns, rows, confidence, created_at)`。
   - sha256 幂等（同文件重复上传不重复建行）。
   - 返回 `{table, inserted_rows, redacted_fields}`。
@@ -95,7 +95,7 @@ planner 在遇到"文件附件 + 无显式 workflow/tool"时，用 Qwen 输出�
 | 项 | 原因 |
 |---|---|
 | `file_sniff` magic bytes | 真实格式是事实 |
-| PII 脱敏（正则） | 敏感字段不能靠 LLM 识别 |
+| 身份类 PII 脱敏（正则，可关） | 身份证/银行卡/手机号不能靠 LLM 识别；工资等数值不遮罩 |
 | agent 输出 JSON schema 校验 | 防 LLM 输出非法结构 |
 | sha256 幂等 + 落库事务 | 数据一致性 |
 | 订单深解析 `order_parser_v2` | 订单号/数量/交期是事实，必须确定性 |
@@ -138,3 +138,12 @@ planner 在遇到"文件附件 + 无显式 workflow/tool"时，用 Qwen 输出�
 2. agent 识别的 `confidence` 阈值（建议 <0.7 进 review）。
 3. 计件单价数据源（SOP/工序目录 vs 新建单价表 vs 手工样例）。
 4. 批量成本控制上限（并发 + 每文件 token 上限）。
+
+## 13. 决策记录（2026-09-06）
+
+- **脱敏策略（已定）**：简单处理 + 有兜底 + 隐私可降级。工资/计件单价等**数值型业务字段不遮罩**（保留供跨表计算，如 工资÷计件单价=日工作量）；仅身份类 PII（身份证/银行卡/手机号）确定性遮罩，`ingest_recognized` 提供 `redact=false` 整体关闭。兜底不变：sha256 幂等、schema 校验、低置信 needs_review、订单走 `order_parser_v2`。
+- **存储（已定）**：SQLite `recognized_tables`（`YUNPAI_RECOGNIZED_DB`）。
+- **跨表计算（已定）**：不做存储层 join；agent 分两次 `query_recognized_table` + 自行计算（agent 侧 join）。
+- **confidence 阈值（默认）**：<0.7 进 review，env 可配。
+- **批量成本（默认）**：sha256 缓存 + 并发 4 + `sample_file` 前 10 行。
+- **计件单价来源（P2 再定）**：先用手工样例跑通计算链路，同时打开真实工资/日报文件确认单价列实际位置。

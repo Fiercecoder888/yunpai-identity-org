@@ -686,6 +686,7 @@ async def ingest_recognized(payload: dict[str, Any], ctx: dict[str, Any]) -> dic
     columns = payload.get("columns") or []
     rows = payload.get("rows") or []
     confidence = float(payload.get("confidence") or 0.0)
+    redact = bool(payload.get("redact", True))
     if not (kind and filename and sha256):
         return {"success": False, "code": "MISSING_REQUIRED",
                 "errors": [{"code": "MISSING_REQUIRED", "message": "kind/filename/sha256 必填", "details": []}],
@@ -701,7 +702,8 @@ async def ingest_recognized(payload: dict[str, Any], ctx: dict[str, Any]) -> dic
     store = RecognizedTableStore(ctx.get("recognized_db"))
     try:
         result = store.ingest(kind=kind, filename=filename, sha256=sha256,
-                              columns=list(columns), rows=rows, confidence=confidence)
+                              columns=list(columns), rows=rows, confidence=confidence,
+                              redact=redact)
     except ValueError as exc:
         return {"success": False, "code": "INVALID_KIND",
                 "errors": [{"code": "INVALID_KIND", "message": str(exc), "details": []}],

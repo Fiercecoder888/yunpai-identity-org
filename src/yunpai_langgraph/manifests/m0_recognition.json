@@ -43,7 +43,7 @@
     },
     {
       "name": "ingest_recognized",
-      "description": "把 agent 判定后的自描述行落库（kind + 列 + 行）。确定性安全网：kind 枚举校验、PII 确定性脱敏（身份证/银行卡/手机号/敏感列名）、sha256 幂等（重复上传不重复建行）。只写自描述表，不写 canonical 主数据；低置信由 agent 决定走 needs_review。",
+      "description": "把 agent 判定后的自描述行落库（kind + 列 + 行）。确定性安全网：kind 枚举校验、身份类 PII 确定性脱敏（身份证/银行卡/手机号，可用 redact=false 整体关闭）、sha256 幂等（重复上传不重复建行）。工资/计件单价等数值型字段不遮罩，供 agent 跨表计算。只写自描述表，不写 canonical 主数据；低置信由 agent 决定走 needs_review。",
       "input_schema": {
         "type": "object",
         "required": ["kind", "filename", "sha256", "columns", "rows"],
