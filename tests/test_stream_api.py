@@ -16,7 +16,7 @@ def read_events(response):
 
 def test_stream_api_emits_gate_and_resume_events():
     client = TestClient(create_app(repository=InMemoryRunRepository()))
-    response = client.post("/runs/stream", json=workflow_request())
+    response = client.post("/runs/stream", json={**workflow_request(), "tenant_id": "tenant-stream"})
     assert response.headers["content-type"].startswith("application/x-ndjson")
     events = read_events(response)
     assert [event["type"] for event in events] == [
@@ -43,6 +43,7 @@ def test_stream_api_emits_gate_and_resume_events():
 def test_stream_api_accepts_attachment_metadata_without_streaming_file_body():
     client = TestClient(create_app(repository=InMemoryRunRepository()))
     payload = {
+        "tenant_id": "tenant-stream",
         "message": "导入基础数据",
         "attachments": [{
             "kind": "master_data", "filename": "master.json", "content_type": "application/json",

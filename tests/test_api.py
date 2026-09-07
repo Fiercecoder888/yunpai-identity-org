@@ -18,11 +18,11 @@ def test_api_persists_lists_and_resumes_runs(tmp_path):
     assert health["bound_tools"] == 85
     assert health["skills"] == 8
     assert health["planner_model"]["provider"] == "qwen"
-    created = client.post("/runs", json=workflow_request()).json()
+    created = client.post("/runs", json={**workflow_request(), "tenant_id": "tenant-api"}).json()
     assert created["pending_gate"]["type"] == "candidate"
     run_id = created["run_id"]
     assert client.get(f"/runs/{run_id}").json()["task_id"] == created["task_id"]
-    assert len(client.get("/runs", params={"tenant_id": "default"}).json()["runs"]) == 1
+    assert len(client.get("/runs", params={"tenant_id": "tenant-api"}).json()["runs"]) == 1
     # T5：resume 使用受信 principal 头（X-Actor-User/Roles），body actor 不再被信任。
     resumed = client.post(
         f"/runs/{run_id}/resume",
@@ -78,7 +78,7 @@ def test_api_data_gate_human_override_requires_explicit_flag(tmp_path):
     client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "override.sqlite")))
     request = workflow_request()
     request["bom_lines"] = []
-    created = client.post("/runs", json=request).json()
+    created = client.post("/runs", json={**request, "tenant_id": "tenant-override"}).json()
     run_id = created["run_id"]
     candidate = client.post(
         f"/runs/{run_id}/resume",
@@ -126,7 +126,7 @@ def test_api_uploads_xlsx_and_records_intent_route(tmp_path):
     client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "upload.sqlite")))
     response = client.post(
         "/runs/upload",
-        params={"message": "请解析并校验这份订单"},
+        params={"message": "请解析并校验这份订单", "tenant_id": "tenant-upload"},
         files={"file": ("order.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )
     assert response.status_code == 200
@@ -146,7 +146,7 @@ def test_api_accepts_m1_supported_non_xlsx_and_rejects_unknown_type(tmp_path):
     # 会失败关闭为 LOCAL_FIXTURE_UNSUPPORTED_FORMAT，而不是 API 层提前拒绝）。
     response = client.post(
         "/runs/upload",
-        params={"message": "请解析并验证这份订单"},
+        params={"message": "请解析并验证这份订单", "tenant_id": "tenant-csv"},
         files={"file": ("order.csv", b"order_id,quantity\nSO-1,1\n", "text/csv")},
     )
     assert response.status_code == 200
@@ -156,6 +156,7 @@ def test_api_accepts_m1_supported_non_xlsx_and_rejects_unknown_type(tmp_path):
     # 无法识别的二进制类型仍然受控拒绝。
     unknown = client.post(
         "/runs/upload",
+        params={"tenant_id": "tenant-csv"},
         files={"file": ("order.exe", b"\x7fELFgarbage", "application/octet-stream")},
     )
     assert unknown.status_code == 415
@@ -177,12 +178,13 @@ def test_api_batch_upload_requires_explicit_mode(tmp_path):
     client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "batch.sqlite")))
     missing_mode = client.post(
         "/runs/upload/batch",
+        data={"tenant_id": "tenant-batch"},
         files=[("files", ("order.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
     )
     assert missing_mode.status_code == 422
     invalid_mode = client.post(
         "/runs/upload/batch",
-        data={"mode": "随便猜"},
+        data={"mode": "随便猜", "tenant_id": "tenant-batch"},
         files=[("files", ("order.xlsx", output.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))],
     )
     assert invalid_mode.status_code == 422
@@ -190,7 +192,7 @@ def test_api_batch_upload_requires_explicit_mode(tmp_path):
 
     created = client.post(
         "/runs/upload/batch",
-        data={"mode": "master_data", "message": "识别这些基础资料"},
+        data={"mode": "master_data", "message": "识别这些基础资料", "tenant_id": "tenant-batch"},
         files=[("files", ("设备台账.json", b'{"records":[{"kind":"equipment"}]}', "application/json"))],
     )
     assert created.status_code == 200
@@ -210,7 +212,7 @@ def test_api_batch_upload_flags_empty_files_as_skipped(tmp_path):
     client = TestClient(create_app(repository=SQLiteRunRepository(tmp_path / "batch-empty.sqlite")))
     response = client.post(
         "/runs/upload/batch",
-        data={"mode": "directory"},
+        data={"mode": "directory", "tenant_id": "tenant-batch"},
         files=[
             ("files", ("a.xlsx", b"", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
             ("files", ("b.json", b"{}", "application/json")),

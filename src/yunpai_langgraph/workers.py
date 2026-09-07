@@ -703,7 +703,7 @@ async def ingest_recognized(payload: dict[str, Any], ctx: dict[str, Any]) -> dic
     try:
         result = store.ingest(kind=kind, filename=filename, sha256=sha256,
                               columns=list(columns), rows=rows, confidence=confidence,
-                              redact=redact)
+                              redact=redact, tenant_id=str(ctx.get("tenant_id") or "default"))
     except ValueError as exc:
         return {"success": False, "code": "INVALID_KIND",
                 "errors": [{"code": "INVALID_KIND", "message": str(exc), "details": []}],
@@ -723,6 +723,7 @@ async def query_recognized_table(payload: dict[str, Any], ctx: dict[str, Any]) -
         filters=payload.get("filters"),
         aggregate=payload.get("aggregate"),
         limit=int(payload.get("limit") or 200),
+        tenant_id=str(ctx.get("tenant_id") or "default"),
     )
     return {"success": True, "data": {"rows": rows, "count": len(rows)}, "errors": [],
             "trace_id": _trace(ctx, "query_recognized_table"),
@@ -750,7 +751,8 @@ async def ingest_canonical(payload: dict[str, Any], ctx: dict[str, Any]) -> dict
                 "data": {}, "trace_id": _trace(ctx, "ingest_canonical")}
     store = CanonicalLandingStore(ctx.get("canonical_db"))
     result = store.ingest(entity_type=entity_type, records=records, filename=filename,
-                          sha256=sha256, confidence=confidence)
+                          sha256=sha256, confidence=confidence,
+                          tenant_id=str(ctx.get("tenant_id") or "default"))
     m0_publication: dict[str, Any] | None = None
     if result.get("success") and os.getenv("M0_URL"):
         try:

@@ -36,9 +36,18 @@ class CanonicalLandingStore:
 
     def _init(self) -> None:
         with self._connect() as db:
+            # 租户迁移（2026-09-07）：记录表补 tenant_id。SQLite 无法原地改
+            # UNIQUE，检出无 tenant_id 的老表时建新表回填 'default' 再删旧表。
+            records_ddl = db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='canonical_records'"
+            ).fetchone()
+            legacy_records = records_ddl is not None and "tenant_id" not in str(records_ddl["sql"])
+            if legacy_records:
+                db.execute("ALTER TABLE canonical_records RENAME TO canonical_records_pre_tenant")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS canonical_records (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
                     entity_type TEXT NOT NULL,
                     business_key TEXT NOT NULL,
                     filename TEXT NOT NULL,
@@ -48,12 +57,24 @@ class CanonicalLandingStore:
                     created_at TEXT NOT NULL
                 )"""
             )
-            db.execute("CREATE INDEX IF NOT EXISTS idx_canonical_sha256 ON canonical_records(sha256)")
+            if legacy_records:
+                db.execute(
+                    """INSERT INTO canonical_records(tenant_id, entity_type, business_key, filename, sha256,
+                                                     payload, confidence, created_at)
+                       SELECT 'default', entity_type, business_key, filename, sha256,
+                              payload, confidence, created_at
+                       FROM canonical_records_pre_tenant"""
+                )
+                db.execute("DROP TABLE canonical_records_pre_tenant")
+            # 幂等索引扩为 (tenant_id, sha256)：判重语义按租户。
+            db.execute("CREATE INDEX IF NOT EXISTS idx_canonical_tenant_sha ON canonical_records(tenant_id, sha256)")
             db.execute("CREATE INDEX IF NOT EXISTS idx_canonical_entity ON canonical_records(entity_type)")
 
     def ingest(self, *, entity_type: str, records: list[dict[str, Any]], filename: str,
-               sha256: str, confidence: float, redact: bool = True) -> dict[str, Any]:
-        """校验 + 脱敏 + 落库；同 sha256 幂等。返回 {success, data, errors}。"""
+               sha256: str, confidence: float, redact: bool = True,
+               tenant_id: str = "default") -> dict[str, Any]:
+        """校验 + 脱敏 + 落库；同租户同 sha256 幂等。返回 {success, data, errors}。"""
+        tenant = str(tenant_id or "default")
         if not sha256 or len(sha256) != 64:
             return {"success": False, "code": "INVALID_SHA256", "errors": [{"code": "INVALID_SHA256", "message": "sha256 必须是 64 位十六进制"}], "data": {}}
         validated = validate_canonical(entity_type, records)
@@ -70,30 +91,34 @@ class CanonicalLandingStore:
             stored.append(out)
         created = datetime.now(timezone.utc).isoformat()
         with self._connect() as db:
-            exists = db.execute("SELECT 1 FROM canonical_records WHERE sha256=?", (sha256,)).fetchone()
+            exists = db.execute(
+                "SELECT 1 FROM canonical_records WHERE tenant_id=? AND sha256=?", (tenant, sha256)
+            ).fetchone()
             if exists:
-                return {"success": True, "data": {"inserted_rows": 0, "duplicate": True, "sha256": sha256, "entity_type": entity_type, "redacted_fields": 0}, "errors": []}
+                return {"success": True, "data": {"inserted_rows": 0, "duplicate": True, "sha256": sha256, "entity_type": entity_type, "redacted_fields": 0, "tenant_id": tenant}, "errors": []}
             for out in stored:
                 business_key = str(out.get(identity_field) or "") if identity_field else ""
                 db.execute(
-                    "INSERT INTO canonical_records(entity_type, business_key, filename, sha256, payload, confidence, created_at) VALUES(?,?,?,?,?,?,?)",
-                    (entity_type, business_key, filename, sha256, json.dumps(out, ensure_ascii=False), float(confidence), created),
+                    "INSERT INTO canonical_records(tenant_id, entity_type, business_key, filename, sha256, payload, confidence, created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (tenant, entity_type, business_key, filename, sha256, json.dumps(out, ensure_ascii=False), float(confidence), created),
                 )
-        return {"success": True, "data": {"inserted_rows": len(stored), "duplicate": False, "sha256": sha256, "entity_type": entity_type, "redacted_fields": redacted_count, "clean_records": validated["clean_records"]}, "errors": []}
+        return {"success": True, "data": {"inserted_rows": len(stored), "duplicate": False, "sha256": sha256, "entity_type": entity_type, "redacted_fields": redacted_count, "tenant_id": tenant, "clean_records": validated["clean_records"]}, "errors": []}
 
-    def query(self, *, entity_type: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    def query(self, *, entity_type: str | None = None, limit: int = 200,
+              tenant_id: str = "default") -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         with self._connect() as db:
-            sql = "SELECT entity_type, business_key, filename, sha256, payload, confidence, created_at FROM canonical_records"
-            params: list[Any] = []
+            sql = ("SELECT tenant_id, entity_type, business_key, filename, sha256, payload, confidence, created_at "
+                   "FROM canonical_records WHERE tenant_id=?")
+            params: list[Any] = [str(tenant_id or "default")]
             if entity_type:
-                sql += " WHERE entity_type=?"
+                sql += " AND entity_type=?"
                 params.append(entity_type)
             sql += " ORDER BY id LIMIT ?"
             params.append(int(limit))
             for row in db.execute(sql, params).fetchall():
                 payload = json.loads(row["payload"])
-                rows.append({"entity_type": row["entity_type"], "business_key": row["business_key"], "filename": row["filename"], "sha256": row["sha256"], "confidence": row["confidence"], **payload})
+                rows.append({"tenant_id": row["tenant_id"], "entity_type": row["entity_type"], "business_key": row["business_key"], "filename": row["filename"], "sha256": row["sha256"], "confidence": row["confidence"], **payload})
         return rows
 
 

@@ -109,7 +109,7 @@ def test_trusted_principal_required_env_blocks_anonymous(client, monkeypatch):
 def test_engineering_gate_needs_engineering_role(client):
     from test_graph import workflow_request
 
-    created = client.post("/runs", json=workflow_request()).json()
+    created = client.post("/runs", json={**workflow_request(), "tenant_id": "tenant-gate"}).json()
     run_id = created["run_id"]
     # candidate gate -> 用 data-steward 批准
     step1 = client.post(

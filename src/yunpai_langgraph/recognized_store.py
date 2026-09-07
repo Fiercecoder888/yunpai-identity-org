@@ -252,25 +252,48 @@ class RecognizedTableStore:
 
     def _init(self) -> None:
         with self._connect() as db:
+            # 租户迁移（2026-09-07）：老表只有 sha256 全局 UNIQUE，跨租户混存；
+            # 检出无 tenant_id 的老表时建新表回填 'default' 再删旧表，幂等键改为
+            # (tenant_id, sha256)。
+            existing = db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='recognized_tables'"
+            ).fetchone()
+            legacy = existing is not None and "tenant_id" not in str(existing["sql"])
+            if legacy:
+                db.execute("ALTER TABLE recognized_tables RENAME TO recognized_tables_pre_tenant")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS recognized_tables (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id TEXT NOT NULL DEFAULT 'default',
                     kind TEXT NOT NULL,
                     filename TEXT NOT NULL,
-                    sha256 TEXT NOT NULL UNIQUE,
+                    sha256 TEXT NOT NULL,
                     columns TEXT NOT NULL,
                     rows TEXT NOT NULL,
                     confidence REAL NOT NULL,
                     redacted_fields INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    UNIQUE(tenant_id, sha256)
                 )"""
             )
+            if legacy:
+                db.execute(
+                    """INSERT INTO recognized_tables(tenant_id, kind, filename, sha256, columns, rows,
+                                                    confidence, redacted_fields, created_at)
+                       SELECT 'default', kind, filename, sha256, columns, rows,
+                              confidence, redacted_fields, created_at
+                       FROM recognized_tables_pre_tenant"""
+                )
+                db.execute("DROP TABLE recognized_tables_pre_tenant")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_recognized_tenant_kind ON recognized_tables(tenant_id, kind)")
 
     def ingest(self, *, kind: str, filename: str, sha256: str, columns: list[str],
-               rows: list[dict[str, Any]], confidence: float, redact: bool = True) -> dict[str, Any]:
-        """落库自描述行；同 sha256 幂等（重复上传不重复建行）。"""
+               rows: list[dict[str, Any]], confidence: float, redact: bool = True,
+               tenant_id: str = "default") -> dict[str, Any]:
+        """落库自描述行；同租户同 sha256 幂等（重复上传不重复建行）。"""
         if kind not in KIND_ENUM:
             raise ValueError(f"unsupported kind: {kind}")
+        tenant = str(tenant_id or "default")
         redacted = 0
         stored_rows: list[dict[str, Any]] = []
         for row in rows:
@@ -281,30 +304,35 @@ class RecognizedTableStore:
             stored_rows.append(out)
         created = datetime.now(timezone.utc).isoformat()
         with self._connect() as db:
-            exists = db.execute("SELECT 1 FROM recognized_tables WHERE sha256=?", (sha256,)).fetchone()
+            exists = db.execute(
+                "SELECT 1 FROM recognized_tables WHERE tenant_id=? AND sha256=?", (tenant, sha256)
+            ).fetchone()
             if exists:
-                return {"inserted_rows": 0, "duplicate": True, "sha256": sha256, "kind": kind, "redacted_fields": 0}
+                return {"inserted_rows": 0, "duplicate": True, "sha256": sha256, "kind": kind, "redacted_fields": 0, "tenant_id": tenant}
             db.execute(
-                """INSERT INTO recognized_tables(kind, filename, sha256, columns, rows, confidence, redacted_fields, created_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (kind, filename, sha256, json.dumps(columns, ensure_ascii=False),
+                """INSERT INTO recognized_tables(tenant_id, kind, filename, sha256, columns, rows,
+                                                confidence, redacted_fields, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (tenant, kind, filename, sha256, json.dumps(columns, ensure_ascii=False),
                  json.dumps(stored_rows, ensure_ascii=False), float(confidence), redacted, created),
             )
-        return {"inserted_rows": len(stored_rows), "duplicate": False, "sha256": sha256, "kind": kind, "redacted_fields": redacted}
+        return {"inserted_rows": len(stored_rows), "duplicate": False, "sha256": sha256, "kind": kind, "redacted_fields": redacted, "tenant_id": tenant}
 
     def query(self, *, kind: str | None = None, filters: dict[str, Any] | None = None,
-              aggregate: dict[str, str] | None = None, limit: int = 200) -> list[dict[str, Any]]:
-        """读回 + 过滤 + 聚合（近似 SQL 的声明式查询）。"""
+              aggregate: dict[str, str] | None = None, limit: int = 200,
+              tenant_id: str = "default") -> list[dict[str, Any]]:
+        """读回 + 过滤 + 聚合（近似 SQL 的声明式查询）；只读本租户的行。"""
         rows: list[dict[str, Any]] = []
         with self._connect() as db:
-            sql = "SELECT kind, filename, sha256, columns, rows, confidence, created_at FROM recognized_tables"
-            params: list[Any] = []
+            sql = ("SELECT tenant_id, kind, filename, sha256, columns, rows, confidence, created_at "
+                   "FROM recognized_tables WHERE tenant_id=?")
+            params: list[Any] = [str(tenant_id or "default")]
             if kind:
-                sql += " WHERE kind=?"
+                sql += " AND kind=?"
                 params.append(kind)
             for r in db.execute(sql, params).fetchall():
                 for row in json.loads(r["rows"]):
-                    rows.append({"kind": r["kind"], "filename": r["filename"], **row})
+                    rows.append({"tenant_id": r["tenant_id"], "kind": r["kind"], "filename": r["filename"], **row})
 
         if filters:
             rows = [r for r in rows if all(str(r.get(k)) == str(v) for k, v in (filters or {}).items())]
