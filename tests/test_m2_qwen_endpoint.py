@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_qwen_default_endpoint_is_local_proxy_never_port_9():
     config = llm.QwenConfig()
     parts = urlsplit(config.base_url)
-    assert parts.port == 18085
+    assert parts.port == 8088
     assert parts.port != 9
     assert "qwen" in parts.hostname or parts.hostname in {"127.0.0.1", "localhost"}
 
@@ -45,14 +45,14 @@ def test_qwen_from_env_honors_explicit_endpoint_and_reports_honestly(monkeypatch
 
 def test_env_example_documents_m2_model_endpoint_contract():
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "QWEN_BASE_URL=http://127.0.0.1:18085/v1" in text
+    assert "QWEN_BASE_URL=http://127.0.0.1:8088/v1" in text
     assert "M2_MODEL_BASE_URL" in text
     assert ":9" not in text.replace("127.0.0.1:9", "")  # 模板本身不出现 127.0.0.1:9 值
 
 
 def test_start_backend_script_contains_endpoint_guard():
     text = (ROOT / "ops" / "deploy" / "start_backend.sh").read_text(encoding="utf-8")
-    assert "18085" in text
+    assert "8088" in text
     assert "QWEN_BASE_URL" in text
     assert "127.0.0.1:8081/" in text  # 启动守卫拦截未代理端口
 

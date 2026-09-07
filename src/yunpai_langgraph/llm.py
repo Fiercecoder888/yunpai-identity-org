@@ -19,8 +19,8 @@ def _env_bool(name: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class QwenConfig:
     enabled: bool = True
-    base_url: str = "http://127.0.0.1:18085/v1"
-    model: str = "qwen3.6-35b-a3b-fp8-gpu0-200k"
+    base_url: str = "http://127.0.0.1:8088/v1"
+    model: str = "qwen3.8-27b"
     api_key: str = ""
     timeout_s: float = 45.0
 
@@ -212,13 +212,12 @@ class QwenRouter:
                          assignments: list[dict[str, Any]], roster: list[dict[str, Any]],
                          message: str, roles: list[dict[str, Any]],
                          permissions: list[dict[str, Any]]) -> dict[str, Any]:
-        """引导AI 对话判断（F-015 重设计：判断交给模型，不写死规则）。
+        """引导AI 对话判断（F-015：结构与分配判断交给模型，代码只做模板）。
 
-        输入当前方案 + 花名册 + 用户一句话，模型输出结构化决策：
-        ``{ok, reply, scale, needs_scale, actions, confirm}``——
-        actions 是对「方案」的变更（add_dept/del_dept/assign/unassign），
-        confirm=true 表示用户明确要落地。模型只提案，落库由调用方在
-        confirm 时执行（人工确认 Gate）。失败返回 ok=False，调用方 fail-loud。
+        模型只产出**扁平数据**（部门名单 + 人员分配，人员带所属部门），组织树
+        的绘制由前端模板完成；首轮（needs_scale）返回三档规模的建议部门名单。
+        返回 ``{ok, reply, scale, needs_scale, confirm, departments, assignments,
+        scale_departments}``。确认落地由调用方在 confirm=true 时执行。
         """
         started = time.perf_counter()
         metadata = self.config.public()
@@ -229,8 +228,8 @@ class QwenRouter:
 
             prompt = json.dumps({
                 "current_scale": scale,
-                "departments": list(departments or []),
-                "assignments": list(assignments or []),
+                "current_departments": list(departments or []),
+                "current_assignments": list(assignments or []),
                 "roster": roster,
                 "user_message": message,
                 "roles": roles,
@@ -240,24 +239,27 @@ class QwenRouter:
                 "model": self.config.model,
                 "messages": [
                     {"role": "system", "content": (
-                        "你是云湃制造系统的组织架构引导助手，负责把公司的组织架构与权限分配方案整理出来。"
-                        "你会收到：当前方案（部门列表、账号分配）、花名册（姓名/岗位/部门）、可分配角色及含义、"
-                        "以及用户最新的一句话。判断用户意图，只输出一个 JSON 对象，字段：\n"
-                        "reply（给用户的中文回复，简短自然，说明你这次做了什么）\n"
-                        "scale（用户本次选定/变更公司规模时填 small|medium|large，否则 null）\n"
-                        "needs_scale（还不知道公司规模、需要先让用户选时填 true，否则 false）\n"
-                        "actions（对方案的变更动作数组，无变更则空数组；每项 op 为：\n"
-                        "  {op:'add_dept', name:'部门名'} / {op:'del_dept', name:'部门名'} / "
-                        "{op:'assign', user:'姓名', roles:['角色code']} / {op:'unassign', user:'姓名'}）\n"
-                        "confirm（用户明确要落地当前方案，如说“就这样/确认/好/可以/落地”时为 true，否则 false）\n\n"
+                        "你是云湃制造系统的组织架构引导助手。你会收到：当前部门名单、当前人员分配（每人含姓名/"
+                        "角色/所属部门）、花名册（姓名/岗位/部门）、可分配角色及含义、用户最新一句话。"
+                        "判断用户意图，只输出一个 JSON 对象，字段：\n"
+                        "reply（给用户的中文回复，简短自然）\n"
+                        "scale（用户选定/变更规模时 small|medium|large，否则 null）\n"
+                        "needs_scale（还不知道规模、需要先让用户选时 true，否则 false）\n"
+                        "confirm（用户明确要落地当前架构，如“就这样/确认/好/可以/落地”时为 true，否则 false）\n"
+                        "departments（更新后的部门名数组，如 [\"生产部\",\"品质部\"]）\n"
+                        "assignments（更新后的人员分配数组，每项 {name:\"张三\", roles:[\"factory-director\"], "
+                        "dept:\"生产部\"}；尚未分配人员则空数组）\n"
+                        "scale_departments（仅当 needs_scale=true 时返回对象 {small:[...], medium:[...], large:[...]}，"
+                        "分别是小/中/大规模的建议部门名单）\n\n"
                         "规则：\n"
-                        "1) 规模对应复杂度——small 约 2~3 个部门/3 类角色（厂长、组长、工人）；"
-                        "medium 约 4~6 个部门/6 类角色；large 约 6~9 个部门/9 类角色。选定规模时用 add_dept 把初始部门列出来。\n"
-                        "2) 账号分配：按花名册里该人的岗位(skill)与部门匹配角色（角色含义见 roles）；"
-                        "拿不准就分配 worker 并在 reply 提示需人工确认；管理类岗位谨慎，reply 里说明。\n"
+                        "1) 规模复杂度——small 2~3 个部门、medium 4~6 个、large 6~9 个；"
+                        "scale_departments 三档要体现部门数量的复杂度差异。\n"
+                        "2) 账号分配：按花名册里该人的岗位(skill)与部门匹配角色（角色含义见 roles），"
+                        "dept 填其所属部门；拿不准给 worker 并在 reply 提示；管理类岗位谨慎。\n"
                         "3) 角色 code 只能从 roles 里选，不能自造。\n"
-                        "4) 删除/撤销照做（del_dept/unassign），并在 reply 说清变化。\n"
-                        "5) 只依据花名册与当前方案判断，不编造人员。"
+                        "4) 用户的所有增删改（加/删部门、设/撤角色、调动人员）都要直接反映到 departments/assignments 里，"
+                        "返回更新后的完整名单，并在 reply 说清变化。\n"
+                        "5) 只依据花名册与当前方案判断，不编造花名册之外的人员；用户明确提到的新名字可以加入。"
                     )},
                     {"role": "user", "content": prompt},
                 ],
@@ -270,7 +272,8 @@ class QwenRouter:
             # 本地模型常无鉴权：api_key 为空时用占位 token（不因此拒绝）。
             token = self.config.api_key or "local"
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            async with httpx.AsyncClient(timeout=self.config.timeout_s, trust_env=False) as client:
+            # 引导要一次生成名单，本地 27b 较慢：给更长超时（至少 180s，与 Planner 路由解耦）。
+            async with httpx.AsyncClient(timeout=max(self.config.timeout_s, 180.0), trust_env=False) as client:
                 response = await client.post(f"{self.config.base_url}/chat/completions", headers=headers, json=body)
                 response.raise_for_status()
                 payload = response.json()
@@ -279,24 +282,26 @@ class QwenRouter:
             decision = json.loads(cleaned)
             if not isinstance(decision, dict):
                 raise ValueError("guide_chat response is not an object")
-            actions = decision.get("actions")
-            if not isinstance(actions, list):
-                actions = []
+            departments = decision.get("departments") if isinstance(decision.get("departments"), list) else []
+            assignments = decision.get("assignments") if isinstance(decision.get("assignments"), list) else []
+            scale_departments = decision.get("scale_departments") if isinstance(decision.get("scale_departments"), dict) else {}
             elapsed = round((time.perf_counter() - started) * 1000, 1)
-            logger.info("qwen.guide_chat status=ok model=%s latency_ms=%s actions=%s confirm=%s",
-                        self.config.model, elapsed, len(actions), bool(decision.get("confirm")))
+            logger.info("qwen.guide_chat status=ok model=%s latency_ms=%s depts=%s assigns=%s confirm=%s",
+                        self.config.model, elapsed, len(departments), len(assignments), bool(decision.get("confirm")))
             return {"ok": True, "status": "ok",
                     "reply": str(decision.get("reply") or ""),
                     "scale": decision.get("scale"),
                     "needs_scale": bool(decision.get("needs_scale")),
-                    "actions": actions,
                     "confirm": bool(decision.get("confirm")),
+                    "departments": departments,
+                    "assignments": assignments,
+                    "scale_departments": scale_departments,
                     "model": {**metadata, "status": "ok", "latency_ms": elapsed}}
         except Exception as exc:
             elapsed = round((time.perf_counter() - started) * 1000, 1)
             logger.warning("qwen.guide_chat status=error model=%s latency_ms=%s error=%s",
-                           self.config.model, elapsed, exc)
-            return {"ok": False, "status": "error", "error": str(exc),
+                           self.config.model, elapsed, f"{type(exc).__name__}: {exc}")
+            return {"ok": False, "status": "error", "error": f"{type(exc).__name__}: {exc}",
                     "model": {**metadata, "status": "error", "latency_ms": elapsed}}
 
     @staticmethod

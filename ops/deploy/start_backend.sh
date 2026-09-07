@@ -25,9 +25,10 @@ if [[ -n "${YUNPAI_ENV_FILE:-}" && -r "$YUNPAI_ENV_FILE" ]]; then
 fi
 
 # Planner 路由模型：未配置 QWEN_API_KEY 时自动回退确定性路由并记录 not_configured。
+# 默认本机 llama.cpp 跑的 Qwen3.8-27B（127.0.0.1:8088）；远端 vLLM 时改 QWEN_BASE_URL。
 export QWEN_ROUTER_ENABLED="${QWEN_ROUTER_ENABLED:-true}"
-export QWEN_BASE_URL="${QWEN_BASE_URL:-http://127.0.0.1:18085/v1}"
-export QWEN_MODEL="${QWEN_MODEL:-qwen3.6-35b-a3b-fp8-gpu0-200k}"
+export QWEN_BASE_URL="${QWEN_BASE_URL:-http://127.0.0.1:8088/v1}"
+export QWEN_MODEL="${QWEN_MODEL:-qwen3.8-27b}"
 
 # M4 的物料供应 API 使用服务 JWT 而非通用模块头；令牌只允许来自调用方环境。
 if [[ -z "${M4_AUTHORIZATION:-}" && -n "${M4_SUPPLY_TOKEN:-}" ]]; then
