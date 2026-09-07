@@ -25,7 +25,7 @@
 | F-011 | M1-M5 Orchestrator 编排闭环 | 最高 | 进行中（代码与本地回归通过，真实 GB10 发布回读待外部条件） | M1/M3/M4/M5 分支、workflow、bridge、M5 repository、principal Gate | 两个版本化 workflow 可路由；多格式上传进入 M1；跨模块 bridge 确定性装配；六类 snapshot 带 revision/checksum；Apply Gate 真实 release+head CAS；resume 用受信 principal；MES 只到 durable pending | E-M1M5-ORCH-CODE-001 |
 | F-013 | 权限隔离与多租户鉴权（身份体系） | 高 | 进行中（登录 v1+权限模型+影子 enforcement 代码完成；切换与前端配套待验收轮） | 租户基座（A-015） | 登录会话/受信头二选一注入 principal；identity API 全过 authorize；业务端点影子→强制渐进；LEGACY 退役开关 | E-IDENTITY-ORG-20260907-001 |
 | F-014 | 组织架构功能完整版 | 高 | 已完成（代码验收；dept 级数据范围过滤列 v2） | F-013 | 花名册派生部门树（拆分/归一化/manual 保护/幂等）；手工调整 API；按部门批量授权；CLI | E-IDENTITY-ORG-20260907-001 |
-| F-015 | 引导AI（权限分配向导） | 高 | 已完成（代码验收；Qwen 增强路径待真实联调） | F-013/F-014 | 权限清单 API；建议只产出不落库；draft 方案；人工确认 Gate 后才写绑定（红线） | E-IDENTITY-ORG-20260907-001 |
+| F-015 | 引导AI（权限分配向导，轻量对话版） | 高 | 已完成（代码验收；Qwen 增强路径待真实联调） | F-013/F-014 | 首开给大/中/小规模三选一预设 → 对话式增删改（设角色/加删部门/移除角色）→ 确认落地；确定性意图解析不依赖 LLM；权限清单 API；红线：确认前零库写入 | E-IDENTITY-ORG-20260907-001 |
 
 ## 功能变更历史
 

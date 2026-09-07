@@ -9,6 +9,7 @@ from typing import Any
 
 from .auth import SESSION_COOKIE, login, session_from_token, sign_session_token
 from .graph import YunpaiGraph
+from .guided_chat import SCALE_PRESETS, handle_message as handle_guidance_message
 from .guided_setup import build_guidance_plan, catalog_payload, enrich_plan_with_llm
 from .identity import IdentityStore, authorize, permission_for_gate
 from .models import new_state
@@ -771,6 +772,33 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         except ValueError as exc:
             raise HTTPException(409, {"code": "GUIDANCE_GATE_REJECTED", "message": str(exc)}) from exc
         return result
+
+    # --------------------------------------------- 引导AI 轻量对话（F-015 重设计）
+
+    @app.get("/api/guidance/presets")
+    async def guidance_presets():
+        """规模三档预设（只读，前端渲染首开三选一按钮）。"""
+        return {
+            "presets": [
+                {"value": code, "label": preset["label"],
+                 "departments": preset["departments"], "roles": preset["roles"]}
+                for code, preset in SCALE_PRESETS.items()
+            ],
+        }
+
+    @app.post("/api/guidance/chat")
+    async def guidance_chat(body: dict[str, Any], request: Request):
+        """引导AI 对话入口（轻量）：规模三选一 → 预设架构 → 自然语言增删改 →
+        确认落地。state 为客户端回传的不透明 JSON，服务端无会话表。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        principal = _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        roster = _load_workers(body, tenant)
+        result = handle_guidance_message(
+            identity_store, tenant_id=tenant, user_id=str(principal.get("actor") or ""),
+            message=str(body.get("message") or ""), roster=roster,
+            state=body.get("state"),
+        )
+        return {"tenant_id": tenant, **result}
 
     return app
 

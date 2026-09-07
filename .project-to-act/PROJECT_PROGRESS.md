@@ -42,6 +42,8 @@
 
 按时间倒序追加：日期、完成事项、证据 ID、遗留问题、下一步和确认来源。不要覆盖旧记录。
 
+- 2026-09-07：按用户裁定将引导AI 重设计为**轻量对话版**（同一分支 feat/identity-org-20260907）：新增 guided_chat.py——首开给大/中/小规模三选一预设（2/5/8 部门、3/6/9 角色），选定后对话式自然语言增删改（设角色/加删部门/移除角色，确定性意图解析不依赖 LLM），说「就这样/确认」即人工 Gate 落地；新增 API `/api/guidance/presets`（只读）与 `/api/guidance/chat`（identity.admin，state 客户端回传无会话表）；原 `/api/identity/guidance/*`（draft/plan/apply）保留为底层原语。全量 pytest 483→493 passed/2 skipped；引导建的结构标 source=manual 不被派生覆盖。证据 E-IDENTITY-ORG-20260907-001（复用）；确认来源：用户反馈。
+
 - 2026-09-07：按《组织架构与权限说明交接包》完成 F-013/F-014/F-015 主体开发（分支 feat/identity-org-20260907，基于租户 PR #2 合入后的 dev，已推 github）：identity.py 占位升正式（五接缝：13 项权限+data scope、九种子角色、shift 实态派生+manual 保护、authorize 四路语义+deny 审计）；auth.py 登录 v1（scrypt+HS256 HttpOnly Cookie，零新增依赖）；api.py 会话 principal 注入（REQUIRE 语义升级二选一，缺两者 401）+ /api/auth/* + /api/identity/* 管理端点（全过 authorize）+ 业务端点影子模式（YUNPAI_IDENTITY_ENFORCE=shadow 默认）；guided_setup.py 引导AI（确定性推荐内核+Qwen 增强回退+draft→人工确认 Gate 落库）+ llm.py guide_suggest；CLI derive-org/create-admin。全量 pytest 483 passed/2 skipped（基线 439）；真实花名册（426 行，云湃业务数据只读、身份证掩码）派生验证：17 部门、「人事、采购」拆两节点、「生产部/生产」归一化合并、幂等零新增、引导方案全覆盖。证据 E-IDENTITY-ORG-20260907-001；遗留：影子模式跑验收轮后切强制并退役 LEGACY_ROLE_GRANTS（阶段⑤）、前端登录页/httpClient 凭据与租户头/permissionCatalog 动态化、Qwen guide_suggest 真实联调、586 行口径与 426 行快照差异待数据侧核对；确认来源：本次实施与验证。
 
 - 2026-09-05：完成 M1-M5 Orchestrator 集成代码与本地验收；集成 origin/dev(M5)+origin/main(M3/M4)+M1 分支到 dev；新增 m1_m5_document_to_plan/canonical_to_m5 workflow、多格式上传入口、required-capability Gate、orchestration_bridge 六类 snapshot、Apply Gate 真实 M5 release（单事务 draft→approved→released+head CAS）、受信 principal/角色 Gate、MES durable pending 边界；完整后端 292 passed、2 skipped，账本/diff 通过；证据 E-M1M5-ORCH-CODE-001；遗留为 GB10 真实订单发布回读需人工审批角色与样本；确认来源：本次实施与验证。
