@@ -15,6 +15,9 @@
 | P-007 | 代码集成完成，GB10 真实联调已到 M4 data Gate | zhb / DeepSeek Harness | 复用并集成 M1/M3/M4/M5 Tool 分支，修复文件/工作流入口、跨模块 snapshot、M5 lifecycle/head 和可信 Gate；39092 已验证 M0 canonical BOM/SOP 回读、M2 匹配和 M3 缺料计算，真实订单在供应商事实 Gate 阻塞 | E-GB10-WH909-ORDER-20260905-006 | 2026-09-05 |
 | P-008 | 已完成（代码验收） | Codex / s-m3-m4-tools-20260904 | M3 15 个、M4 24 个目标工具真实绑定；两个 Skill operation 完整；契约、负向、Gate 和 M3→M4 集成测试通过（从 origin/main 并入 dev 时登记，原并行分支编号 P-006 与 M1 handoff 撞号） | E-M3M4-TOOLS-001 | 2026-09-04 |
 | P-009 | 已完成（代码验收） | DeepSeek Harness / s-m1-tools-20260904 | M1 17 个 Tool 全部绑定（专用 HTTP Adapter）与 Skill 全操作映射落地，117 项测试通过（从 M1 分支并入 dev 时登记，原并行分支编号 P-007 与 orchestration 规划撞号） | E-M1-TOOLS-001 | 2026-09-04 |
+| P-011 | 代码完成（本地验收；影子模式待验收轮后切强制） | zzg / feat/identity-org-20260907 | 接缝 1/2/4（权限清单 13 项+九角色+authorize 正式语义+deny 审计）+ 登录 v1（scrypt+HS256 Cookie）+ identity API 全过 authorize + 业务端点影子模式；阶段⑤切换（IDENTITY_LEGACY_ROLES 默认关、前端登录页）待 ②-④ 验收轮 | E-IDENTITY-ORG-20260907-001 | 2026-09-07 |
+| P-012 | 已完成（代码验收） | zzg / feat/identity-org-20260907 | 接缝 3 派生规则（shift 实态/拆分/归一化/manual 保护）+ org 手工调整 API + 按部门批量授权 bind_users_bulk + CLI derive-org；dept 级数据范围过滤列 v2 | E-IDENTITY-ORG-20260907-001 | 2026-09-07 |
+| P-013 | 代码完成（本地验收；Qwen 真实联调待配置） | zzg / feat/identity-org-20260907 | 权限清单 API + 引导建议（确定性内核+LLM 增强回退）+ draft 方案 + 人工确认 Gate 落库；红线测试：未确认方案零绑定写入 | E-IDENTITY-ORG-20260907-001 | 2026-09-07 |
 
 ## 阻塞项
 
@@ -38,6 +41,8 @@
 ## 进度历史
 
 按时间倒序追加：日期、完成事项、证据 ID、遗留问题、下一步和确认来源。不要覆盖旧记录。
+
+- 2026-09-07：按《组织架构与权限说明交接包》完成 F-013/F-014/F-015 主体开发（分支 feat/identity-org-20260907，基于租户 PR #2 合入后的 dev，已推 github）：identity.py 占位升正式（五接缝：13 项权限+data scope、九种子角色、shift 实态派生+manual 保护、authorize 四路语义+deny 审计）；auth.py 登录 v1（scrypt+HS256 HttpOnly Cookie，零新增依赖）；api.py 会话 principal 注入（REQUIRE 语义升级二选一，缺两者 401）+ /api/auth/* + /api/identity/* 管理端点（全过 authorize）+ 业务端点影子模式（YUNPAI_IDENTITY_ENFORCE=shadow 默认）；guided_setup.py 引导AI（确定性推荐内核+Qwen 增强回退+draft→人工确认 Gate 落库）+ llm.py guide_suggest；CLI derive-org/create-admin。全量 pytest 483 passed/2 skipped（基线 439）；真实花名册（426 行，云湃业务数据只读、身份证掩码）派生验证：17 部门、「人事、采购」拆两节点、「生产部/生产」归一化合并、幂等零新增、引导方案全覆盖。证据 E-IDENTITY-ORG-20260907-001；遗留：影子模式跑验收轮后切强制并退役 LEGACY_ROLE_GRANTS（阶段⑤）、前端登录页/httpClient 凭据与租户头/permissionCatalog 动态化、Qwen guide_suggest 真实联调、586 行口径与 426 行快照差异待数据侧核对；确认来源：本次实施与验证。
 
 - 2026-09-05：完成 M1-M5 Orchestrator 集成代码与本地验收；集成 origin/dev(M5)+origin/main(M3/M4)+M1 分支到 dev；新增 m1_m5_document_to_plan/canonical_to_m5 workflow、多格式上传入口、required-capability Gate、orchestration_bridge 六类 snapshot、Apply Gate 真实 M5 release（单事务 draft→approved→released+head CAS）、受信 principal/角色 Gate、MES durable pending 边界；完整后端 292 passed、2 skipped，账本/diff 通过；证据 E-M1M5-ORCH-CODE-001；遗留为 GB10 真实订单发布回读需人工审批角色与样本；确认来源：本次实施与验证。
 - 2026-09-05：完成本地/远端未合并代码审计；确认 DeepSeek M1/M2 `6045624` 及其合并提交已在 `origin/main`/`origin/dev`，PMC/M1 Skill 分支的运行时代码已有等价主线实现，剩余未合入提交为重复补丁或文档；远端两分支随后统一到 `4192438`；证据 E-GIT-MERGE-AUDIT-20260905；遗留仍为 M0 canonical、产品/BOM/SOP 和 M3-M5 真实数据阻塞；确认来源：本次 Git 审计。

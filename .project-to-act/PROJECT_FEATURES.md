@@ -23,10 +23,15 @@
 | F-010 | M1 Tool 与 Skill 完整绑定与独立服务接入 | 最高 | 已完成（代码验收） | M1 manifests、T8 M1 独立服务、M1 HTTP Adapter | 17 个 M1 Tool 经专用 HTTP Adapter 可执行且 Skill operation 唯一；租户/角色/202/错误映射与本地 fixture 边界有自动化证据；真实服务联调按 URL/认证/数据库回读条件另计 | E-M1-TOOLS-001 |
 | F-009 | M3/M4 Tool 与 Skill 完整绑定 | 最高 | 已完成（代码验收） | M3/M4 manifests、历史领域实现、HTTP Adapter | M3 15 个和 M4 24 个目标工具均可执行且 Skill operation 完整；审批、幂等、revision、handoff、发送和供应事实 Gate 有自动化证据 | E-M3M4-TOOLS-001 |
 | F-011 | M1-M5 Orchestrator 编排闭环 | 最高 | 进行中（代码与本地回归通过，真实 GB10 发布回读待外部条件） | M1/M3/M4/M5 分支、workflow、bridge、M5 repository、principal Gate | 两个版本化 workflow 可路由；多格式上传进入 M1；跨模块 bridge 确定性装配；六类 snapshot 带 revision/checksum；Apply Gate 真实 release+head CAS；resume 用受信 principal；MES 只到 durable pending | E-M1M5-ORCH-CODE-001 |
+| F-013 | 权限隔离与多租户鉴权（身份体系） | 高 | 进行中（登录 v1+权限模型+影子 enforcement 代码完成；切换与前端配套待验收轮） | 租户基座（A-015） | 登录会话/受信头二选一注入 principal；identity API 全过 authorize；业务端点影子→强制渐进；LEGACY 退役开关 | E-IDENTITY-ORG-20260907-001 |
+| F-014 | 组织架构功能完整版 | 高 | 已完成（代码验收；dept 级数据范围过滤列 v2） | F-013 | 花名册派生部门树（拆分/归一化/manual 保护/幂等）；手工调整 API；按部门批量授权；CLI | E-IDENTITY-ORG-20260907-001 |
+| F-015 | 引导AI（权限分配向导） | 高 | 已完成（代码验收；Qwen 增强路径待真实联调） | F-013/F-014 | 权限清单 API；建议只产出不落库；draft 方案；人工确认 Gate 后才写绑定（红线） | E-IDENTITY-ORG-20260907-001 |
 
 ## 功能变更历史
 
 按时间倒序追加：日期、功能 ID、变化、原因、影响、证据 ID 和确认来源。
+
+- 2026-09-07：新增 F-013/F-014/F-015 并落地主体实现（分支 feat/identity-org-20260907，基于 dev）：F-013 登录 v1（scrypt+HS256 HttpOnly 会话 Cookie，principal 注入替换受信头语义、REQUIRE 二选一缺两者 401）+ 13 项权限清单（含 worker.view/report.view 独立授权与 data scope）+ 九种子角色 + authorize 正式语义（IDENTITY_LEGACY_ROLES 开关/bootstrap 仅空租户/deny 审计）+ identity 管理 API 全过 authorize + 业务端点影子模式（YUNPAI_IDENTITY_ENFORCE 默认 shadow）；F-014 shift 实态派生（、，/ 拆分、剥「部」归一化合并、manual 保护、纯函数预览）+ 手工调整 API + 批量授权 + CLI；F-015 权限清单 API + 确定性推荐内核 + Qwen guide_suggest 增强（失败回退）+ draft 方案 + 人工确认 Gate（confirm=true 才写绑定，红线测试锁定）；原因：D-007 批准的 R-001/R-002 正式需求（交接包 2026-09-07 规范）；影响：后端 483 passed/2 skipped（基线 439），真实花名册 426 行派生验证通过；证据 E-IDENTITY-ORG-20260907-001；遗留：阶段⑤切换（LEGACY 默认关/前端登录页/httpClient 凭据租户头/permissionCatalog 动态化）与 Qwen 真实联调；确认来源：本次实施与验证。
 
 - 2026-09-05：F-008 进展为"进行中"并新增 F-011 M1-M5 Orchestrator 编排闭环；F-011 覆盖 M1/M3/M4/M5 分支集成、两个版本化 workflow（m1_m5_document_to_plan/canonical_to_m5）、多格式上传入口、required-capability Gate、确定性 orchestration_bridge 与 planning_snapshot 六类 snapshot、Apply Gate 真实 M5 release（单事务 + head CAS）、受信 principal/角色 Gate 与 MES pending 边界；证据 `E-M1M5-ORCH-CODE-001`；真实 GB10 服务/审批角色与 M0 canonical 可达仍单独阻塞生产回读验收；确认来源：本次实施与验证。
 
