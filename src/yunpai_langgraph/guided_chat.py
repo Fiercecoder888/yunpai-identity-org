@@ -92,7 +92,7 @@ def _split_names(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"[、，,\s]+", text) if p.strip()]
 
 
-_CONFIRM_WORDS = ("就这样", "就按", "确认", "确定", "可以", "没问题", "完成", "同意", "开始", "ok", "yes")
+_CONFIRM_WORDS = ("就这样", "就按", "确认", "确定", "可以", "没问题", "完成", "同意", "开始", "ok", "yes", "confirm")
 
 
 def _is_confirm(msg: str) -> bool:
@@ -211,7 +211,7 @@ def handle_message(store: IdentityStore, *, tenant_id: str, user_id: str,
                      "·「新增部门 品质部」「删除 仓库」\n"
                      "·「张三不当组长了」\n"
                      "或者回复「就这样」按默认落地。",
-            "options": [{"value": "confirm", "label": "就这样，按默认落地"}],
+            "options": [{"value": "就这样", "label": "就这样，按默认落地"}],
             "plan": {"departments": list(preset["departments"]),
                      "roles": preset["roles"], "assignments": []},
             "state": new_state, "done": False, "applied": None,
@@ -279,7 +279,7 @@ def _reply_edit(state: dict[str, Any], departments: list[str], assignments: list
     return {
         "reply": f"{prefix}\n{_plan_summary({'departments': departments, 'assignments': assignments})}\n"
                  "继续调整，或回复「就这样」落地。",
-        "options": [{"value": "confirm", "label": "就这样，落地"}],
+        "options": [{"value": "就这样", "label": "就这样，落地"}],
         "plan": {"departments": departments,
                  "roles": [role["role_code"] for role in DEFAULT_ROLE_SEEDS],
                  "assignments": [{"name": a["name"], "roles": a["roles"]} for a in assignments]},
