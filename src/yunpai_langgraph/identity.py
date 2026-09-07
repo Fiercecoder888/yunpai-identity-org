@@ -337,17 +337,6 @@ class IdentityStore:
                 )"""
             )
             db.execute(
-                """CREATE TABLE IF NOT EXISTS guidance_plans (
-                    plan_id TEXT PRIMARY KEY,
-                    tenant_id TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'draft',
-                    created_at TEXT NOT NULL,
-                    applied_at TEXT,
-                    applied_by TEXT
-                )"""
-            )
-            db.execute(
                 """CREATE TABLE IF NOT EXISTS kv_secrets (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
@@ -622,91 +611,6 @@ class IdentityStore:
             rows = db.execute(query + " ORDER BY seq DESC LIMIT ?", params).fetchall()
         return [dict(row) for row in rows]
 
-    # ------------------------------------------------------- 引导AI（F-015）
-
-    def save_guidance_plan(self, *, tenant_id: str, plan: dict[str, Any]) -> dict[str, Any]:
-        """保存建议方案为 draft——只有方案行，没有任何绑定写入（红线）。"""
-        plan_id = plan.get("plan_id") or f"plan-{secrets.token_urlsafe(8)}"
-        with self._txn() as db:
-            db.execute(
-                "INSERT INTO guidance_plans(plan_id, tenant_id, payload, status, created_at) VALUES(?,?,?,?,?)",
-                (plan_id, tenant_id, _dump_obj(plan), "draft", _now()),
-            )
-        return {"plan_id": plan_id, "tenant_id": tenant_id, "status": "draft"}
-
-    def get_guidance_plan(self, *, tenant_id: str, plan_id: str) -> dict[str, Any] | None:
-        with self._txn() as db:
-            row = db.execute(
-                "SELECT plan_id, payload, status, created_at, applied_at, applied_by FROM guidance_plans WHERE tenant_id=? AND plan_id=?",
-                (tenant_id, plan_id)).fetchone()
-        if not row:
-            return None
-        plan = _load_obj(row["payload"])
-        return {
-            "plan_id": row["plan_id"],
-            "status": row["status"],
-            "created_at": row["created_at"],
-            "applied_at": row["applied_at"],
-            "applied_by": row["applied_by"],
-            "plan": plan,
-        }
-
-    def apply_guidance_plan(self, *, tenant_id: str, plan_id: str,
-                            confirmed_by: str, confirm: bool = False) -> dict[str, Any]:
-        """人工确认 Gate：``confirm=True`` 且 confirmed_by 非空才把方案落库为绑定。
-
-        - 红线〔原话边界〕：AI 建议不经确认不生效——confirm 非 True 直接拒绝；
-        - draft 才可应用（applied 幂等拒绝），绑定与状态翻转同一事务。
-        """
-        if not confirm:
-            raise ValueError("引导AI 分配方案必须人工确认（confirm=true）后才能落库")
-        confirmed_by = str(confirmed_by or "").strip()
-        if not confirmed_by:
-            raise ValueError("必须提供确认人（confirmed_by）")
-        with self._txn() as db:
-            row = db.execute(
-                "SELECT payload, status FROM guidance_plans WHERE tenant_id=? AND plan_id=?",
-                (tenant_id, plan_id)).fetchone()
-            if not row:
-                raise ValueError(f"方案不存在: {plan_id}（租户 {tenant_id}）")
-            if row["status"] != "draft":
-                raise ValueError(f"方案状态为 {row['status']}，只有 draft 可应用")
-            plan = _load_obj(row["payload"])
-            suggestions = plan.get("suggestions") or []
-            self.ensure_tenant_roles(tenant_id)
-            for item in suggestions:
-                user_id = str(item.get("user_id") or "")
-                role_codes = [str(r) for r in (item.get("suggested_roles") or item.get("role_codes") or [])]
-                if not user_id or not role_codes:
-                    continue
-                org_id = item.get("primary_dept") or item.get("org_id")
-                if org_id:
-                    node = db.execute(
-                        "SELECT 1 FROM org_nodes WHERE tenant_id=? AND org_id=?",
-                        (tenant_id, org_id)).fetchone()
-                    if not node:
-                        raise ValueError(f"组织节点不存在: {org_id}（租户 {tenant_id}）")
-                for role in role_codes:
-                    exists = db.execute(
-                        "SELECT 1 FROM roles WHERE tenant_id=? AND role_code=?",
-                        (tenant_id, role)).fetchone()
-                    if not exists:
-                        raise ValueError(f"未注册角色: {role}（租户 {tenant_id}）")
-                db.execute(
-                    """INSERT INTO user_bindings(tenant_id, user_id, org_id, role_codes, skill, created_at)
-                       VALUES(?,?,?,?,?,?)
-                       ON CONFLICT(tenant_id, user_id) DO UPDATE SET
-                         org_id=COALESCE(excluded.org_id, user_bindings.org_id),
-                         role_codes=excluded.role_codes, skill=excluded.skill""",
-                    (tenant_id, user_id, org_id, _dump(role_codes), item.get("skill"), _now()),
-                )
-            db.execute(
-                "UPDATE guidance_plans SET status='applied', applied_at=?, applied_by=? WHERE tenant_id=? AND plan_id=?",
-                (_now(), confirmed_by, tenant_id, plan_id),
-            )
-        return {"plan_id": plan_id, "tenant_id": tenant_id, "status": "applied",
-                "applied_by": confirmed_by, "bindings_written": len(suggestions)}
-
     # -------------------------------------------------------------- 解析
 
     def resolve(self, *, tenant_id: str, user_id: str) -> dict[str, Any]:
@@ -851,11 +755,6 @@ def _dump(value: list[str]) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _dump_obj(value: dict[str, Any]) -> str:
-    import json
-    return json.dumps(value, ensure_ascii=False)
-
-
 def _load(text: str) -> list[str]:
     import json
     try:
@@ -864,14 +763,6 @@ def _load(text: str) -> list[str]:
     except ValueError:
         return []
 
-
-def _load_obj(text: str) -> dict[str, Any]:
-    import json
-    try:
-        value = json.loads(text)
-        return value if isinstance(value, dict) else {}
-    except ValueError:
-        return {}
 
 
 #: 规范落点状态（2026-09-07）：五接缝已按交接包填充正式实现，占位退役。

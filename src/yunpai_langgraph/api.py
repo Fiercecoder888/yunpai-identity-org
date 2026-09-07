@@ -10,7 +10,7 @@ from typing import Any
 from .auth import SESSION_COOKIE, login, session_from_token, sign_session_token
 from .graph import YunpaiGraph
 from .guided_chat import SCALE_OPTIONS, handle_message as handle_guidance_message
-from .guided_setup import build_guidance_plan, catalog_payload, enrich_plan_with_llm
+from .guided_setup import catalog_payload
 from .identity import IdentityStore, authorize, permission_for_gate
 from .models import new_state
 from .registry import ToolRegistry, build_runtime_registry
@@ -711,67 +711,6 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         m0_db = Path(os.getenv("YUNPAI_M0_DB", "runtime/yunpai-m0.sqlite"))
         return [entity.get("payload_json") or {}
                 for entity in M0Store(m0_db).list_entities("worker", tenant).get("entities", [])]
-
-    @app.post("/api/identity/guidance/suggest")
-    async def identity_guidance_suggest(body: dict[str, Any], request: Request):
-        """引导对话原型（阶段①）：产出建议方案，**不落库**（红线）。
-
-        组织树用只读规划器预览（plan_org_from_workers），不写任何 org 节点。
-        """
-        tenant = _tenant_for_request(body.get("tenant_id"), request)
-        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
-        from .identity import plan_org_from_workers
-
-        workers = _load_workers(body, tenant)
-        if not workers:
-            raise HTTPException(409, {"code": "NO_WORKER_ENTITIES",
-                                      "message": "未提供 workers 且 canonical 无 worker 实体"})
-        preview = plan_org_from_workers(workers,
-                                        existing_nodes=identity_store.org_tree(tenant_id=tenant))
-        plan = build_guidance_plan(tenant_id=tenant, workers=workers, derive_result=preview)
-        if body.get("use_llm"):
-            router = getattr(graph.planner, "router", None)
-            plan = await enrich_plan_with_llm(plan, router)
-        return {"tenant_id": tenant, "persisted": False, "plan": plan}
-
-    @app.post("/api/identity/guidance/plan")
-    async def identity_guidance_plan(body: dict[str, Any], request: Request):
-        """生成并保存 draft 方案（阶段④前半）：只写方案行，不写任何绑定。"""
-        tenant = _tenant_for_request(body.get("tenant_id"), request)
-        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
-        from .identity import plan_org_from_workers
-
-        workers = _load_workers(body, tenant)
-        if not workers:
-            raise HTTPException(409, {"code": "NO_WORKER_ENTITIES",
-                                      "message": "未提供 workers 且 canonical 无 worker 实体"})
-        preview = plan_org_from_workers(workers,
-                                        existing_nodes=identity_store.org_tree(tenant_id=tenant))
-        plan = build_guidance_plan(tenant_id=tenant, workers=workers, derive_result=preview)
-        if body.get("use_llm"):
-            router = getattr(graph.planner, "router", None)
-            plan = await enrich_plan_with_llm(plan, router)
-        saved = identity_store.save_guidance_plan(tenant_id=tenant, plan=plan)
-        return {"tenant_id": tenant, "plan_id": saved["plan_id"], "status": "draft",
-                "bindings_written": 0, "plan": plan}
-
-    @app.post("/api/identity/guidance/apply")
-    async def identity_guidance_apply(body: dict[str, Any], request: Request):
-        """人工确认 Gate（阶段④后半）：confirm=true 才把 draft 方案落库为绑定。"""
-        tenant = _tenant_for_request(body.get("tenant_id"), request)
-        principal = _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
-        plan_id = str(body.get("plan_id") or "")
-        if not plan_id:
-            raise HTTPException(422, {"code": "PLAN_ID_REQUIRED", "message": "缺少 plan_id"})
-        confirmed_by = str(body.get("confirmed_by") or principal.get("actor") or "")
-        try:
-            result = identity_store.apply_guidance_plan(
-                tenant_id=tenant, plan_id=plan_id,
-                confirmed_by=confirmed_by, confirm=bool(body.get("confirm") is True),
-            )
-        except ValueError as exc:
-            raise HTTPException(409, {"code": "GUIDANCE_GATE_REJECTED", "message": str(exc)}) from exc
-        return result
 
     # --------------------------------------------- 引导AI 轻量对话（F-015 重设计）
 

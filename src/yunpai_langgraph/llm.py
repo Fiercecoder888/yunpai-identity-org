@@ -208,69 +208,6 @@ class QwenRouter:
             logger.warning("qwen.map_to_canonical status=error model=%s latency_ms=%s error=%s", self.config.model, elapsed, exc)
             return {"ok": False, "status": "error", "error": str(exc), "model": {**metadata, "status": "error", "latency_ms": elapsed}}
 
-    async def guide_suggest(self, roster: list[dict[str, Any]],
-                            permissions: list[dict[str, Any]],
-                            roles: list[dict[str, Any]]) -> dict[str, Any]:
-        """引导AI 建议增强（F-015）：花名册 → 角色分配建议（JSON 提案，不落库）。
-
-        输出仅供 ``guided_setup.enrich_plan_with_llm`` 合并与人工确认，任何
-        失败（未启用/未配置/HTTP/解析）都返回 ok=False 由调用方回退确定性规则。
-        """
-        started = time.perf_counter()
-        metadata = self.config.public()
-        if not self.config.enabled:
-            return {"ok": False, "status": "disabled", "model": {**metadata, "status": "disabled"}}
-        if not self.config.api_key:
-            return {"ok": False, "status": "not_configured", "model": {**metadata, "status": "not_configured"}}
-        try:
-            import httpx
-
-            role_codes = [str(role.get("role_code") or "") for role in roles]
-            prompt = json.dumps({
-                "roster": roster,
-                "available_role_codes": role_codes,
-                "permission_codes": [str(p.get("code") or "") for p in permissions],
-            }, ensure_ascii=False)
-            body = {
-                "model": self.config.model,
-                "messages": [
-                    {"role": "system", "content": (
-                        "你是云湃制造系统的组织权限引导助手。根据花名册（user_id/display_name/skill/depts）"
-                        "为每个人推荐 1-2 个角色（role_code 只能从 available_role_codes 中选，不能自造）。"
-                        "中小企业可能没有正式组织架构，请按岗位与部门常识保守推荐：拿不准就给 worker 并标 "
-                        "needs_review=true。厂长/管理类岗位给 factory-director 时也必须 needs_review=true"
-                        "（管理权确认交人工）。只输出一个 JSON 对象，字段为 suggestions、reason；"
-                        "suggestions 每项为 {user_id, suggested_roles, needs_review, reason}。"
-                    )},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0,
-                "max_tokens": 4096,
-                "stream": False,
-                "chat_template_kwargs": {"enable_thinking": False},
-                "response_format": {"type": "json_object"},
-            }
-            headers = {"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"}
-            async with httpx.AsyncClient(timeout=self.config.timeout_s, trust_env=False) as client:
-                response = await client.post(f"{self.config.base_url}/chat/completions", headers=headers, json=body)
-                response.raise_for_status()
-                payload = response.json()
-            content = self._content(payload)
-            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE | re.DOTALL).strip()
-            decision = json.loads(cleaned)
-            suggestions = decision.get("suggestions") if isinstance(decision, dict) else None
-            if not isinstance(suggestions, list):
-                raise ValueError("guide_suggest response has no suggestions list")
-            elapsed = round((time.perf_counter() - started) * 1000, 1)
-            logger.info("qwen.guide_suggest status=ok model=%s latency_ms=%s suggestions=%s", self.config.model, elapsed, len(suggestions))
-            return {"ok": True, "status": "ok", "suggestions": suggestions,
-                    "model": {**metadata, "status": "ok", "latency_ms": elapsed}}
-        except Exception as exc:
-            elapsed = round((time.perf_counter() - started) * 1000, 1)
-            logger.warning("qwen.guide_suggest status=error model=%s latency_ms=%s error=%s", self.config.model, elapsed, exc)
-            return {"ok": False, "status": "error", "error": str(exc),
-                    "model": {**metadata, "status": "error", "latency_ms": elapsed}}
-
     async def guide_chat(self, *, scale: str | None, departments: list[str],
                          assignments: list[dict[str, Any]], roster: list[dict[str, Any]],
                          message: str, roles: list[dict[str, Any]],
