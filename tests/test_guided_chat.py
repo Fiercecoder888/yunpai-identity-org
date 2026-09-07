@@ -23,8 +23,8 @@ SCALE_DEPARTMENTS = {
 
 DEPARTMENTS = ["生产部", "管理部"]
 ASSIGNMENTS = [
-    {"name": "张三", "roles": ["factory-director"], "dept": "生产部"},
-    {"name": "李四", "roles": ["team-leader"], "dept": "生产部"},
+    {"name": "张三", "roles": ["factory-director"], "dept": "", "manager": ""},
+    {"name": "李四", "roles": ["team-leader"], "dept": "生产部", "manager": "张三"},
 ]
 
 
@@ -59,12 +59,22 @@ def store(tmp_path):
 def test_sanitize_filters_invalid():
     assert sanitize_departments(["生产部", "", "生产部", "管理部"]) == ["生产部", "管理部"]
     assigns = sanitize_assignments([
-        {"name": "张三", "roles": ["factory-director", "superman"], "dept": "生产部"},
+        {"name": "张三", "roles": ["factory-director", "superman"], "dept": "生产部", "manager": ""},
         {"name": "", "roles": ["worker"], "dept": "生产部"},  # 空名剔除
         "garbage",  # 非 dict 剔除
         {"name": "李四", "roles": ["superman"], "dept": "生产部"},  # 全部角色非法 → 剔除
     ])
-    assert assigns == [{"name": "张三", "roles": ["factory-director"], "dept": "生产部"}]
+    assert assigns == [{"name": "张三", "roles": ["factory-director"], "dept": "生产部", "manager": ""}]
+
+
+async def test_manager_field_passes_through(store):
+    """汇报关系（manager）随 plan 透传给前端渲染，但落库仅写部门+角色（manager 为 v2）。"""
+    router = FakeRouter({"小": {"scale": "small", "departments": DEPARTMENTS,
+                                "assignments": ASSIGNMENTS, "reply": "已生成"}})
+    resp = await handle_message(store, tenant_id="t1", user_id="boss", message="小", router=router)
+    by_name = {a["name"]: a for a in resp["plan"]["assignments"]}
+    assert by_name["李四"]["manager"] == "张三"
+    assert by_name["张三"]["manager"] == ""
 
 
 async def test_first_turn_returns_three_scale_departments(store):
@@ -103,7 +113,7 @@ async def test_confirm_applies_flat_plan(store):
     assert {"company", "dept:生产", "dept:管理"} <= set(tree)
     assert tree["dept:生产"]["source"] == "manual"
     binds = {b["user_id"]: (b["role_codes"], b["org_id"]) for b in store.list_bindings(tenant_id="t1")}
-    assert binds["张三"] == (["factory-director"], "dept:生产")
+    assert binds["张三"] == (["factory-director"], None)  # 顶层负责人无部门
     assert binds["李四"] == (["team-leader"], "dept:生产")
 
 

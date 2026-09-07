@@ -55,7 +55,8 @@ def sanitize_departments(raw: Any) -> list[str]:
 
 
 def sanitize_assignments(raw: Any) -> list[dict[str, Any]]:
-    """人员分配：角色 code 白名单过滤，name 非空。"""
+    """人员分配：角色 code 白名单过滤，name 非空；保留 dept（组织单元）与
+    manager（上级姓名，汇报关系，仅用于组织架构图渲染，不入库）。"""
     result: list[dict[str, Any]] = []
     for item in (raw or []) if isinstance(raw, list) else []:
         if not isinstance(item, dict):
@@ -64,7 +65,12 @@ def sanitize_assignments(raw: Any) -> list[dict[str, Any]]:
         roles = [str(r) for r in (item.get("roles") or []) if str(r) in _ROLE_CODES]
         if not name or not roles:
             continue
-        result.append({"name": name, "roles": roles, "dept": str(item.get("dept") or "").strip()})
+        result.append({
+            "name": name,
+            "roles": roles,
+            "dept": str(item.get("dept") or "").strip(),
+            "manager": str(item.get("manager") or "").strip(),
+        })
     return result
 
 
