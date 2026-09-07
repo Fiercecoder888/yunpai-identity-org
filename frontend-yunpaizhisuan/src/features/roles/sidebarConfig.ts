@@ -22,7 +22,6 @@ export const sidebarGroups: SidebarGroupDef[] = [
     key: 'workbench',
     title: '我的工作台',
     items: [
-      { key: '/home', label: '角色首页', requiredPermission: null },
       { key: '/quality', label: '品保流程监督', requiredPermission: 'quality:supervise', roles: ['quality-assurance', 'factory-director'] },
       { key: '/dashboard', label: 'Dashboard', requiredPermission: 'dashboard:read' },
       { key: '/cockpit', label: '驾驶舱', requiredPermission: 'dashboard:read' },

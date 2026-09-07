@@ -34,6 +34,12 @@ export default defineConfig(({ mode }) => {
       // 本地浏览器验收：真实模式下把 /api/orchestrator 代理到本地编排器，
       // MSW demo 模式不经网络，不受影响。
       proxy: {
+        // M0 模块后端（本地 m0_backend :8010 提供 /api/m0/*；orchestrator 不暴露这些路由）。
+        // 仅本地开发走此分流；生产由 api-gateway 路由到 m0 服务。
+        '/api/m0': {
+          target: env.YUNPAI_LOCAL_M0_URL || process.env.YUNPAI_LOCAL_M0_URL || 'http://127.0.0.1:8010',
+          changeOrigin: true,
+        },
         '/api': {
           target: env.YUNPAI_LOCAL_BACKEND_URL || process.env.YUNPAI_LOCAL_BACKEND_URL || 'http://127.0.0.1:9000',
           changeOrigin: true,

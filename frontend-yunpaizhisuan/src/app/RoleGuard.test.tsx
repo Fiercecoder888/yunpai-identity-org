@@ -12,7 +12,8 @@ const renderRoute = (path: AppPath, content: string) =>
   renderWithApp(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/home" element={<div>角色首页落地</div>} />
+        {/* 被测路径 ≠ 跳转目标时，才定义 /dashboard 落地页，避免同路径冲突 */}
+        {path !== '/dashboard' ? <Route path="/dashboard" element={<div>Dashboard 落地页</div>} /> : null}
         <Route path={path} element={<RoleGuard path={path}>{content}</RoleGuard>} />
       </Routes>
     </MemoryRouter>,
@@ -36,12 +37,13 @@ describe('RoleGuard', () => {
     expect(await screen.findByText('任务看板内容')).toBeInTheDocument();
   });
 
-  it('redirects to /home and writes a permission denied audit when the role lacks access', async () => {
+  it('redirects to /dashboard and writes a permission denied audit when the role lacks access', async () => {
     window.localStorage.setItem('mockRoleId', 'worker');
-    renderRoute('/dashboard', '不应渲染的 Dashboard');
+    // 工人角色无 quality:supervise → 拒绝 → 跳到 /dashboard 落地页
+    renderRoute('/quality', '不应渲染的 Quality');
 
-    expect(await screen.findByText('角色首页落地')).toBeInTheDocument();
-    expect(screen.queryByText('不应渲染的 Dashboard')).not.toBeInTheDocument();
+    expect(await screen.findByText('Dashboard 落地页')).toBeInTheDocument();
+    expect(screen.queryByText('不应渲染的 Quality')).not.toBeInTheDocument();
 
     await waitFor(async () => {
       const logs = await getAuditLogs();
@@ -50,8 +52,8 @@ describe('RoleGuard', () => {
           expect.objectContaining({
             actor: '生产工人',
             action: 'PERMISSION_DENIED',
-            module: 'Dashboard',
-            targetId: '/dashboard',
+            module: 'QualitySupervision',
+            targetId: '/quality',
             result: 'blocked',
           }),
         ]),
@@ -62,9 +64,9 @@ describe('RoleGuard', () => {
   it('fails closed when the role query errors', async () => {
     vi.stubEnv('VITE_ENABLE_MSW', 'false');
     server.use(http.get('/api/auth/me', () => HttpResponse.json({ message: 'Auth unavailable' }, { status: 503 })));
-    renderRoute('/dashboard', '不应渲染的 Dashboard');
+    renderRoute('/quality', '不应渲染的 Quality');
 
-    expect(await screen.findByText('角色首页落地')).toBeInTheDocument();
-    expect(screen.queryByText('不应渲染的 Dashboard')).not.toBeInTheDocument();
+    expect(await screen.findByText('Dashboard 落地页')).toBeInTheDocument();
+    expect(screen.queryByText('不应渲染的 Quality')).not.toBeInTheDocument();
   });
 });

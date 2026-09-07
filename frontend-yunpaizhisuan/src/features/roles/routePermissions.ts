@@ -7,7 +7,6 @@ export type RoutePermissionDef = {
 };
 
 export const routePermissions: Record<AppPath, RoutePermissionDef> = {
-  '/home': { permission: null, auditModule: 'Workbench' },
   '/quality': { permission: 'quality:supervise', auditModule: 'QualitySupervision' },
   '/dashboard': { permission: 'dashboard:read', auditModule: 'Dashboard' },
   '/cockpit': { permission: 'dashboard:read', auditModule: 'Cockpit' },

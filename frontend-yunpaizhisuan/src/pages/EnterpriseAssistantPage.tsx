@@ -1,5 +1,5 @@
-import { LoginOutlined, MenuOutlined } from '@ant-design/icons';
-import { Badge, Button, Drawer, Modal, Tag, Tooltip, message } from 'antd';
+import { FolderOpenOutlined, LoginOutlined, MenuOutlined } from '@ant-design/icons';
+import { App as AntdApp, Badge, Button, Drawer, Modal, Tag, Tooltip, message } from 'antd';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ChatPanel, type ChatToolAction, type ChatToolActionOptions } from '../features/chat/ChatPanel';
@@ -7,7 +7,6 @@ import { ConversationSidebar } from '../features/chat/ConversationSidebar';
 import { DataFlowPanel } from '../features/business-flow/DataFlowPanel';
 import { LocalAgentRunPanel } from '../features/business-flow/LocalAgentRunPanel';
 import { OrderFileUploadPanel } from '../features/business-flow/OrderFileUploadPanel';
-import { MasterDataUploadPanel } from '../features/business-flow/MasterDataUploadPanel';
 import { useBusinessRunStore } from '../features/business-flow/useBusinessRunStore';
 import { AgentTaskCenter } from '../features/agent-tasks/AgentTaskCenter';
 import { M0ChatPanel } from '../features/m0/M0ChatPanel';
@@ -34,6 +33,7 @@ import { EvidenceAdjudicationPanel } from '../features/chat/EvidenceAdjudication
 import { DropOverlay } from '../features/upload/DropOverlay';
 import { extractFilesFromClipboard } from '../features/upload/pasteFiles';
 import { handleDropFiles, useGlobalFileDrop } from '../features/upload/useGlobalFileDrop';
+import { describeM0UploadError, uploadM0FilesWithProgress } from '../services/uploadWithProgress';
 
 export function EnterpriseAssistantPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
@@ -57,6 +57,9 @@ export function EnterpriseAssistantPage() {
   const [m7DeliveryDraft, setM7DeliveryDraft] = useState<M7DeliveryDraft | null>(null);
   const [m7DraftConversationId, setM7DraftConversationId] = useState<string>();
   const [dropFiles, setDropFiles] = useState<{ order?: File[]; m0?: File[] }>({});
+  const m0FolderInputRef = useRef<HTMLInputElement>(null);
+  const [m0FolderUploading, setM0FolderUploading] = useState(false);
+  const { notification: appNotification } = AntdApp.useApp();
   const recognizedM7Batches = useRef(new Set<string>());
   const menuButton = useRef<HTMLButtonElement>(null);
   const localLangGraph = import.meta.env.VITE_LOCAL_LANGGRAPH === 'true';
@@ -181,6 +184,40 @@ export function EnterpriseAssistantPage() {
     return () => window.removeEventListener('yunpai:open-m0-upload', onOpenM0);
   }, [openToolModal]);
 
+  // 「M0 上传文件夹」：选择整个文件夹，把其中所有文件批量导入 M0 批次。
+  // 部分浏览器/React 版本对非标准 directory 属性渲染不可靠，挂载后强制以
+  // DOM API 设置，确保点击按钮弹出的是「选择文件夹」而不是「选文件」。
+  useEffect(() => {
+    const el = m0FolderInputRef.current;
+    if (el) {
+      el.setAttribute('webkitdirectory', '');
+      el.setAttribute('directory', '');
+      el.setAttribute('multiple', '');
+    }
+  }, []);
+
+  const handleM0FolderSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    if (files.length === 0) return;
+    setM0FolderUploading(true);
+    try {
+      const batch = await uploadM0FilesWithProgress(files, {});
+      // 上传成功后给出明显的「数据上传成功」通知（右上角，带批次号与后续入口），
+      // 不自动打开空的 M0 面板，避免误以为未上传。
+      appNotification.success({
+        message: 'M0 数据上传成功',
+        description: `已上传 ${files.length} 个文件，批次 ${batch.id ?? '已创建'} 已建立，正在处理中。可在「M0 数据建设」页查看批次详情。`,
+        placement: 'topRight',
+        duration: 8,
+      });
+    } catch (error) {
+      message.error(describeM0UploadError(error));
+    } finally {
+      setM0FolderUploading(false);
+    }
+  };
+
   useEffect(() => {
     if (roleQuery.data?.id !== 'quality-assurance') return;
     let disposed = false;
@@ -244,6 +281,23 @@ export function EnterpriseAssistantPage() {
         <div className="assistant-header-right">
           <AgentTaskCenter />
           <RoleSwitcher />
+          <input
+            ref={m0FolderInputRef}
+            type="file"
+            multiple
+            style={{ position: 'fixed', top: 0, left: 0, width: 1, height: 1, opacity: 0, overflow: 'hidden', pointerEvents: 'none' }}
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={handleM0FolderSelect}
+            {...({ webkitdirectory: '', directory: '' } as Record<string, unknown>)}
+          />
+          <Button
+            icon={<FolderOpenOutlined />}
+            loading={m0FolderUploading}
+            onClick={() => m0FolderInputRef.current?.click()}
+          >
+            M0 上传文件夹
+          </Button>
           <div className="assistant-header-version">
             <VersionBadge />
           </div>
@@ -282,16 +336,6 @@ export function EnterpriseAssistantPage() {
         styles={{ body: { overflowX: 'hidden' } }}
       >
         <OrderFileUploadPanel onClose={closeToolModal} initialFiles={dropFiles.order} />
-      </Modal>
-      <Modal
-        title="基础资料识别落库 · agent 理解自主决策"
-        open={toolModal === 'master-data-upload'}
-        footer={null}
-        width="min(94vw, 720px)"
-        onCancel={closeToolModal}
-        destroyOnHidden
-      >
-        <MasterDataUploadPanel onClose={closeToolModal} />
       </Modal>
       <Modal
         title="M0 数据导入 · 基础数据库建设"

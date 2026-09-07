@@ -34,7 +34,6 @@ const M5FlowDashboardPage = lazy(() =>
 const PurchaseWarningsPage = lazy(() => import('../pages/PurchaseWarningsPage').then((module) => ({ default: module.PurchaseWarningsPage })));
 const QualitySupervisionPage = lazy(() => import('../pages/QualitySupervisionPage').then((module) => ({ default: module.QualitySupervisionPage })));
 const QcDashboardPage = lazy(() => import('../pages/QcDashboardPage').then((module) => ({ default: module.QcDashboardPage })));
-const RoleHomePage = lazy(() => import('../pages/RoleHomePage').then((module) => ({ default: module.RoleHomePage })));
 const ScheduleGanttPage = lazy(() => import('../pages/ScheduleGanttPage').then((module) => ({ default: module.ScheduleGanttPage })));
 const SampleWorkOrdersPage = lazy(() =>
   import('../pages/SampleWorkOrdersPage').then((module) => ({ default: module.SampleWorkOrdersPage })),
@@ -61,7 +60,6 @@ export type RouteMeta = {
 };
 
 const routeMetaSource = {
-  '/home': { navTitle: '角色首页', groupKey: 'workbench', icon: 'home', description: '按角色聚合待办、风险与常用入口', closable: true },
   '/quality': { navTitle: '品保流程监督', groupKey: 'workbench', icon: 'quality', description: '只读查看 M1-M5 全流程进度、异常与任务提醒', closable: false },
   '/dashboard': { navTitle: 'Dashboard', groupKey: 'workbench', icon: 'dashboard', description: '模块状态、风险摘要与最近 Agent 活动', closable: false },
   '/cockpit': { navTitle: '驾驶舱', groupKey: 'workbench', icon: 'cockpit', description: '深色三列驾驶舱大屏', closable: false },
@@ -116,7 +114,6 @@ export const router = createBrowserRouter([
       {
         element: <WorkbenchLayout />,
         children: [
-          { path: 'home', element: withSuspense(<RoleGuard path="/home"><RoleHomePage /></RoleGuard>) },
           { path: 'dashboard', element: withSuspense(<RoleGuard path="/dashboard"><DashboardPage /></RoleGuard>) },
           { path: 'tasks', element: withSuspense(<RoleGuard path="/tasks"><TaskBoardPage /></RoleGuard>) },
           { path: 'modules/m0-review', element: withSuspense(<RoleGuard path="/modules/m0-review"><M1ReviewPage /></RoleGuard>) },

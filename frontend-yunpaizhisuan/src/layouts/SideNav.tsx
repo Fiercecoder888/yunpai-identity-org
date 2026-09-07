@@ -7,7 +7,6 @@ import {
   FileSearchOutlined,
   FormOutlined,
   FundProjectionScreenOutlined,
-  HomeOutlined,
   InboxOutlined,
   SafetyCertificateOutlined,
   ScheduleOutlined,
@@ -25,7 +24,6 @@ import { filterSidebarGroups } from '../features/roles/sidebarConfig';
 import { useCurrentRole } from '../features/roles/useCurrentRole';
 
 const navIcons: Partial<Record<AppPath, ReactNode>> = {
-  '/home': <HomeOutlined />,
   '/dashboard': <DashboardOutlined />,
   '/tasks': <ApartmentOutlined />,
   '/modules/m0-review': <FileSearchOutlined />,

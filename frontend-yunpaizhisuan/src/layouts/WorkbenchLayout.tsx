@@ -50,7 +50,7 @@ export function WorkbenchLayout() {
     }
     const meta = routeMeta[location.pathname];
     const groupTitle = meta.groupKey ? groupTitles.get(meta.groupKey) : undefined;
-    const items: NonNullable<BreadcrumbProps['items']> = [{ title: <Link to="/home">首页</Link> }];
+    const items: NonNullable<BreadcrumbProps['items']> = [{ title: <Link to="/">首页</Link> }];
     if (groupTitle) {
       items.push({ title: groupTitle });
     }

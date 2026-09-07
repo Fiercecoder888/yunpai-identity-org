@@ -48,5 +48,5 @@ export function RoleGuard({ path, children }: { path: AppPath; children: ReactNo
     return <>{children}</>;
   }
 
-  return <Navigate to="/home" replace />;
+  return <Navigate to="/dashboard" replace />;
 }

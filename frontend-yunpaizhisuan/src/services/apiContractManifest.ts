@@ -547,7 +547,7 @@ const apiContractManifestSource: ApiContractItem[] = [
     responseParser: 'unwrapEnvelope { items: M0InventoryRow[] }',
     consumers: ['src/features/chat/InventoryDrawer.tsx'],
     chatAppReuse: 'not_used',
-    riskGap: 'GET /api/m0/import/master/m0_master_inventory: real backend with offset pagination (added 2026-08-14). Verify gateway rewrite /api/m0/* and runtime schema.',
+    riskGap: 'GET /api/m0/import/master/m0_master_inventory: real backend with offset pagination (added 2026-08-14, 39085). Verify gateway rewrite /api/m0/* and runtime schema.',
   },
   {
     id: 'm0.import.master',
@@ -2267,7 +2267,7 @@ const apiContractManifestSource: ApiContractItem[] = [
     responseKind: 'array',
     realBackendStatus: 'real',
     responseParser: 'runtime response validation via workerOrderBindingSchema (envelope)',
-    consumers: ['src/pages/LeaderWorkbenchPage.tsx', 'src/features/roles/RoleHomeView.tsx', 'src/pages/OrderBindingTab.tsx'],
+    consumers: ['src/pages/LeaderWorkbenchPage.tsx', 'src/pages/OrderBindingTab.tsx'],
     chatAppReuse: 'not_used',
     riskGap: 'GET /api/m5/leader/bindings: 订单已绑工人查询（订单隔离数据源）；验收核对网关重写。',
   },
@@ -2327,7 +2327,7 @@ const apiContractManifestSource: ApiContractItem[] = [
     responseKind: 'json',
     realBackendStatus: 'real',
     responseParser: 'runtime response validation via workloadLedgerSchema (envelope)',
-    consumers: ['src/features/roles/RoleHomeView.tsx', 'src/features/roles/WorkerSection.tsx'],
+    consumers: ['src/features/roles/WorkerSection.tsx'],
     chatAppReuse: 'not_used',
     riskGap: 'POST /api/m5/worker/report: 工人自助报工，前端提交 plan/order/operation/resource 精确元组；验收核对绑定校验、TaskID 与命令幂等。',
   },
@@ -3403,7 +3403,7 @@ export const apiContractIgnoredExports: ApiContractIgnoredExport[] = [
   {
     serviceFile: 'src/services/m0Api.ts',
     exportName: 'm0BatchDocumentFileUrl',
-    reason: 'Pure URL builder for batch document iframe preview src (toApiUrl(/m0/import/batch/{batch_id}/documents/{document_id}/file)); the M0 batch file stream endpoint is verified in production acceptance.',
+    reason: 'Pure URL builder for batch document iframe preview src (toApiUrl(/m0/import/batch/{batch_id}/documents/{document_id}/file)); the M0 batch file stream endpoint is verified in gb10 acceptance.',
   },
   {
     serviceFile: 'src/services/m0Api.ts',

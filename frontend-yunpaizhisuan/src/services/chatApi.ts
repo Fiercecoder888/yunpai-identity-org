@@ -264,7 +264,13 @@ export function parseNdjsonChatEvent(line: string): ChatStreamEvent | null {
 type LocalRunEvent = { type: string; run_id?: string; task_id?: string; at?: string; content?: string; gate?: LocalGate; state?: Record<string, unknown>; step?: Record<string, unknown>; output_summary?: unknown; code?: string; message?: string };
 const localMessageId = (runId: string) => `local-assistant-${runId}`;
 async function* streamLocalRun(path: string, body: Record<string, unknown>, options: ChatStreamOptions = {}): AsyncGenerator<ChatStreamEvent> {
-  const response = await (options.fetchImpl ?? fetch)(toApiUrl(path), { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/x-ndjson', 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: options.signal });
+  // 本地编排（/runs/stream、/runs/{id}/resume/stream）的后端在单租户内网部署下
+  // 严格要求租户上下文（缺失返回 MISSING_TENANT 并失败关闭）。前端统一携带
+  // tenant_id=default（与 localRunApi 的 tenant_id=default 用法一致），避免
+  // 本地联调被租户校验拦截。
+  const localBody = { tenant_id: body.tenant_id ?? 'default', ...body };
+  const localTenant = String(localBody.tenant_id || 'default');
+  const response = await (options.fetchImpl ?? fetch)(toApiUrl(path), { method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/x-ndjson', 'Content-Type': 'application/json', 'X-Yunpai-Tenant-ID': localTenant }, body: JSON.stringify(localBody), signal: options.signal });
   if (!response.ok) { const text = await response.text().catch(() => ''); throw new ChatStreamHttpError(response.status, text || `本地编排请求失败：HTTP ${response.status}`); }
   if (!response.body) throw new ChatStreamParseError('浏览器不支持流式响应');
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let runId = ''; let messageId = '';
