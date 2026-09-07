@@ -54,6 +54,28 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
                                       "message": "必须从受信认证中间件/反向代理提供 X-Yunpai-Principal 或 X-Actor-User 头"})
         return {}, False
 
+    def _resolve_tenant(*, explicit: Any, headers: dict[str, str]) -> str:
+        """运行入口租户解析（P1.2，与 M1 适配器 fail-closed 对齐）。
+
+        解析顺序：显式参数（body/form/query 的 tenant_id）→ 租户头
+        （X-Yunpai-Tenant-ID / X-Tenant-ID）→ 兼容开关 ``YUNPAI_DEFAULT_TENANT``
+        （单租户内网部署显式声明，请求时读取）→ 都没有则 400 MISSING_TENANT，
+        不再静默落入 default 租户。
+        """
+        tenant = str(explicit or "").strip()
+        if not tenant:
+            tenant = str(headers.get("x-yunpai-tenant-id") or headers.get("x-tenant-id") or "").strip()
+        if not tenant:
+            fallback = os.getenv("YUNPAI_DEFAULT_TENANT", "").strip()
+            if fallback:
+                return fallback
+            raise HTTPException(400, {
+                "code": "MISSING_TENANT",
+                "message": "缺少租户上下文（tenant_id 参数或 X-Yunpai-Tenant-ID 头），已失败关闭；"
+                           "单租户内网部署可设置 YUNPAI_DEFAULT_TENANT 显式兼容",
+            })
+        return tenant
+
     def _principal_actor(principal: dict[str, Any], trusted: bool, body: dict[str, Any]) -> tuple[str, list[str]]:
         body_actor = str(body.get("actor") or "")
         if trusted:
@@ -99,12 +121,18 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         return {"skills": graph.skills.catalog()}
 
     @app.post("/runs")
-    async def create_run(body: dict[str, Any]):
+    async def create_run(body: dict[str, Any],
+                         x_yunpai_tenant_id: str | None = Header(None),
+                         x_tenant_id: str | None = Header(None)):
         request = body.get("request", body)
         if not isinstance(request, dict):
             raise HTTPException(422, "request must be an object")
+        tenant_id = _resolve_tenant(explicit=body.get("tenant_id"), headers={
+            "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
         try:
-            state = await graph.run(new_state(request, tenant_id=str(body.get("tenant_id", "default"))))
+            state = await graph.run(new_state(request, tenant_id=tenant_id))
             return graph._public_state(state)
         except (KeyError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -121,16 +149,25 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         )
 
     @app.post("/runs/stream")
-    async def create_streaming_run(body: dict[str, Any]):
+    async def create_streaming_run(body: dict[str, Any],
+                                   x_yunpai_tenant_id: str | None = Header(None),
+                                   x_tenant_id: str | None = Header(None)):
         request = body.get("request", body)
         if not isinstance(request, dict):
             raise HTTPException(422, "request must be an object")
-        state = new_state(request, tenant_id=str(body.get("tenant_id", "default")))
+        tenant_id = _resolve_tenant(explicit=body.get("tenant_id"), headers={
+            "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
+        state = new_state(request, tenant_id=tenant_id)
         graph.repository.save(state)
         return ndjson_response(graph.stream(state))
 
     @app.post("/runs/upload")
-    async def upload_run(file: Any = File(...), message: str = "请解析并验证这份订单", tenant_id: str = "default", workflow: str | None = None):
+    async def upload_run(file: Any = File(...), message: str = "请解析并验证这份订单", tenant_id: str = "",
+                         workflow: str | None = None,
+                         x_yunpai_tenant_id: str | None = Header(None),
+                         x_tenant_id: str | None = Header(None)):
         """单文件上传入口：保存原字节/哈希/类型/相对路径为 attachment reference，
         再交给 Planner 选择 workflow。API 层不做固定 XLSX 解析；支持的实际类型
         以 M1 工具合同为准（PDF/图片/XLS*/CSV/DOCX/DXF-DWG/ZIP-TAR-RAR-7Z 等）。
@@ -138,6 +175,10 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         from .file_sniff import sniff_format
         from .uploads import MAX_FILE_BYTES, sha256_of
 
+        tenant_id = _resolve_tenant(explicit=tenant_id, headers={
+            "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
         raw = await file.read()
         if not raw:
             raise HTTPException(400, "uploaded file is empty")
@@ -174,7 +215,10 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(400, str(exc)) from exc
 
     @app.post("/runs/upload/batch")
-    async def upload_batch_run(files: list[Any] = File(...), message: str = Form("请识别并登记这些业务资料"), mode: str = Form(...), tenant_id: str = Form("default")):
+    async def upload_batch_run(files: list[Any] = File(...), message: str = Form("请识别并登记这些业务资料"),
+                               mode: str = Form(...), tenant_id: str = Form(""),
+                               x_yunpai_tenant_id: str | None = Header(None),
+                               x_tenant_id: str | None = Header(None)):
         """目录/基础资料/订单批量上传：显式 mode，逐文件返回状态与批次摘要。
 
         与单文件 /runs/upload 不同，本端点不靠用户文案猜测模式；缺 content_b64、
@@ -191,6 +235,10 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             to_attachment_record,
         )
 
+        tenant_id = _resolve_tenant(explicit=tenant_id, headers={
+            "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
         mode = str(mode).strip()
         if mode not in UPLOAD_MODES:
             raise HTTPException(422, {"code": "INVALID_UPLOAD_MODE", "message": f"mode 必须为 {'/'.join(UPLOAD_MODES)} 之一", "allowed": list(UPLOAD_MODES)})
