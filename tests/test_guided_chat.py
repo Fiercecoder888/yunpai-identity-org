@@ -1,7 +1,7 @@
-"""引导AI 轻量对话（F-015 重设计）测试。
+"""引导AI 对话版（LLM 驱动）测试。
 
-覆盖：规模三选一 → 预设架构 → 自然语言增删改 → 确认落地；红线：确认前
-库里查不到任何部门/绑定写入。
+用 fake router（测试替身）驱动，验证确定性层的机械职责：规模三选一契约、
+状态维护、动作校验、确认 Gate 落库、模型不可用 fail-loud；不验证真实模型。
 """
 from __future__ import annotations
 
@@ -9,9 +9,32 @@ import pytest
 from fastapi.testclient import TestClient
 
 from yunpai_langgraph.api import create_app
-from yunpai_langgraph.guided_chat import SCALE_PRESETS, handle_message
+from yunpai_langgraph.guided_chat import SCALE_OPTIONS, handle_message
 from yunpai_langgraph.identity import IdentityStore
+from yunpai_langgraph.llm import QwenRouter
 from yunpai_langgraph.repository import InMemoryRunRepository
+
+
+class FakeRouter:
+    """按用户消息返回预设决策的测试替身（script: 关键词 → 决策字段）。
+
+    匹配按「最长关键词优先」——「张三不当了」优先命中「不当了」而非「张三」。
+    """
+
+    def __init__(self, script=None):
+        self.script = script or {}
+        self.calls = []
+
+    async def guide_chat(self, **kwargs):
+        self.calls.append(kwargs)
+        msg = str(kwargs.get("message") or "")
+        for key in sorted(self.script, key=len, reverse=True):
+            if key in msg:
+                decision = self.script[key]
+                return {"ok": True, "scale": None, "needs_scale": False,
+                        "actions": [], "confirm": False, "reply": "", **decision}
+        return {"ok": True, "reply": "（默认无动作）", "scale": None,
+                "needs_scale": False, "actions": [], "confirm": False}
 
 
 @pytest.fixture()
@@ -19,98 +42,118 @@ def store(tmp_path):
     return IdentityStore(str(tmp_path / "identity.sqlite"))
 
 
-def _start(store):
-    return handle_message(store, tenant_id="t1", user_id="boss", message="")
-
-
-def test_first_message_offers_three_scale_options(store):
-    resp = _start(store)
-    assert resp["state"]["stage"] == "ask_scale"
+async def test_first_message_offers_three_scale_options(store):
+    resp = await handle_message(store, tenant_id="t1", user_id="boss", message="")
+    assert resp["state"]["started"] is True
     assert [o["value"] for o in resp["options"]] == ["small", "medium", "large"]
-    assert "小规模" in resp["reply"] and "大规模" in resp["reply"]
+    assert len(SCALE_OPTIONS) == 3
     assert resp["done"] is False and resp["applied"] is None
 
 
-def test_presets_differ_in_complexity():
-    assert len(SCALE_PRESETS["small"]["departments"]) == 2
-    assert len(SCALE_PRESETS["small"]["roles"]) == 3
-    assert len(SCALE_PRESETS["medium"]["departments"]) == 5
-    assert len(SCALE_PRESETS["medium"]["roles"]) == 6
-    assert len(SCALE_PRESETS["large"]["departments"]) == 8
-    assert len(SCALE_PRESETS["large"]["roles"]) == 9
+async def test_scale_selection_delegates_to_llm(store):
+    router = FakeRouter({"小": {"scale": "small", "actions": [
+        {"op": "add_dept", "name": "生产部"},
+        {"op": "add_dept", "name": "管理部"}],
+        "reply": "好的，先按小规模搭两部门。"}})
+    resp = await handle_message(store, tenant_id="t1", user_id="boss", message="小",
+                                router=router)
+    assert resp["state"]["scale"] == "small"
+    assert resp["state"]["departments"] == ["生产部", "管理部"]
+    # 确认前红线：库里无写入
+    assert store.org_tree(tenant_id="t1") == []
+    assert store.list_bindings(tenant_id="t1") == []
+    # 模型收到的上下文包含花名册与角色目录（证明判断交给了模型）
+    call = router.calls[0]
+    assert "roles" in call and "roster" in call
 
 
-def test_select_scale_proposes_preset(store):
-    resp = handle_message(store, tenant_id="t1", user_id="boss", message="中",
-                          state={"stage": "ask_scale"})
-    assert resp["state"]["stage"] == "propose"
-    assert resp["state"]["departments"] == ["生产部", "工程部", "品质部", "计划部", "仓储部"]
-    assert "就这样" in resp["reply"]
-    # 口语等价：中规模 / 2 都识别
-    for word in ("中规模", "2", "medium"):
-        r = handle_message(store, tenant_id="t1", user_id="boss", message=word,
-                           state={"stage": "ask_scale"})
-        assert r["state"]["scale"] == "medium", word
-
-
-def test_edit_intents_assign_add_delete_remove(store):
-    state = handle_message(store, tenant_id="t1", user_id="boss", message="小",
-                           state={"stage": "ask_scale"})["state"]
-    # 设角色（多人）
-    r = handle_message(store, tenant_id="t1", user_id="boss", message="张三设为厂长", state=state)
+async def test_llm_assign_add_delete_remove(store):
+    router = FakeRouter({
+        "张三": {"actions": [{"op": "assign", "user": "张三", "roles": ["factory-director"]}],
+                 "reply": "已把张三设为厂长。"},
+        "李四": {"actions": [{"op": "assign", "user": "李四", "roles": ["team-leader"]}],
+                 "reply": "已把李四设为组长。"},
+        "品质部": {"actions": [{"op": "add_dept", "name": "品质部"}], "reply": "已新增品质部。"},
+        "管理部": {"actions": [{"op": "del_dept", "name": "管理部"}], "reply": "已删除管理部。"},
+        "不当了": {"actions": [{"op": "unassign", "user": "张三"}], "reply": "已移除张三的分配。"},
+    })
+    state = {"scale": "small", "departments": ["生产部", "管理部"], "assignments": []}
+    r = await handle_message(store, tenant_id="t1", user_id="boss", message="张三", state=state, router=router)
     assert r["state"]["assignments"] == [{"name": "张三", "roles": ["factory-director"]}]
-    r = handle_message(store, tenant_id="t1", user_id="boss", message="李四、王五当组长", state=r["state"])
-    names = {a["name"]: a["roles"] for a in r["state"]["assignments"]}
-    assert names == {"张三": ["factory-director"], "李四": ["team-leader"], "王五": ["team-leader"]}
-    # 加部门 / 删部门
-    r = handle_message(store, tenant_id="t1", user_id="boss", message="新增部门 品质部", state=r["state"])
+    r = await handle_message(store, tenant_id="t1", user_id="boss", message="李四", state=r["state"], router=router)
+    assert [a["roles"] for a in r["state"]["assignments"] if a["name"] == "李四"] == [["team-leader"]]
+    r = await handle_message(store, tenant_id="t1", user_id="boss", message="品质部", state=r["state"], router=router)
     assert "品质部" in r["state"]["departments"]
-    r = handle_message(store, tenant_id="t1", user_id="boss", message="删除 管理部", state=r["state"])
+    r = await handle_message(store, tenant_id="t1", user_id="boss", message="管理部", state=r["state"], router=router)
     assert "管理部" not in r["state"]["departments"]
-    # 移除账号角色
-    r = handle_message(store, tenant_id="t1", user_id="boss", message="张三不当了", state=r["state"])
+    r = await handle_message(store, tenant_id="t1", user_id="boss", message="张三不当了", state=r["state"], router=router)
     assert all(a["name"] != "张三" for a in r["state"]["assignments"])
-    # 确认前红线：库里无任何写入
     assert store.org_tree(tenant_id="t1") == []
     assert store.list_bindings(tenant_id="t1") == []
 
 
-def test_confirm_applies_org_and_bindings(store):
-    state = handle_message(store, tenant_id="t1", user_id="boss", message="小",
-                           state={"stage": "ask_scale"})["state"]
-    state = handle_message(store, tenant_id="t1", user_id="boss", message="张三设为厂长", state=state)["state"]
-    state = handle_message(store, tenant_id="t1", user_id="boss", message="李四当组长", state=state)["state"]
-    done = handle_message(store, tenant_id="t1", user_id="boss", message="就这样", state=state)
+async def test_confirm_applies_org_and_bindings(store):
+    router = FakeRouter({"就这样": {"confirm": True, "reply": "好的，正在落地。"}})
+    state = {"scale": "small", "departments": ["生产部", "管理部"],
+             "assignments": [{"name": "张三", "roles": ["factory-director"]},
+                             {"name": "李四", "roles": ["team-leader"]}]}
+    done = await handle_message(store, tenant_id="t1", user_id="boss", message="就这样",
+                                state=state, router=router)
     assert done["done"] is True and done["state"] is None
-    assert done["applied"]["departments"] == 2
-    assert done["applied"]["bindings"] == 2
+    assert done["applied"]["departments"] == 2 and done["applied"]["bindings"] == 2
     tree = {n["org_id"]: n for n in store.org_tree(tenant_id="t1")}
     assert {"company", "dept:生产", "dept:管理"} <= set(tree)
-    assert tree["dept:生产"]["source"] == "manual"  # 引导建的结构标 manual，派生不覆盖
+    assert tree["dept:生产"]["source"] == "manual"
     binds = {b["user_id"]: b["role_codes"] for b in store.list_bindings(tenant_id="t1")}
     assert binds == {"张三": ["factory-director"], "李四": ["team-leader"]}
 
 
-def test_roster_name_resolves_to_worker_code(store):
-    roster = [{"worker_code": "***1234", "worker_name": "张三", "skill": "厂长"},
-              {"worker_code": "***5678", "worker_name": "李四", "skill": "组长"}]
-    state = handle_message(store, tenant_id="t1", user_id="boss", message="大",
-                           state={"stage": "ask_scale"})["state"]
-    state = handle_message(store, tenant_id="t1", user_id="boss", message="张三设为厂长", state=state)["state"]
-    done = handle_message(store, tenant_id="t1", user_id="boss", message="就这样",
-                          state=state, roster=roster)
+async def test_roster_name_resolves_to_worker_code(store):
+    roster = [{"worker_code": "***1234", "worker_name": "张三", "skill": "厂长"}]
+    router = FakeRouter({
+        "张三": {"actions": [{"op": "assign", "user": "张三", "roles": ["factory-director"]}]},
+        "就这样": {"confirm": True},
+    })
+    state = {"scale": "small", "departments": ["生产部"], "assignments": []}
+    r = await handle_message(store, tenant_id="t1", user_id="boss", message="张三",
+                             state=state, roster=roster, router=router)
+    done = await handle_message(store, tenant_id="t1", user_id="boss", message="就这样",
+                                state=r["state"], roster=roster, router=router)
     assert done["done"]
     binds = {b["user_id"]: b["role_codes"] for b in store.list_bindings(tenant_id="t1")}
-    assert "***1234" in binds and binds["***1234"] == ["factory-director"]
-    assert "张三" not in binds  # 用花名册 code 而非名字当账号
+    assert binds == {"***1234": ["factory-director"]}
 
 
-def test_unknown_message_reprompts_without_change(store):
-    state = handle_message(store, tenant_id="t1", user_id="boss", message="中",
-                           state={"stage": "ask_scale"})["state"]
-    r = handle_message(store, tenant_id="t1", user_id="boss", message="帮我随便搞搞", state=state)
-    assert "没识别出" in r["reply"]
-    assert r["state"]["departments"] == state["departments"]
+async def test_validation_rejects_invalid_role_code(store):
+    router = FakeRouter({"张三": {"actions": [
+        {"op": "assign", "user": "张三", "roles": ["superman"]}]}})
+    resp = await handle_message(store, tenant_id="t1", user_id="boss", message="张三", router=router)
+    assert "已忽略" in resp["reply"]
+    assert resp["state"]["assignments"] == []
+
+
+async def test_model_unavailable_fails_loud(store):
+    class DownRouter:
+        async def guide_chat(self, **kwargs):
+            return {"ok": False, "status": "error", "error": "connection refused"}
+
+    resp = await handle_message(store, tenant_id="t1", user_id="boss", message="小",
+                                state={"scale": None}, router=DownRouter())
+    assert "模型不可用" in resp["reply"]
+    assert resp["done"] is False and resp["applied"] is None
+
+
+async def test_missing_router_fails_loud(store):
+    resp = await handle_message(store, tenant_id="t1", user_id="boss", message="小",
+                                state={"scale": None})
+    assert "模型不可用" in resp["reply"]
+
+
+async def test_needs_scale_returns_options_again(store):
+    router = FakeRouter({"随便": {"needs_scale": True, "reply": "咱们先定规模。"}})
+    resp = await handle_message(store, tenant_id="t1", user_id="boss", message="随便",
+                                state={"scale": None}, router=router)
+    assert [o["value"] for o in resp["options"]] == ["small", "medium", "large"]
 
 
 # ------------------------------------------------------------ API 层
@@ -132,17 +175,33 @@ def test_chat_endpoint_requires_admin(client):
     assert resp.status_code == 401
 
 
-def test_chat_endpoint_full_flow(client, store):
+def test_chat_endpoint_full_flow(client, store, monkeypatch):
+    """API 层全流程：通过 monkeypatch 把真实 QwenRouter.guide_chat 换成假决策。"""
+    async def fake_guide_chat(self, **kwargs):
+        msg = str(kwargs.get("message") or "")
+        if "小" in msg:
+            return {"ok": True, "reply": "按小规模搭两部门", "scale": "small",
+                    "needs_scale": False,
+                    "actions": [{"op": "add_dept", "name": "生产部"},
+                                {"op": "add_dept", "name": "管理部"}], "confirm": False}
+        if "张三" in msg:
+            return {"ok": True, "reply": "张三设为厂长", "scale": None, "needs_scale": False,
+                    "actions": [{"op": "assign", "user": "张三", "roles": ["factory-director"]}],
+                    "confirm": False}
+        if "就这样" in msg:
+            return {"ok": True, "reply": "落地完成", "scale": None, "needs_scale": False,
+                    "actions": [], "confirm": True}
+        return {"ok": True, "reply": "…", "scale": None, "needs_scale": False,
+                "actions": [], "confirm": False}
+
+    monkeypatch.setattr(QwenRouter, "guide_chat", fake_guide_chat)
     headers = {"X-Actor-User": "boss", "X-Actor-Roles": "admin", "X-Tenant-Id": "t1"}
     first = client.post("/api/guidance/chat", json={"tenant_id": "t1", "message": ""}, headers=headers)
-    assert first.status_code == 200
-    assert len(first.json()["options"]) == 3
-    # 选规模
+    assert first.status_code == 200 and len(first.json()["options"]) == 3
     pick = client.post("/api/guidance/chat",
                        json={"tenant_id": "t1", "message": "小", "state": first.json()["state"]},
                        headers=headers)
     assert pick.json()["state"]["departments"] == ["生产部", "管理部"]
-    # 分配 + 确认
     assign = client.post("/api/guidance/chat",
                          json={"tenant_id": "t1", "message": "张三设为厂长", "state": pick.json()["state"]},
                          headers=headers)

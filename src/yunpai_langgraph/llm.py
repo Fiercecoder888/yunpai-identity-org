@@ -271,6 +271,97 @@ class QwenRouter:
             return {"ok": False, "status": "error", "error": str(exc),
                     "model": {**metadata, "status": "error", "latency_ms": elapsed}}
 
+    async def guide_chat(self, *, scale: str | None, departments: list[str],
+                         assignments: list[dict[str, Any]], roster: list[dict[str, Any]],
+                         message: str, roles: list[dict[str, Any]],
+                         permissions: list[dict[str, Any]]) -> dict[str, Any]:
+        """引导AI 对话判断（F-015 重设计：判断交给模型，不写死规则）。
+
+        输入当前方案 + 花名册 + 用户一句话，模型输出结构化决策：
+        ``{ok, reply, scale, needs_scale, actions, confirm}``——
+        actions 是对「方案」的变更（add_dept/del_dept/assign/unassign），
+        confirm=true 表示用户明确要落地。模型只提案，落库由调用方在
+        confirm 时执行（人工确认 Gate）。失败返回 ok=False，调用方 fail-loud。
+        """
+        started = time.perf_counter()
+        metadata = self.config.public()
+        if not self.config.enabled:
+            return {"ok": False, "status": "disabled", "model": {**metadata, "status": "disabled"}}
+        try:
+            import httpx
+
+            prompt = json.dumps({
+                "current_scale": scale,
+                "departments": list(departments or []),
+                "assignments": list(assignments or []),
+                "roster": roster,
+                "user_message": message,
+                "roles": roles,
+                "permissions": permissions,
+            }, ensure_ascii=False)
+            body = {
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": (
+                        "你是云湃制造系统的组织架构引导助手，负责把公司的组织架构与权限分配方案整理出来。"
+                        "你会收到：当前方案（部门列表、账号分配）、花名册（姓名/岗位/部门）、可分配角色及含义、"
+                        "以及用户最新的一句话。判断用户意图，只输出一个 JSON 对象，字段：\n"
+                        "reply（给用户的中文回复，简短自然，说明你这次做了什么）\n"
+                        "scale（用户本次选定/变更公司规模时填 small|medium|large，否则 null）\n"
+                        "needs_scale（还不知道公司规模、需要先让用户选时填 true，否则 false）\n"
+                        "actions（对方案的变更动作数组，无变更则空数组；每项 op 为：\n"
+                        "  {op:'add_dept', name:'部门名'} / {op:'del_dept', name:'部门名'} / "
+                        "{op:'assign', user:'姓名', roles:['角色code']} / {op:'unassign', user:'姓名'}）\n"
+                        "confirm（用户明确要落地当前方案，如说“就这样/确认/好/可以/落地”时为 true，否则 false）\n\n"
+                        "规则：\n"
+                        "1) 规模对应复杂度——small 约 2~3 个部门/3 类角色（厂长、组长、工人）；"
+                        "medium 约 4~6 个部门/6 类角色；large 约 6~9 个部门/9 类角色。选定规模时用 add_dept 把初始部门列出来。\n"
+                        "2) 账号分配：按花名册里该人的岗位(skill)与部门匹配角色（角色含义见 roles）；"
+                        "拿不准就分配 worker 并在 reply 提示需人工确认；管理类岗位谨慎，reply 里说明。\n"
+                        "3) 角色 code 只能从 roles 里选，不能自造。\n"
+                        "4) 删除/撤销照做（del_dept/unassign），并在 reply 说清变化。\n"
+                        "5) 只依据花名册与当前方案判断，不编造人员。"
+                    )},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0,
+                "max_tokens": 4096,
+                "stream": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "response_format": {"type": "json_object"},
+            }
+            # 本地模型常无鉴权：api_key 为空时用占位 token（不因此拒绝）。
+            token = self.config.api_key or "local"
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            async with httpx.AsyncClient(timeout=self.config.timeout_s, trust_env=False) as client:
+                response = await client.post(f"{self.config.base_url}/chat/completions", headers=headers, json=body)
+                response.raise_for_status()
+                payload = response.json()
+            content = self._content(payload)
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE | re.DOTALL).strip()
+            decision = json.loads(cleaned)
+            if not isinstance(decision, dict):
+                raise ValueError("guide_chat response is not an object")
+            actions = decision.get("actions")
+            if not isinstance(actions, list):
+                actions = []
+            elapsed = round((time.perf_counter() - started) * 1000, 1)
+            logger.info("qwen.guide_chat status=ok model=%s latency_ms=%s actions=%s confirm=%s",
+                        self.config.model, elapsed, len(actions), bool(decision.get("confirm")))
+            return {"ok": True, "status": "ok",
+                    "reply": str(decision.get("reply") or ""),
+                    "scale": decision.get("scale"),
+                    "needs_scale": bool(decision.get("needs_scale")),
+                    "actions": actions,
+                    "confirm": bool(decision.get("confirm")),
+                    "model": {**metadata, "status": "ok", "latency_ms": elapsed}}
+        except Exception as exc:
+            elapsed = round((time.perf_counter() - started) * 1000, 1)
+            logger.warning("qwen.guide_chat status=error model=%s latency_ms=%s error=%s",
+                           self.config.model, elapsed, exc)
+            return {"ok": False, "status": "error", "error": str(exc),
+                    "model": {**metadata, "status": "error", "latency_ms": elapsed}}
+
     @staticmethod
     def _canonical_system_prompt() -> str:
         from .canonical_schema import CANONICAL_SCHEMA
