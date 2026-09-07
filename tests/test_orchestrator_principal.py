@@ -6,7 +6,7 @@
 - 请求体 actor 与受信 principal 不一致（冒充）被拒绝/忽略并记录审计
 - 跨租户审批被拒绝
 - 无角色 / 角色不足审批被拒绝（403）
-- YUNPAI_REQUIRE_TRUSTED_PRINCIPAL=1 时缺头直接 403
+- YUNPAI_REQUIRE_TRUSTED_PRINCIPAL=1 时缺受信头/登录会话直接 401（接缝 5）
 """
 import json
 
@@ -95,7 +95,9 @@ def test_trusted_principal_required_env_blocks_anonymous(client, monkeypatch):
     monkeypatch.setenv("YUNPAI_REQUIRE_TRUSTED_PRINCIPAL", "1")
     run_id = _open_authorization_gate(client)
     resp = client.post(f"/runs/{run_id}/resume", json={"decision": "approve", "actor": "anyone"})
-    assert resp.status_code == 403
+    # 接缝 5（2026-09-07 规范）：语义升级为「受信头或有效登录会话二选一」，
+    # 无两者 → 401（原 403，登录 v1 落地时显式演进）。
+    assert resp.status_code == 401
     assert resp.json()["detail"]["code"] == "TRUSTED_PRINCIPAL_REQUIRED"
     # 有受信头则放行
     ok = client.post(

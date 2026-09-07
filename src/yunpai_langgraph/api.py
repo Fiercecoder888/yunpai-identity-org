@@ -2,35 +2,55 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
+from .auth import SESSION_COOKIE, login, session_from_token, sign_session_token
 from .graph import YunpaiGraph
+from .guided_setup import build_guidance_plan, catalog_payload, enrich_plan_with_llm
+from .identity import IdentityStore, authorize, permission_for_gate
 from .models import new_state
 from .registry import ToolRegistry, build_runtime_registry
 from .repository import RunRepository, SQLiteRunRepository
 
+logger = logging.getLogger("yunpai.api")
 
-def create_app(*, repository: RunRepository | None = None, registry: ToolRegistry | None = None):
+# 端点签名需要 Request 注解（会话 Cookie 读取）；延迟字符串注解由 FastAPI 按
+# 模块全局解析，故在模块级条件导入（无 fastapi 环境仍可 import 本模块）。
+try:  # pragma: no cover - 视环境而定
+    from fastapi import Request
+except ImportError:  # pragma: no cover
+    Request = None  # type: ignore[assignment]
+
+
+def create_app(*, repository: RunRepository | None = None, registry: ToolRegistry | None = None,
+               identity_store: IdentityStore | None = None):
     try:
         from fastapi import FastAPI, File, Form, Header, HTTPException
-        from fastapi.responses import StreamingResponse
+        from fastapi.responses import JSONResponse, StreamingResponse
     except ImportError as exc: raise RuntimeError("安装 fastapi 后才能启动 HTTP API") from exc
     if repository is None:
         db_path = Path(os.getenv("YUNPAI_RUN_DB", "runtime/yunpai-runs.sqlite"))
         db_path.parent.mkdir(parents=True, exist_ok=True)
         repository = SQLiteRunRepository(db_path)
     graph = YunpaiGraph(registry or build_runtime_registry(), repository)
+    # 身份/组织/权限事实源（F-013/F-014/F-015 正式版，2026-09-07）。
+    if identity_store is None:
+        identity_store = IdentityStore(os.getenv("YUNPAI_IDENTITY_DB", "runtime/yunpai-identity.sqlite"))
     app = FastAPI(title="Yunpai LangGraph", version="0.2.0")
 
-    def _principal_from_headers(headers: dict[str, str]) -> tuple[dict[str, Any], bool]:
+    def _principal_from_headers(headers: dict[str, str],
+                                cookies: dict[str, str] | None = None) -> tuple[dict[str, Any], bool]:
         """从受信反向代理/认证中间件读取审批 principal（T5.2）。
 
         优先 ``X-Yunpai-Principal``（JSON：actor/roles/tenant_id），其次拆分头
-        ``X-Actor-User`` + ``X-Actor-Roles`` + ``X-Tenant-Id``。
-        返回 (principal, trusted)；无受信头且未强制受信时 actor 交由调用方
-        从 body 取（dev/preview 降级），审计标记 principal_source=untrusted_body。
+        ``X-Actor-User`` + ``X-Actor-Roles`` + ``X-Tenant-Id``；无受信头时尝试
+        登录会话 Cookie（接缝 5：验签解出 principal，trusted=login，角色取
+        identity 绑定解析结果）注入现有链路——替换而非新造，冒充校验语义
+        不变。返回 (principal, trusted)；两者皆无且未强制受信时 actor 交由
+        调用方从 body 取（dev/preview 降级），审计标记 principal_source=untrusted_body。
         """
         header = headers.get("x-yunpai-principal")
         if header:
@@ -40,18 +60,31 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
                 roles = value.get("roles") if isinstance(value.get("roles"), list) else [str(value.get("role") or "")]
                 tenant = str(value.get("tenant_id") or value.get("tenant") or "")
                 if actor:
-                    return {"actor": actor, "roles": [str(r) for r in roles], "tenant_id": tenant}, True
+                    return {"actor": actor, "roles": [str(r) for r in roles], "tenant_id": tenant, "source": "trusted_header"}, True
             except (ValueError, TypeError):
                 raise HTTPException(400, {"code": "INVALID_PRINCIPAL", "message": "X-Yunpai-Principal 不是合法 JSON"})
         user = headers.get("x-actor-user") or headers.get("x-yunpai-actor-user")
         if user:
             roles = [item.strip() for item in (headers.get("x-actor-roles") or "").split(",") if item.strip()]
             tenant = headers.get("x-tenant-id") or headers.get("x-yunpai-tenant-id") or ""
-            return {"actor": str(user), "roles": roles, "tenant_id": str(tenant)}, True
+            return {"actor": str(user), "roles": roles, "tenant_id": str(tenant), "source": "trusted_header"}, True
+        session_token = str((cookies or {}).get(SESSION_COOKIE) or "")
+        if session_token:
+            session = session_from_token(identity_store, session_token)
+            if session:
+                resolved = identity_store.resolve(
+                    tenant_id=session["tenant_id"], user_id=session["user_id"])
+                return {
+                    "actor": session["user_id"],
+                    "roles": list(resolved["roles"]),
+                    "tenant_id": session["tenant_id"],
+                    "source": "login",
+                }, True
         require_trusted = os.getenv("YUNPAI_REQUIRE_TRUSTED_PRINCIPAL", "0").lower() in {"1", "true", "yes"}
         if require_trusted:
-            raise HTTPException(403, {"code": "TRUSTED_PRINCIPAL_REQUIRED",
-                                      "message": "必须从受信认证中间件/反向代理提供 X-Yunpai-Principal 或 X-Actor-User 头"})
+            # 接缝 5：语义升级为「受信头或有效登录会话二选一」，无两者 401。
+            raise HTTPException(401, {"code": "TRUSTED_PRINCIPAL_REQUIRED",
+                                      "message": "必须提供受信认证头（X-Yunpai-Principal/X-Actor-User）或有效登录会话 Cookie"})
         return {}, False
 
     def _resolve_tenant(*, explicit: Any, headers: dict[str, str]) -> str:
@@ -301,8 +334,44 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         if state is None: raise HTTPException(404, "run not found")
         return graph._public_state(state)
 
+    def _request_principal(request) -> tuple[dict[str, Any], bool]:
+        return _principal_from_headers({
+            "x-yunpai-principal": request.headers.get("x-yunpai-principal", ""),
+            "x-actor-user": request.headers.get("x-actor-user", ""),
+            "x-actor-roles": request.headers.get("x-actor-roles", ""),
+            "x-tenant-id": request.headers.get("x-tenant-id", "")
+            or request.headers.get("x-yunpai-tenant-id", ""),
+        }, cookies=dict(request.cookies))
+
+    def _identity_gate_check(state: dict[str, Any], *, actor: str, roles: list[str],
+                             principal: dict[str, Any], trusted: bool) -> None:
+        """业务端点 identity 判定（接缝 4 第二步）。
+
+        ``YUNPAI_IDENTITY_ENFORCE``：``off`` 跳过；``shadow``（默认）只记
+        判定结果与审计不拦截（跑一个验收轮）；``on`` 强制（deny → 403）。
+        与既有 GATE_ALLOWED_ROLES（T5.3）叠加，不替换。
+        """
+        mode = os.getenv("YUNPAI_IDENTITY_ENFORCE", "shadow").strip().lower()
+        if mode in {"", "off"} or not trusted or not str(actor or "").strip():
+            return
+        gate_type = str((state.get("pending_gate") or {}).get("type") or "")
+        permission = permission_for_gate(gate_type)
+        if not permission:
+            return
+        tenant = str(principal.get("tenant_id") or state.get("tenant_id") or "default")
+        decision = authorize(identity_store, tenant_id=tenant, user_id=actor,
+                             permission=permission, legacy_roles=list(roles or []))
+        if decision["allowed"]:
+            return
+        if mode == "on":
+            raise HTTPException(403, {"code": "IDENTITY_DENIED",
+                                      "message": f"gate {gate_type} 需要 {decision['resolved']['role_names'] or '已绑定角色'} 之外的权限 {permission}",
+                                      "permission": permission, "reason": decision["reason"]})
+        logger.warning("identity shadow deny tenant=%s user=%s gate=%s permission=%s reason=%s",
+                       tenant, actor, gate_type, permission, decision["reason"])
+
     @app.post("/runs/{run_id}/resume")
-    async def resume_run(run_id: str, body: dict[str, Any],
+    async def resume_run(run_id: str, body: dict[str, Any], request: Request,
                          x_yunpai_principal: str | None = Header(None),
                          x_actor_user: str | None = Header(None),
                          x_actor_roles: str | None = Header(None),
@@ -314,7 +383,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "x-actor-user": x_actor_user or "",
             "x-actor-roles": x_actor_roles or "",
             "x-tenant-id": x_tenant_id or "",
-        })
+        }, cookies=dict(request.cookies))
         actor, roles = _principal_actor(principal, trusted, body)
         decision = str(body.get("decision", "allow"))
         human_override = bool(body.get("human_override", False))
@@ -331,6 +400,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         except ValueError as exc:
             status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
             raise HTTPException(status, str(exc)) from exc
+        _identity_gate_check(state, actor=actor, roles=roles, principal=principal, trusted=trusted)
         try:
             resumed = await graph.resume(
                 state,
@@ -345,6 +415,8 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
                     "trusted": trusted, "actor": actor, "roles": roles,
                     "tenant_id": principal.get("tenant_id") or "",
                 })
+                if principal.get("source"):
+                    resumed["approvals"][-1]["principal"]["source"] = principal["source"]
                 if not trusted:
                     resumed["approvals"][-1]["principal"]["source"] = "untrusted_body"
             return graph._public_state(resumed)
@@ -352,7 +424,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(409, str(exc)) from exc
 
     @app.post("/runs/{run_id}/resume/stream")
-    async def resume_stream(run_id: str, body: dict[str, Any],
+    async def resume_stream(run_id: str, body: dict[str, Any], request: Request,
                             x_yunpai_principal: str | None = Header(None),
                             x_actor_user: str | None = Header(None),
                             x_actor_roles: str | None = Header(None),
@@ -365,7 +437,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "x-actor-user": x_actor_user or "",
             "x-actor-roles": x_actor_roles or "",
             "x-tenant-id": x_tenant_id or "",
-        })
+        }, cookies=dict(request.cookies))
         actor, roles = _principal_actor(principal, trusted, body)
         decision = str(body.get("decision", "allow"))
         human_override = bool(body.get("human_override", False))
@@ -384,6 +456,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         except ValueError as exc:
             status = 403 if any(token in str(exc) for token in ("role", "tenant", "anonymous")) else 409
             raise HTTPException(status, str(exc)) from exc
+        _identity_gate_check(state, actor=actor, roles=roles, principal=principal, trusted=trusted)
         return ndjson_response(
             graph.stream_resume(
                 state,
@@ -409,6 +482,296 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         transport = os.getenv("YUNPAI_TOOL_TRANSPORT", "local").lower()
         real_available = transport == "http" and bool(os.getenv("M0_URL"))
         return M0SandboxStore(db_path).readback_report(batch_id, real_m0_available=real_available)
+    # ------------------------------------------------- 登录 v1（F-013 接缝 5）
+
+    def _require_identity_permission(permission: str, *, tenant_id: str,
+                                     request) -> dict[str, Any]:
+        """identity 管理 API 的鉴权门（接缝 4 第一步：identity 自有 API 全过
+        authorize）。接受受信头（legacy 角色）或登录会话；deny → 403 且已留审计。"""
+        principal, trusted = _request_principal(request)
+        actor = str(principal.get("actor") or "")
+        if not trusted or not actor:
+            raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED",
+                                      "message": "需要受信认证头或有效登录会话"})
+        principal_tenant = str(principal.get("tenant_id") or "")
+        if principal_tenant and principal_tenant != tenant_id:
+            raise HTTPException(403, {"code": "CROSS_TENANT",
+                                      "message": f"principal 租户 {principal_tenant} 无权管理租户 {tenant_id}"})
+        decision = authorize(identity_store, tenant_id=tenant_id, user_id=actor,
+                             permission=permission,
+                             legacy_roles=list(principal.get("roles") or []))
+        if not decision["allowed"]:
+            raise HTTPException(403, {"code": "IDENTITY_DENIED",
+                                      "message": f"缺少权限 {permission}（reason={decision['reason']}）",
+                                      "permission": permission, "reason": decision["reason"]})
+        return principal
+
+    def _header_tenant(request) -> dict[str, str]:
+        if request is None:
+            return {}
+        return {
+            "x-yunpai-tenant-id": request.headers.get("x-yunpai-tenant-id", ""),
+            "x-tenant-id": request.headers.get("x-tenant-id", ""),
+        }
+
+    def _tenant_for_request(explicit: Any, request) -> str:
+        """identity 端点租户解析：显式参数 → 会话/受信头 principal 租户 →
+        租户头 → YUNPAI_DEFAULT_TENANT → 400 MISSING_TENANT。"""
+        if request is not None and not str(explicit or "").strip():
+            principal, _ = _request_principal(request)
+            explicit = str(principal.get("tenant_id") or "")
+        return _resolve_tenant(explicit=explicit, headers=_header_tenant(request))
+
+    @app.post("/api/auth/login")
+    async def auth_login(body: dict[str, Any],
+                         x_yunpai_tenant_id: str | None = Header(None),
+                         x_tenant_id: str | None = Header(None)):
+        tenant_id = _resolve_tenant(explicit=body.get("tenant_id"), headers={
+            "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
+            "x-tenant-id": x_tenant_id or "",
+        })
+        user_id = str(body.get("user_id") or "")
+        user = login(identity_store, tenant_id=tenant_id, user_id=user_id,
+                     password=str(body.get("password") or ""))
+        if not user:
+            raise HTTPException(401, {"code": "INVALID_CREDENTIALS", "message": "用户名或密码错误"})
+        token = sign_session_token(identity_store.session_secret(),
+                                   tenant_id=tenant_id, user_id=user_id)
+        resolved = identity_store.resolve(tenant_id=tenant_id, user_id=user_id)
+        response = JSONResponse({
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "display_name": user.get("display_name"),
+            "roles": resolved["roles"],
+            "role_names": resolved["role_names"],
+            "permissions": resolved["permissions"],
+        })
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", path="/")
+        return response
+
+    @app.post("/api/auth/logout")
+    async def auth_logout():
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return response
+
+    @app.get("/api/auth/me")
+    async def auth_me(request: Request):
+        principal, trusted = _request_principal(request)
+        actor = str(principal.get("actor") or "")
+        if not trusted or not actor:
+            raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED",
+                                      "message": "未登录（无有效会话或受信头）"})
+        tenant_id = str(principal.get("tenant_id") or "")
+        if not tenant_id:
+            raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED",
+                                      "message": "principal 缺租户上下文"})
+        resolved = identity_store.resolve(tenant_id=tenant_id, user_id=actor)
+        return {"principal": {"actor": actor, "tenant_id": tenant_id,
+                              "roles": list(principal.get("roles") or []),
+                              "source": principal.get("source")},
+                **resolved}
+
+    # ------------------------------------------- identity 管理 API（P-011/P-012）
+
+    @app.get("/api/identity/catalog")
+    async def identity_catalog():
+        """权限清单 + 种子角色（只读静态目录，引导AI/前端共用，不涉敏感数据）。"""
+        return catalog_payload()
+
+    @app.get("/api/identity/org")
+    async def identity_org_tree(tenant_id: str = "", request: Request = None):
+        tenant = _tenant_for_request(tenant_id, request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        return {"tenant_id": tenant, "org": identity_store.org_tree(tenant_id=tenant)}
+
+    @app.post("/api/identity/org")
+    async def identity_org_upsert(body: dict[str, Any], request: Request):
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        node = identity_store.upsert_org(
+            tenant_id=tenant,
+            org_id=str(body.get("org_id") or ""),
+            name=str(body.get("name") or ""),
+            parent_id=body.get("parent_id"),
+            org_type=str(body.get("org_type") or "dept"),
+            source="manual",
+        )
+        return node
+
+    @app.post("/api/identity/org/derive")
+    async def identity_org_derive(body: dict[str, Any], request: Request):
+        """从 canonical worker 实体派生组织树（接缝 3；手工节点不覆盖）。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        from .m0_backend import M0Store
+
+        m0_db = Path(os.getenv("YUNPAI_M0_DB", "runtime/yunpai-m0.sqlite"))
+        workers = [entity.get("payload_json") or {}
+                   for entity in M0Store(m0_db).list_entities("worker", tenant).get("entities", [])]
+        if not workers:
+            raise HTTPException(409, {"code": "NO_WORKER_ENTITIES",
+                                      "message": f"tenant={tenant} canonical 无 worker 实体，无法派生"})
+        result = identity_store.derive_org_from_workers(workers, tenant_id=tenant)
+        return {"tenant_id": tenant, "workers": len(workers),
+                "created": result["created"],
+                "skipped_manual": result["skipped_manual"],
+                "departments": result["departments"]}
+
+    @app.get("/api/identity/roles")
+    async def identity_roles(tenant_id: str = "", request: Request = None):
+        tenant = _tenant_for_request(tenant_id, request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        return {"tenant_id": tenant, "roles": identity_store.list_roles(tenant_id=tenant)}
+
+    @app.post("/api/identity/roles")
+    async def identity_role_upsert(body: dict[str, Any], request: Request):
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        try:
+            role = identity_store.upsert_role(
+                tenant_id=tenant,
+                role_code=str(body.get("role_code") or ""),
+                name=str(body.get("name") or ""),
+                permissions=[str(p) for p in (body.get("permissions") or [])],
+            )
+        except ValueError as exc:
+            raise HTTPException(422, {"code": "INVALID_ROLE", "message": str(exc)}) from exc
+        return role
+
+    @app.get("/api/identity/bindings")
+    async def identity_bindings(tenant_id: str = "", user_id: str = "",
+                                request: Request = None):
+        tenant = _tenant_for_request(tenant_id, request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        return {"tenant_id": tenant,
+                "bindings": identity_store.list_bindings(tenant_id=tenant, user_id=user_id or None)}
+
+    @app.post("/api/identity/bindings")
+    async def identity_bind_user(body: dict[str, Any], request: Request):
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        try:
+            bound = identity_store.bind_user(
+                tenant_id=tenant,
+                user_id=str(body.get("user_id") or ""),
+                role_codes=[str(r) for r in (body.get("role_codes") or [])],
+                org_id=body.get("org_id"),
+                skill=body.get("skill"),
+            )
+        except ValueError as exc:
+            raise HTTPException(422, {"code": "INVALID_BINDING", "message": str(exc)}) from exc
+        return bound
+
+    @app.post("/api/identity/bindings/bulk")
+    async def identity_bind_users_bulk(body: dict[str, Any], request: Request):
+        """按部门批量授权（接缝 3 阶段③）：逐条绑定，任何一条失败整批 422。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        items = body.get("bindings")
+        if not isinstance(items, list) or not items:
+            raise HTTPException(422, {"code": "INVALID_BULK_BINDING", "message": "bindings 必须为非空数组"})
+        try:
+            return identity_store.bind_users_bulk(
+                tenant_id=tenant, bindings=[item for item in items if isinstance(item, dict)])
+        except ValueError as exc:
+            raise HTTPException(422, {"code": "INVALID_BULK_BINDING", "message": str(exc)}) from exc
+
+    @app.get("/api/identity/resolve")
+    async def identity_resolve(tenant_id: str = "", user_id: str = "",
+                               request: Request = None):
+        tenant = _tenant_for_request(tenant_id, request)
+        principal = _request_principal(request)[0]
+        actor = str(principal.get("actor") or "")
+        target = user_id or actor
+        if target != actor:
+            _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        elif not actor:
+            raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED", "message": "未认证"})
+        return identity_store.resolve(tenant_id=tenant, user_id=target)
+
+    @app.get("/api/identity/authz/recent")
+    async def identity_authz_recent(tenant_id: str = "", limit: int = 50,
+                                    request: Request = None):
+        """最近授权判定（deny 留痕查询；identity.admin）。"""
+        tenant = _tenant_for_request(tenant_id, request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        return {"tenant_id": tenant,
+                "decisions": identity_store.recent_authz(tenant_id=tenant, limit=max(1, min(limit, 500)))}
+
+    # --------------------------------------------- 引导AI（F-015 / P-013）
+
+    def _load_workers(body: dict[str, Any], tenant: str) -> list[dict[str, Any]]:
+        explicit = body.get("workers")
+        if isinstance(explicit, list) and explicit:
+            return [item for item in explicit if isinstance(item, dict)]
+        from .m0_backend import M0Store
+
+        m0_db = Path(os.getenv("YUNPAI_M0_DB", "runtime/yunpai-m0.sqlite"))
+        return [entity.get("payload_json") or {}
+                for entity in M0Store(m0_db).list_entities("worker", tenant).get("entities", [])]
+
+    @app.post("/api/identity/guidance/suggest")
+    async def identity_guidance_suggest(body: dict[str, Any], request: Request):
+        """引导对话原型（阶段①）：产出建议方案，**不落库**（红线）。
+
+        组织树用只读规划器预览（plan_org_from_workers），不写任何 org 节点。
+        """
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        from .identity import plan_org_from_workers
+
+        workers = _load_workers(body, tenant)
+        if not workers:
+            raise HTTPException(409, {"code": "NO_WORKER_ENTITIES",
+                                      "message": "未提供 workers 且 canonical 无 worker 实体"})
+        preview = plan_org_from_workers(workers,
+                                        existing_nodes=identity_store.org_tree(tenant_id=tenant))
+        plan = build_guidance_plan(tenant_id=tenant, workers=workers, derive_result=preview)
+        if body.get("use_llm"):
+            router = getattr(graph.planner, "router", None)
+            plan = await enrich_plan_with_llm(plan, router)
+        return {"tenant_id": tenant, "persisted": False, "plan": plan}
+
+    @app.post("/api/identity/guidance/plan")
+    async def identity_guidance_plan(body: dict[str, Any], request: Request):
+        """生成并保存 draft 方案（阶段④前半）：只写方案行，不写任何绑定。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        from .identity import plan_org_from_workers
+
+        workers = _load_workers(body, tenant)
+        if not workers:
+            raise HTTPException(409, {"code": "NO_WORKER_ENTITIES",
+                                      "message": "未提供 workers 且 canonical 无 worker 实体"})
+        preview = plan_org_from_workers(workers,
+                                        existing_nodes=identity_store.org_tree(tenant_id=tenant))
+        plan = build_guidance_plan(tenant_id=tenant, workers=workers, derive_result=preview)
+        if body.get("use_llm"):
+            router = getattr(graph.planner, "router", None)
+            plan = await enrich_plan_with_llm(plan, router)
+        saved = identity_store.save_guidance_plan(tenant_id=tenant, plan=plan)
+        return {"tenant_id": tenant, "plan_id": saved["plan_id"], "status": "draft",
+                "bindings_written": 0, "plan": plan}
+
+    @app.post("/api/identity/guidance/apply")
+    async def identity_guidance_apply(body: dict[str, Any], request: Request):
+        """人工确认 Gate（阶段④后半）：confirm=true 才把 draft 方案落库为绑定。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        principal = _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        plan_id = str(body.get("plan_id") or "")
+        if not plan_id:
+            raise HTTPException(422, {"code": "PLAN_ID_REQUIRED", "message": "缺少 plan_id"})
+        confirmed_by = str(body.get("confirmed_by") or principal.get("actor") or "")
+        try:
+            result = identity_store.apply_guidance_plan(
+                tenant_id=tenant, plan_id=plan_id,
+                confirmed_by=confirmed_by, confirm=bool(body.get("confirm") is True),
+            )
+        except ValueError as exc:
+            raise HTTPException(409, {"code": "GUIDANCE_GATE_REJECTED", "message": str(exc)}) from exc
+        return result
+
     return app
 
 
