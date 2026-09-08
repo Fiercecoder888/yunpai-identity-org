@@ -3,6 +3,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import type { AppPath } from './router';
 import { routePermissions } from '../features/roles/routePermissions';
+import { landingKindForRoleId } from '../features/roles/roleConfig';
 import { useCurrentRole } from '../features/roles/useCurrentRole';
 import { hasPermission } from '../services/permissionApi';
 import { createAuditLog, writeAuditLogSafely } from '../services/auditLogger';
@@ -48,5 +49,7 @@ export function RoleGuard({ path, children }: { path: AppPath; children: ReactNo
     return <>{children}</>;
   }
 
-  return <Navigate to="/dashboard" replace />;
+  // 回该角色自己的落地页：固定跳 /dashboard 会让「同样没有 dashboard 权限」的
+  // 工人/组长陷入重定向（页面空白）。未知角色/权限服务故障 → 默认落地页（对话页）。
+  return <Navigate to={landingKindForRoleId(role?.id).landingPath} replace />;
 }

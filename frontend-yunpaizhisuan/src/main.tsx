@@ -2,7 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { AppProviders } from './app/providers';
 import { App } from './app/App';
-import { isMswDemoMode } from './app/runtimeMode';
+import { isDemoRoleEnabled, isMswDemoMode } from './app/runtimeMode';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './styles/tokens.css';
 import './styles/global.css';
@@ -33,19 +33,24 @@ const disableLegacyMocking = async () => {
 };
 
 const prepareRuntime = async () => {
-  if (import.meta.env.VITE_LOCAL_LANGGRAPH === 'true') return true;
-  if (!isMswDemoMode()) {
-    const reloadWithoutLegacyWorker = await disableLegacyMocking();
-    if (reloadWithoutLegacyWorker) {
-      window.location.reload();
-      return false;
-    }
-    await bootstrapAuth().catch(() => undefined);
+  if (isMswDemoMode()) {
+    const { worker } = await import('./mocks/browser');
+    await worker.start({ onUnhandledRequest: 'bypass' });
     return true;
   }
 
-  const { worker } = await import('./mocks/browser');
-  await worker.start({ onUnhandledRequest: 'bypass' });
+  // 演示角色模式（VITE_ENABLE_DEMO_ROLES=true，含本地联调）：前端 mock 角色，
+  // 不请求身份后端。真实鉴权（交付/联调）必须把该开关设为 false。
+  if (isDemoRoleEnabled()) {
+    return true;
+  }
+
+  const reloadWithoutLegacyWorker = await disableLegacyMocking();
+  if (reloadWithoutLegacyWorker) {
+    window.location.reload();
+    return false;
+  }
+  await bootstrapAuth().catch(() => undefined);
   return true;
 };
 

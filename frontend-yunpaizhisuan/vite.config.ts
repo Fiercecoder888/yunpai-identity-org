@@ -31,6 +31,11 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      // 编辑工具落盘时会写 `.<file>.<pid>.<uuid>.tmpdir/` 临时目录，Windows 上
+      // Vite watcher 会因 EBUSY 直接崩（dev server 退出）。忽略这些临时目录。
+      watch: {
+        ignored: ['**/.tmpdir/**', '**/*.tmpdir/**', '**/.*.tmpdir/**'],
+      },
       // 本地浏览器验收：真实模式下把 /api/orchestrator 代理到本地编排器，
       // MSW demo 模式不经网络，不受影响。
       proxy: {

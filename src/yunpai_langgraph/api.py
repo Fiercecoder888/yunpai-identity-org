@@ -55,6 +55,23 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         identity_store = IdentityStore(os.getenv("YUNPAI_IDENTITY_DB", "runtime/yunpai-identity.sqlite"))
     app = FastAPI(title="Yunpai LangGraph", version="0.2.0")
 
+    @app.middleware("http")
+    async def _accept_unprefixed_identity_paths(request, call_next):
+        """兼容「剥掉 /api 前缀」的部署（vite dev proxy、_deploy-gb10/static_proxy.py）。
+
+        api-gateway 把 `/api/auth/*` 原样转给 orchestrator，而 vite dev proxy 与演示
+        静态代理会 `rewrite: path.replace(/^\\/api/, '')` → `/auth/*`。两条路都要能用，
+        故把无前缀的 `/auth|/identity|/guidance/*` 内部映射回 `/api/...`。
+        这三个前缀与既有无前缀路由（/runs、/tools、/health、/skills、/m0/readback）
+        不冲突。
+        """
+        path = str(request.scope.get("path") or "")
+        for prefix in ("/auth", "/identity", "/guidance"):
+            if path == prefix or path.startswith(prefix + "/"):
+                request.scope["path"] = "/api" + path
+                break
+        return await call_next(request)
+
     def _principal_from_headers(headers: dict[str, str],
                                 cookies: dict[str, str] | None = None) -> tuple[dict[str, Any], bool]:
         """从受信反向代理/认证中间件读取审批 principal（T5.2）。

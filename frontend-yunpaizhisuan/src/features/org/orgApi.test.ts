@@ -12,11 +12,12 @@ describe('orgApi', () => {
   it('builds a three-level tree from flat nodes', () => {
     const tree = buildOrgTree(nodes);
     expect(tree).toHaveLength(1);
-    expect(tree[0].key).toBe('company');
-    expect(tree[0].children.map((node) => node.key).sort()).toEqual(['dept:prod', 'dept:qc']);
-    const prod = tree[0].children.find((node) => node.key === 'dept:prod');
+    const [root] = tree;
+    expect(root?.key).toBe('company');
+    expect(root?.children.map((node) => node.key).sort()).toEqual(['dept:prod', 'dept:qc']);
+    const prod = root?.children.find((node) => node.key === 'dept:prod');
     expect(prod?.children.map((node) => node.key)).toEqual(['team:prod-a']);
-    expect(prod?.children[0].orgType).toBe('team');
+    expect(prod?.children[0]?.orgType).toBe('team');
   });
 
   it('keeps orphan nodes as roots instead of dropping them', () => {

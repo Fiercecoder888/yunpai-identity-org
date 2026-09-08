@@ -22,10 +22,13 @@ import {
 import { lastSelectedConversationId, useChatStore } from '../store/useChatStore';
 import { useAuthStore } from '../auth/useAuthStore';
 import { oidcLoginUrl } from '../auth/authApi';
+import { isDemoRoleEnabled } from '../app/runtimeMode';
 import { CommandPalette } from '../components/CommandPalette';
 import { DatabaseTenantSwitcher } from '../components/DatabaseTenantSwitcher';
 import { VersionBadge } from '../components/VersionBadge';
 import { RoleSwitcher } from '../features/roles/RoleSwitcher';
+import { AdminNavMenu } from '../features/roles/AdminNavMenu';
+import { UserMenu } from '../features/roles/UserMenu';
 import { useCurrentRole } from '../features/roles/useCurrentRole';
 import { PieceWageReportCard } from '../features/wage/PieceWageReportCard';
 import { createM7TrackingTaskId, listM7PendingInspections, scanM7DeliveryNote } from '../services/m7Api';
@@ -47,6 +50,8 @@ export function EnterpriseAssistantPage() {
   const persistAssistantMessage = useChatStore((state) => state.persistAssistantMessage);
   const me = useAuthStore((state) => state.me);
   const authConfig = useAuthStore((state) => state.config);
+  // 演示角色模式保留旧共享标记；真实鉴权下顶部显示账号/角色/退出。
+  const demoRoles = isDemoRoleEnabled();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const roleQuery = useCurrentRole();
   const [toolModal, setToolModal] = useState<Exclude<ChatToolAction, 'pmc-progress'> | null>(null);
@@ -280,7 +285,7 @@ export function EnterpriseAssistantPage() {
         </div>
         <div className="assistant-header-right">
           <AgentTaskCenter />
-          <RoleSwitcher />
+          {demoRoles ? <RoleSwitcher /> : null}
           <input
             ref={m0FolderInputRef}
             type="file"
@@ -301,14 +306,23 @@ export function EnterpriseAssistantPage() {
           <div className="assistant-header-version">
             <VersionBadge />
           </div>
-          <Tag color="gold" className="assistant-shared-tag" title="只读共享业务数据">
-            <Badge status="success" />
-            共享数据{me?.user?.name ? ` · ${me.user.name}` : ''}
-          </Tag>
-          <DatabaseTenantSwitcher />
-          {authConfig?.capabilities.oidc_login && me?.principal_type !== 'oidc_federated'
-            ? <Button aria-label="登录" icon={<LoginOutlined />} href={oidcLoginUrl(`${location.pathname}${location.search}`)}>登录</Button>
-            : null}
+          {demoRoles ? (
+            <>
+              <Tag color="gold" className="assistant-shared-tag" title="只读共享业务数据">
+                <Badge status="success" />
+                共享数据{me?.user?.name ? ` · ${me.user.name}` : ''}
+              </Tag>
+              <DatabaseTenantSwitcher />
+              {authConfig?.capabilities.oidc_login && me?.principal_type !== 'oidc_federated'
+                ? <Button aria-label="登录" icon={<LoginOutlined />} href={oidcLoginUrl(`${location.pathname}${location.search}`)}>登录</Button>
+                : null}
+            </>
+          ) : (
+            <>
+              <AdminNavMenu />
+              <UserMenu />
+            </>
+          )}
         </div>
       </header>
       {localLangGraph

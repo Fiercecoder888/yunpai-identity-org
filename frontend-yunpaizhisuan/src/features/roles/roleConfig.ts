@@ -1,4 +1,5 @@
-export const HOME_PATH = '/home' as const;
+// 默认落地页 = Agent 对话页（/home 已随角色首页一起删除）。
+export const HOME_PATH = '/' as const;
 
 export const demoRoleStorageKey = 'mockRoleId';
 

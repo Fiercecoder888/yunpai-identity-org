@@ -37,6 +37,20 @@ def _register_admin(client, **overrides):
     return client.post("/api/auth/register-admin", json=body)
 
 
+def test_unprefixed_identity_paths_are_accepted(app):
+    """vite dev proxy / static_proxy 会剥掉 /api 前缀：无前缀路径必须同样可用。"""
+    client = TestClient(app)
+    assert client.get("/auth/bootstrap-status").json()["needs_bootstrap"] is True
+    assert client.get("/api/auth/bootstrap-status").json()["needs_bootstrap"] is True
+    registered = client.post("/auth/register-admin", json={
+        "company_name": "云湃测试厂", "user_id": "boss", "password": "boss-pass-123"})
+    assert registered.status_code == 200, registered.text
+    assert client.get("/auth/me").status_code == 200
+    assert client.get("/identity/catalog").status_code == 200
+    assert client.get("/api/identity/catalog").status_code == 200
+    assert client.get("/guidance/presets").status_code == 200
+
+
 # ------------------------------------------------------------ 初始化状态
 
 def test_bootstrap_status_reports_empty_system(app):

@@ -32,7 +32,8 @@ describe('roleConfig', () => {
     expect(landingKindForRoleId('quality-assurance').landingPath).toBe('/');
     expect(landingKindForRoleId('team-leader').landingPath).toBe('/leader');
     expect(landingKindForRoleId('worker').landingPath).toBe('/worker');
-    expect(defaultRoleLanding.landingPath).toBe('/home');
+    // 未知角色/权限服务故障时的默认落地页 = 对话页（/home 已随角色首页删除）
+    expect(defaultRoleLanding.landingPath).toBe('/');
   });
 
   it('defines role-specific metric keys without sharing an empty default', () => {

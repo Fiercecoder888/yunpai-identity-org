@@ -41,7 +41,7 @@ export function UserMenu() {
           },
         }}
       >
-        <Button type="text" icon={<UserOutlined />} aria-label="用户菜单">
+        <Button type="text" icon={<UserOutlined />} aria-label="用户菜单" data-testid="user-menu">
           <Space size={6}>
             {roleName ? <Tag color="blue" style={{ marginInlineEnd: 0 }}>{roleName}</Tag> : null}
             {displayName}
