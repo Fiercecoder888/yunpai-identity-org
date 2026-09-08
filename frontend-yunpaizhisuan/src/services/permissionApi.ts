@@ -1,5 +1,6 @@
 import { isDemoRoleEnabled, isLenovoTestIdentity } from '../app/runtimeMode';
 import { PERMISSION_CODES, isPermissionCode, type PermissionCode } from '../features/roles/permissionCatalog';
+import { pagePermissionsForRoles } from '../features/roles/backendPermissionMap';
 import { requestJson } from './httpClient';
 import { useAuthStore } from '../auth/useAuthStore';
 
@@ -93,14 +94,32 @@ export async function getCurrentRole() {
     };
   }
 
+  // PR #6 真鉴权：角色/权限来自 /api/auth/me（useAuthStore 启动时已拉取）。
+  // 后端是流程权限 code（order.view…），前端是页面权限 code（m1:read…），
+  // 由 backendPermissionMap 显式映射；未知角色 → 空权限（fail-closed）。
   const me = useAuthStore.getState().me;
   if (me) {
+    // 旧 BFF 匿名会话的共享开发者仍映射到厂长视图（兼容分支，PR #6 不产生）。
     const isSharedDeveloper =
       me.principal_type === 'shared_anonymous' && me.roles?.includes('shared_developer');
+    if (isSharedDeveloper) {
+      return {
+        id: 'factory-director',
+        name: me.user?.name ?? '共享开发者',
+        permissions: me.permissions.filter(isPermissionCode),
+      };
+    }
     return {
-      id: isSharedDeveloper ? 'factory-director' : (me.roles[0] ?? 'shared-developer'),
-      name: me.user?.name ?? '共享开发者',
-      permissions: me.permissions.filter(isPermissionCode),
+      id: me.roles[0] ?? 'unbound',
+      name: me.role_names?.[0] ?? me.display_name ?? me.roles[0] ?? '未绑定角色',
+      // 角色映射（PR #6 后端码 → 页面码）与直通（旧契约/测试夹具里的页面码）取并集：
+      // 后端码不是页面码，会被 isPermissionCode 过滤掉；页面码直接保留。
+      permissions: [
+        ...new Set([
+          ...pagePermissionsForRoles(me.roles, me.permissions),
+          ...me.permissions.filter(isPermissionCode),
+        ]),
+      ],
     };
   }
   const payload = await requestJson<unknown>('/auth/me');

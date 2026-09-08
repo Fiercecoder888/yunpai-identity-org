@@ -41,6 +41,18 @@ const SampleWorkOrdersPage = lazy(() =>
 const SopPage = lazy(() => import('../pages/SopPage').then((module) => ({ default: module.SopPage })));
 const TaskBoardPage = lazy(() => import('../pages/TaskBoardPage').then((module) => ({ default: module.TaskBoardPage })));
 const WorkerPage = lazy(() => import('../pages/WorkerPage').then((module) => ({ default: module.WorkerPage })));
+const OrgStructurePage = lazy(() =>
+  import('../pages/OrgStructurePage').then((module) => ({ default: module.OrgStructurePage })),
+);
+const AccountsPage = lazy(() =>
+  import('../pages/AccountsPage').then((module) => ({ default: module.AccountsPage })),
+);
+const RolesPermissionsPage = lazy(() =>
+  import('../pages/RolesPermissionsPage').then((module) => ({ default: module.RolesPermissionsPage })),
+);
+const SetupGuidePage = lazy(() =>
+  import('../pages/SetupGuidePage').then((module) => ({ default: module.SetupGuidePage })),
+);
 const WarehouseReconcilePage = lazy(() =>
   import('../pages/WarehouseReconcilePage').then((module) => ({ default: module.WarehouseReconcilePage })),
 );
@@ -82,6 +94,10 @@ const routeMetaSource = {
   '/modules/legal-final-review': { navTitle: '法务终审', groupKey: 'trace', icon: 'legal-final-review', description: '隔离的样例终审流程', closable: true },
   '/modules/data-construction': { navTitle: 'M0 数据建设', groupKey: 'system', icon: 'data-construction', description: '数据导入、解析、裁决与入库', closable: true },
   '/audit': { navTitle: '操作留痕', groupKey: 'system', icon: 'audit', description: '权限与操作留痕审计', closable: true },
+  '/org': { navTitle: '组织架构', groupKey: 'org', icon: 'leader', description: '公司 → 部门 → 班组 三层组织树；增删节点、查看来源（手工/花名册派生）', closable: true },
+  '/accounts': { navTitle: '账号管理', groupKey: 'org', icon: 'leader', description: '给员工分配账号与角色、重置初始密码、启用停用', closable: true },
+  '/roles': { navTitle: '角色与权限', groupKey: 'org', icon: 'audit', description: '权限目录与角色矩阵（只读）：13 项权限 × 9 个角色', closable: true },
+  '/setup': { navTitle: '架构设计引导', groupKey: 'org', icon: 'leader', description: '与 AI 对话生成组织架构与账号分配方案，确认后落地', closable: true },
 } as const;
 
 export type AppPath = keyof typeof routeMetaSource;
@@ -132,6 +148,10 @@ export const router = createBrowserRouter([
           { path: 'modules/legal-final-review', element: withSuspense(<RoleGuard path="/modules/legal-final-review"><LegalFinalReviewPage /></RoleGuard>) },
           { path: 'modules/data-construction', element: withSuspense(<RoleGuard path="/modules/data-construction"><DataConstructionPage /></RoleGuard>) },
           { path: 'audit', element: withSuspense(<RoleGuard path="/audit"><AuditLogPage /></RoleGuard>) },
+          { path: 'org', element: withSuspense(<RoleGuard path="/org"><OrgStructurePage /></RoleGuard>) },
+          { path: 'accounts', element: withSuspense(<RoleGuard path="/accounts"><AccountsPage /></RoleGuard>) },
+          { path: 'roles', element: withSuspense(<RoleGuard path="/roles"><RolesPermissionsPage /></RoleGuard>) },
+          { path: 'setup', element: withSuspense(<RoleGuard path="/setup"><SetupGuidePage /></RoleGuard>) },
         ],
       },
       { path: '*', element: <Navigate to="/" replace /> },

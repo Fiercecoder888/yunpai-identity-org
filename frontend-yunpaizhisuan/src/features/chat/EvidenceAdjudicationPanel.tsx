@@ -53,8 +53,8 @@ function DetailFields({ fields }: { fields: Array<[string, string | undefined]> 
 }
 
 function EvidenceModulePane({ module }: { module: EvidenceModule }) {
-  const tenantId = useAuthStore((state) => state.me?.tenant.id);
-  const sessionId = useAuthStore((state) => state.me?.session.id);
+  const tenantId = useAuthStore((state) => state.me?.tenant?.id ?? state.me?.tenant_id);
+  const sessionId = useAuthStore((state) => state.me?.session?.id);
   const queryClient = useQueryClient();
   const [selectedBatchId, setSelectedBatchId] = useState<string>();
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -190,8 +190,8 @@ function EvidenceModulePane({ module }: { module: EvidenceModule }) {
 }
 
 export function EvidenceAdjudicationPanel() {
-  const tenantId = useAuthStore((state) => state.me?.tenant.id);
-  const sessionId = useAuthStore((state) => state.me?.session.id);
+  const tenantId = useAuthStore((state) => state.me?.tenant?.id ?? state.me?.tenant_id);
+  const sessionId = useAuthStore((state) => state.me?.session?.id);
   const queryClient = useQueryClient();
   const previousIdentity = useRef<{ tenantId?: string; sessionId?: string } | undefined>(undefined);
   useEffect(() => {

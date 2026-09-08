@@ -343,7 +343,7 @@ export function DataFlowPanel({
   initiallyExpanded?: boolean;
 }) {
   const store = useBusinessRunStore();
-  const tenantId = useAuthStore((state) => state.me?.tenant.id);
+  const tenantId = useAuthStore((state) => state.me?.tenant?.id ?? state.me?.tenant_id);
   const [selectedCatalogId, setSelectedCatalogId] = useState('');
   const [manualM2Note, setManualM2Note] = useState('');
   const [supplementBomNote, setSupplementBomNote] = useState('');

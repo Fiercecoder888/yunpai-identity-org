@@ -5,9 +5,9 @@ import { currentRoleQueryKey, getCurrentRole } from '../../services/permissionAp
 export function useCurrentRole() {
   const authStatus = useAuthStore((state) => state.status);
   const authError = useAuthStore((state) => state.error ?? null);
-  const principalId = useAuthStore((state) => state.me?.principal_id ?? null);
-  const tenantId = useAuthStore((state) => state.me?.tenant.id ?? null);
-  const sessionId = useAuthStore((state) => state.me?.session.id ?? null);
+  const principalId = useAuthStore((state) => state.me?.user_id ?? state.me?.principal_id ?? null);
+  const tenantId = useAuthStore((state) => state.me?.tenant?.id ?? state.me?.tenant_id ?? null);
+  const sessionId = useAuthStore((state) => state.me?.session?.id ?? null);
   const roles = useAuthStore((state) => state.me?.roles ?? null);
   const permissions = useAuthStore((state) => state.me?.permissions ?? null);
   const query = useQuery({

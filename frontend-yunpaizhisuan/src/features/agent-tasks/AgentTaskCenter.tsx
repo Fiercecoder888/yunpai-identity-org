@@ -94,7 +94,7 @@ function LocalGateNotificationCard({
 }
 
 export function AgentTaskCenter({ supervision = false }: { supervision?: boolean }) {
-  const tenantId = useAuthStore((state) => state.me?.tenant.id);
+  const tenantId = useAuthStore((state) => state.me?.tenant?.id ?? state.me?.tenant_id);
   const queryClient = useQueryClient();
   const [notificationApi, notificationContext] = notification.useNotification();
   const [open, setOpen] = useState(false);

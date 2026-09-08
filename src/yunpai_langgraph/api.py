@@ -599,6 +599,24 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             tenant = str(_header_tenant(request).get("x-yunpai-tenant-id") or "").strip()
         return tenant or (os.getenv("YUNPAI_DEFAULT_TENANT", "").strip() or "default")
 
+    @app.get("/api/auth/config")
+    async def auth_config(request: Request):
+        """前端鉴权配置：账号密码模式（无匿名会话、无 OIDC、按用户隔离）。"""
+        tenant = _bootstrap_tenant("", request)
+        return {
+            "auth_mode": "authenticated_isolated",
+            "oidc_enabled": False,
+            "shared_data": False,
+            "csrf_required": False,
+            "capabilities": {
+                "anonymous_session": False,
+                "oidc_login": False,
+                "session_management": True,
+                "user_isolation": True,
+            },
+            "tenants": [{"id": tenant, "name": tenant}],
+        }
+
     @app.get("/api/auth/bootstrap-status")
     async def auth_bootstrap_status(request: Request, tenant_id: str = ""):
         """系统是否已初始化：无任何账号 → 前端跳「厂长注册」，否则跳登录页。"""

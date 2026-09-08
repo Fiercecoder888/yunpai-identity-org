@@ -21,10 +21,10 @@ export function DatabaseTenantSwitcher({ size = 'small', reloadPage }: DatabaseT
 
   if (!me || tenants.length === 0) return null;
 
-  const currentTenantName = tenants.find((tenant) => tenant.id === me.tenant.id)?.name ?? me.tenant.name;
+  const currentTenantName = tenants.find((tenant) => tenant.id === me.tenant?.id)?.name ?? me.tenant?.name;
 
   const requestSwitch = (tenantId: string) => {
-    if (tenantId === me.tenant.id) return;
+    if (tenantId === me.tenant?.id) return;
     const targetName = tenants.find((tenant) => tenant.id === tenantId)?.name ?? tenantId;
 
     modal.confirm({
@@ -52,7 +52,7 @@ export function DatabaseTenantSwitcher({ size = 'small', reloadPage }: DatabaseT
         trigger={['click']}
         disabled={switching}
         menu={{
-          selectedKeys: [me.tenant.id],
+          selectedKeys: [me.tenant?.id ?? ''],
           items: tenants.map((tenant) => ({ key: tenant.id, label: tenant.name })),
           onClick: ({ key }) => requestSwitch(key),
         }}

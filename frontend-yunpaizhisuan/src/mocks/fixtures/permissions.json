@@ -22,7 +22,13 @@
         "chat:read",
         "chat:write",
         "chat:delete",
-        "m0:bom:approve"
+        "m0:bom:approve",
+        "org:read",
+        "org:write",
+        "account:read",
+        "account:write",
+        "role:manage",
+        "system:setup"
       ]
     },
     {

@@ -29,4 +29,8 @@ export const routePermissions: Record<AppPath, RoutePermissionDef> = {
   '/modules/data-construction': { permission: null, auditModule: 'M0' },
   '/modules/m0-wiki': { permission: null, auditModule: 'M0' },
   '/audit': { permission: 'audit:read', auditModule: 'Audit' },
+  '/org': { permission: 'org:write', auditModule: 'OrgStructure' },
+  '/accounts': { permission: 'account:write', auditModule: 'Accounts' },
+  '/roles': { permission: 'role:manage', auditModule: 'Roles' },
+  '/setup': { permission: 'system:setup', auditModule: 'SetupGuide' },
 };

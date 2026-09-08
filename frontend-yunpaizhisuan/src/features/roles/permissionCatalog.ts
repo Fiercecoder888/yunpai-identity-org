@@ -16,6 +16,13 @@ export const PERMISSION_CODES = [
   'chat:write',
   'chat:delete',
   'm0:bom:approve',
+  // 组织架构与账号（对应 PR #6 的 identity.admin；仅厂长/组织管理员）
+  'org:read',
+  'org:write',
+  'account:read',
+  'account:write',
+  'role:manage',
+  'system:setup',
 ] as const;
 
 export type PermissionCode = (typeof PERMISSION_CODES)[number];

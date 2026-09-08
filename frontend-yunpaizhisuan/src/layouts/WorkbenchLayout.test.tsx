@@ -74,6 +74,7 @@ describe('WorkbenchLayout header', () => {
     expect(screen.getByText('订单识别·任务协同·生产排程·操作留痕')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '我的待办' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '当前数据库：测试库' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '用户菜单' })).toBeInTheDocument();
+    // 演示模式（VITE_ENABLE_DEMO_ROLES 默认开）显示角色切换；真实鉴权下换成 UserMenu。
+    expect(screen.getByTestId('role-switcher')).toBeInTheDocument();
   });
 });

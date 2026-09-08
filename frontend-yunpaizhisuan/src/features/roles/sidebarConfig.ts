@@ -79,6 +79,17 @@ export const sidebarGroups: SidebarGroupDef[] = [
       { key: '/audit', label: '操作留痕', requiredPermission: 'audit:read' },
     ],
   },
+  {
+    key: 'org',
+    title: '组织与账号',
+    items: [
+      // 厂长（含组织管理员角色）专属：组织架构 / 账号分配 / 角色权限 / 引导。
+      { key: '/org', label: '组织架构', requiredPermission: 'org:write', roles: ['factory-director', 'org-admin'] },
+      { key: '/accounts', label: '账号管理', requiredPermission: 'account:write', roles: ['factory-director', 'org-admin'] },
+      { key: '/roles', label: '角色与权限', requiredPermission: 'role:manage', roles: ['factory-director', 'org-admin'] },
+      { key: '/setup', label: '架构设计引导', requiredPermission: 'system:setup', roles: ['factory-director', 'org-admin'] },
+    ],
+  },
 ];
 
 export const filterSidebarGroups = (role: RolePermission | null | undefined): SidebarGroupDef[] => {
