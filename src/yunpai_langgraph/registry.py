@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import base64
+import logging
 from pathlib import Path
 import os
 from typing import Any
 from urllib.parse import quote
+
+logger = logging.getLogger("yunpai.registry")
 
 try:
     from jsonschema import Draft202012Validator
@@ -76,6 +79,19 @@ class ToolHTTPError(RuntimeError):
         self.status_code = status_code
 
 
+class ToolForbiddenError(RuntimeError):
+    """工具级权限拒绝（F-013：禁止不同角色调用无权工具）。"""
+
+    def __init__(self, tool: str, required: str | None, *, permissions: list[str]) -> None:
+        reason = f"缺少权限 {required}" if required else "该工具未登记权限映射（fail-closed）"
+        super().__init__(f"{tool}: TOOL_FORBIDDEN: {reason}")
+        self.tool = tool
+        self.required = required
+        self.code = "TOOL_FORBIDDEN"
+        self.permissions = list(permissions)
+        self.status_code = 403
+
+
 class ToolRegistry:
     """全局唯一工具注册表；可加载 JSON manifest 并绑定本地/HTTP handler。"""
 
@@ -122,10 +138,39 @@ class ToolRegistry:
     def tools_for(self, module: str) -> list[ToolSpec]:
         return [s for s in self.specs.values() if s.module == module]
 
+    def _authorize_tool(self, name: str, spec: Any, context: dict[str, Any]) -> None:
+        """工具级权限硬闸（F-013）。
+
+        只在 context 带 principal（HTTP 入口注入）时生效；无 principal 的内部调用
+        （单测、CLI、graph.run 直调）保持 legacy 放行，避免误伤——真实用户请求
+        经 api.py 一定带 principal。
+        """
+        if not context.get("principal"):
+            return
+        from .tool_permissions import authz_mode, permission_for_tool
+
+        mode = authz_mode()
+        if mode == "off":
+            return
+        permissions = [str(item) for item in (context.get("principal_permissions") or [])]
+        scopes = {str(key): str(value) for key, value in (context.get("principal_scopes") or {}).items()}
+        required = permission_for_tool(name, spec.module)
+        # 映射按租户级登记：@self/@dept 的窄范围授权不满足工具要求。
+        if required is not None and required in permissions and scopes.get(required, "tenant") == "tenant":
+            return
+        if mode == "warn":
+            logger.warning(
+                "tool_authz.warn tool=%s module=%s required=%s permissions=%s scopes=%s",
+                name, spec.module, required, permissions, scopes,
+            )
+            return
+        raise ToolForbiddenError(name, required, permissions=permissions)
+
     async def call(self, name: str, payload: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if name not in self.specs:
             raise KeyError(f"unknown tool: {name}")
         spec = self.specs[name]
+        self._authorize_tool(name, spec, context)
         errors = sorted(Draft202012Validator(spec.input_schema).iter_errors(payload), key=lambda e: list(e.path))
         if errors:
             raise ValueError(f"invalid input for {name}: {errors[0].message}")

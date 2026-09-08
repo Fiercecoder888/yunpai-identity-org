@@ -845,6 +845,39 @@ def authorize(store: IdentityStore, *, tenant_id: str, user_id: str, permission:
     return decision
 
 
+def effective_permissions(store: IdentityStore, *, tenant_id: str, user_id: str,
+                          legacy_roles: list[str] | None = None) -> dict[str, Any]:
+    """用户 → 生效权限集合（与 ``authorize`` 同语义，供工具级权限闸用）。
+
+    优先级与 ``authorize`` 一致：绑定权限 → legacy 受信头角色（开关开时）→
+    bootstrap 首管（仅空租户）→ 空。工具闸拿这个集合逐工具判定，避免「Gate 允许
+    但工具全被拒」的不一致。
+    """
+    resolved = store.resolve(tenant_id=tenant_id, user_id=user_id)
+    permissions = set(resolved["permissions"])
+    scopes = dict(resolved.get("permission_scopes") or {})
+    sources: list[str] = ["binding"] if permissions else []
+    if legacy_roles_enabled():
+        for legacy in legacy_roles or []:
+            granted = LEGACY_ROLE_GRANTS.get(str(legacy))
+            if granted:
+                permissions |= set(granted)
+                sources.append(f"legacy_role:{legacy}")
+    bootstrap = os.getenv("IDENTITY_BOOTSTRAP_ADMIN", "").strip()
+    if bootstrap and user_id == bootstrap and store.count_bindings(tenant_id=tenant_id) == 0:
+        permissions.add("identity.admin")
+        sources.append("bootstrap_admin")
+    return {
+        "permissions": sorted(permissions),
+        "permission_scopes": scopes,
+        "roles": list(resolved["roles"]),
+        "role_names": list(resolved["role_names"]),
+        "org_id": resolved.get("org_id"),
+        "org_path": resolved.get("org_path") or [],
+        "sources": sources,
+    }
+
+
 # ---------------------------------------------------------------------------
 # CLI（接缝 3/5）：python -m yunpai_langgraph.identity {derive-org,create-admin}
 # ---------------------------------------------------------------------------

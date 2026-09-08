@@ -47,9 +47,12 @@ class RunState(TypedDict, total=False):
     intent: dict[str, Any]
     route_decision: dict[str, Any]
     model: dict[str, Any]
+    #: 调用者身份（api.py 从会话/受信头注入）：{actor, roles, permissions, tenant_id, source}
+    principal: dict[str, Any]
 
 
-def new_state(request: dict[str, Any], *, tenant_id: str = "default") -> RunState:
+def new_state(request: dict[str, Any], *, tenant_id: str = "default",
+              principal: dict[str, Any] | None = None) -> RunState:
     now = datetime.now(timezone.utc).isoformat()
     run_id, task_id = f"run-{uuid4().hex}", f"task-{uuid4().hex}"
     return RunState(
@@ -59,7 +62,7 @@ def new_state(request: dict[str, Any], *, tenant_id: str = "default") -> RunStat
         current_step="", current_result={},
         status="queued", outputs={}, evidence=[], steps=[], pending_gate=None,
         approvals=[], authorized_steps=[], errors=[], response="", trace=[{"event": "run.created", "at": now}],
-        intent={}, route_decision={}, model={},
+        intent={}, route_decision={}, model={}, principal=dict(principal or {}),
     )
 
 

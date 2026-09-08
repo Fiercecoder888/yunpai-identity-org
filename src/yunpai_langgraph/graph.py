@@ -269,6 +269,18 @@ class YunpaiGraph:
                 record.update(output_summary=summarize(result), evidence=result["evidence"], finished_at=_now())
                 state["trace"].append({"event": "react.observation", "agent": "worker", "tool": step["tool"], "status": "blocked_input", "at": _now()})
                 return self._save(state)
+            from .registry import ToolForbiddenError
+            if isinstance(exc, ToolForbiddenError):
+                # 工具级权限拒绝（F-013）：明确 403 语义，不伪装成业务数据缺失。
+                error = {"code": "TOOL_FORBIDDEN", "tool": step["tool"],
+                         "required": exc.required, "message": str(exc)}
+                record.update(status="blocked", error=error, finished_at=_now())
+                state["errors"].append(error)
+                state["status"] = "failed"
+                state["response"] = f"没有权限调用 {step['module'].upper()} · {step['tool']}（需要 {exc.required}）"
+                state["trace"].append({"event": "tool.forbidden", "tool": step["tool"],
+                                       "required": exc.required, "at": _now()})
+                return self._save(state)
             error = {"code": "TOOL_ERROR", "tool": step["tool"], "message": str(exc)}
             record.update(status="failed", error=error, finished_at=_now())
             state["errors"].append(error)

@@ -20,7 +20,7 @@ from .auth import (
 from .graph import YunpaiGraph
 from .guided_chat import SCALE_OPTIONS, handle_message as handle_guidance_message
 from .guided_setup import catalog_payload
-from .identity import BOOTSTRAP_ADMIN_ROLES, IdentityStore, authorize, permission_for_gate
+from .identity import BOOTSTRAP_ADMIN_ROLES, IdentityStore, authorize, effective_permissions, permission_for_gate
 from .models import new_state
 from .registry import ToolRegistry, build_runtime_registry
 from .repository import RunRepository, SQLiteRunRepository
@@ -46,6 +46,10 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         db_path.parent.mkdir(parents=True, exist_ok=True)
         repository = SQLiteRunRepository(db_path)
     graph = YunpaiGraph(registry or build_runtime_registry(), repository)
+    # 工具权限映射必须全覆盖（漏配 = 默认放行，因此启动即校验）。
+    from .tool_permissions import assert_full_coverage
+
+    assert_full_coverage(graph.registry.specs)
     # 身份/组织/权限事实源（F-013/F-014/F-015 正式版，2026-09-07）。
     if identity_store is None:
         identity_store = IdentityStore(os.getenv("YUNPAI_IDENTITY_DB", "runtime/yunpai-identity.sqlite"))
@@ -155,8 +159,19 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         return payload
 
     @app.get("/tools")
-    async def list_tools(module: str | None = None):
+    async def list_tools(module: str | None = None, request: Request = None):
+        """工具清单：带身份时按 principal 权限过滤（无身份 = 本地/内部调用，返回全量）。"""
         catalog = graph.registry.catalog()
+        principal = _run_principal(request, tenant_id=_bootstrap_tenant("", request)) if request is not None else {}
+        permissions = principal.get("permissions") if principal else None
+        scopes = principal.get("permission_scopes") if principal else None
+        if permissions is not None:
+            from .tool_permissions import tool_allowed
+
+            catalog = [
+                item for item in catalog
+                if tool_allowed(str(item["name"]), str(item["module"]), permissions, scopes)
+            ]
         return {"tools": [item for item in catalog if module is None or item["module"] == module]}
 
     @app.get("/skills")
@@ -164,18 +179,19 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         return {"skills": graph.skills.catalog()}
 
     @app.post("/runs")
-    async def create_run(body: dict[str, Any],
+    async def create_run(body: dict[str, Any], request: Request,
                          x_yunpai_tenant_id: str | None = Header(None),
                          x_tenant_id: str | None = Header(None)):
-        request = body.get("request", body)
-        if not isinstance(request, dict):
+        request_payload = body.get("request", body)
+        if not isinstance(request_payload, dict):
             raise HTTPException(422, "request must be an object")
         tenant_id = _resolve_tenant(explicit=body.get("tenant_id"), headers={
             "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
             "x-tenant-id": x_tenant_id or "",
         })
         try:
-            state = await graph.run(new_state(request, tenant_id=tenant_id))
+            state = await graph.run(new_state(request_payload, tenant_id=tenant_id,
+                                              principal=_run_principal(request, tenant_id=tenant_id)))
             return graph._public_state(state)
         except (KeyError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -192,22 +208,23 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         )
 
     @app.post("/runs/stream")
-    async def create_streaming_run(body: dict[str, Any],
+    async def create_streaming_run(body: dict[str, Any], request: Request,
                                    x_yunpai_tenant_id: str | None = Header(None),
                                    x_tenant_id: str | None = Header(None)):
-        request = body.get("request", body)
-        if not isinstance(request, dict):
+        request_payload = body.get("request", body)
+        if not isinstance(request_payload, dict):
             raise HTTPException(422, "request must be an object")
         tenant_id = _resolve_tenant(explicit=body.get("tenant_id"), headers={
             "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
             "x-tenant-id": x_tenant_id or "",
         })
-        state = new_state(request, tenant_id=tenant_id)
+        state = new_state(request_payload, tenant_id=tenant_id,
+                          principal=_run_principal(request, tenant_id=tenant_id))
         graph.repository.save(state)
         return ndjson_response(graph.stream(state))
 
     @app.post("/runs/upload")
-    async def upload_run(file: Any = File(...), message: str = "请解析并验证这份订单", tenant_id: str = "",
+    async def upload_run(request: Request, file: Any = File(...), message: str = "请解析并验证这份订单", tenant_id: str = "",
                          workflow: str | None = None,
                          x_yunpai_tenant_id: str | None = Header(None),
                          x_tenant_id: str | None = Header(None)):
@@ -245,20 +262,21 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "sha256": sha256_of(raw),
             "detected_format": verdict.detected_format,
         }
-        request: dict[str, Any] = {
+        request_payload: dict[str, Any] = {
             "message": message,
             "attachments": [attachment],
         }
         if workflow:
-            request["workflow"] = workflow
+            request_payload["workflow"] = workflow
         try:
-            state = await graph.run(new_state(request, tenant_id=tenant_id))
+            state = await graph.run(new_state(request_payload, tenant_id=tenant_id,
+                                              principal=_run_principal(request, tenant_id=tenant_id)))
             return graph._public_state(state)
         except (KeyError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from exc
 
     @app.post("/runs/upload/batch")
-    async def upload_batch_run(files: list[Any] = File(...), message: str = Form("请识别并登记这些业务资料"),
+    async def upload_batch_run(request: Request, files: list[Any] = File(...), message: str = Form("请识别并登记这些业务资料"),
                                mode: str = Form(...), tenant_id: str = Form(""),
                                x_yunpai_tenant_id: str | None = Header(None),
                                x_tenant_id: str | None = Header(None)):
@@ -321,13 +339,14 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
                 "upload_summary": summary.as_dict(),
                 "error": {"code": "NO_ACCEPTED_FILES", "message": "没有可识别的文件"},
             }
-        request: dict[str, Any] = {
+        request_payload: dict[str, Any] = {
             "message": message,
             "upload_mode": mode,
             "attachments": attachments,
         }
         try:
-            state = await graph.run(new_state(request, tenant_id=tenant_id))
+            state = await graph.run(new_state(request_payload, tenant_id=tenant_id,
+                                              principal=_run_principal(request, tenant_id=tenant_id)))
             public = graph._public_state(state)
             public["upload_summary"] = summary.as_dict()
             return public
@@ -352,6 +371,34 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "x-tenant-id": request.headers.get("x-tenant-id", "")
             or request.headers.get("x-yunpai-tenant-id", ""),
         }, cookies=dict(request.cookies))
+
+    def _run_principal(request, *, tenant_id: str) -> dict[str, Any]:
+        """运行入口身份（工具级权限闸用）：会话/受信头 → 角色+生效权限。
+
+        权限集合与 `authorize()` 同语义（绑定 → legacy 角色 → bootstrap 首管），
+        避免「Gate 放行但工具全被拒」。无有效身份时返回 {}——与既有
+        ``YUNPAI_REQUIRE_TRUSTED_PRINCIPAL`` 语义一致（该开关只在 resume/identity
+        端点强制 401）；此时工具闸按 legacy 放行，生产应同时开启该开关。
+        """
+        try:
+            principal, trusted = _request_principal(request)
+        except HTTPException:
+            return {}
+        actor = str(principal.get("actor") or "")
+        if not trusted or not actor:
+            return {}
+        effective = effective_permissions(
+            identity_store, tenant_id=tenant_id, user_id=actor,
+            legacy_roles=[str(role) for role in (principal.get("roles") or [])],
+        )
+        return {
+            "actor": actor,
+            "roles": list(principal.get("roles") or effective["roles"]),
+            "permissions": list(effective["permissions"]),
+            "permission_scopes": dict(effective["permission_scopes"]),
+            "tenant_id": tenant_id,
+            "source": principal.get("source"),
+        }
 
     def _identity_gate_check(state: dict[str, Any], *, actor: str, roles: list[str],
                              principal: dict[str, Any], trusted: bool) -> None:

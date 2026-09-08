@@ -326,13 +326,21 @@ class WorkerAgent:
 
     async def run(self, state: RunState, step: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         tool = step["tool"]
+        # 身份上下文（工具级权限闸用）：无 principal 时保持 legacy 放行。
+        principal = dict(state.get("principal") or {})
+        identity_context = {
+            "principal": principal or None,
+            "principal_permissions": list(principal.get("permissions") or []),
+            "principal_scopes": dict(principal.get("permission_scopes") or {}),
+        }
         if step.get("kind") == "skill":
-            result = await self.skills.call(tool, payload, {"run_id": state["run_id"], "task_id": state["task_id"], "tenant_id": state.get("tenant_id"), "_tool_registry": self.registry})
+            result = await self.skills.call(tool, payload, {"run_id": state["run_id"], "task_id": state["task_id"], "tenant_id": state.get("tenant_id"), "_tool_registry": self.registry, **identity_context})
             return {"module": "orchestrator", "tool": tool, "result": result, "input_summary": summarize(payload), "output_summary": summarize(result)}
         spec = self.registry.specs[tool]
         result = await self.registry.call(tool, payload, {
             "run_id": state["run_id"], "task_id": state["task_id"],
             "tenant_id": state.get("tenant_id"),
+            **identity_context,
         })
         return {
             "module": spec.module, "tool": tool, "result": result,
