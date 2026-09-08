@@ -40,3 +40,19 @@ export async function listLocalRuns(limit = 50): Promise<LocalRun[]> {
 export async function getLocalRun(runId: string): Promise<LocalRun> {
   return requestJson<LocalRun>(`/runs/${encodeURIComponent(runId)}`);
 }
+
+export async function deleteLocalRun(runId: string): Promise<void> {
+  await requestJson<{ run_id: string; deleted: boolean }>(
+    `/runs/${encodeURIComponent(runId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function deleteLocalRuns(runIds: string[]): Promise<string[]> {
+  if (!runIds.length) return [];
+  const payload = await requestJson<{ deleted: string[]; count: number }>('/runs/batch-delete', {
+    method: 'POST',
+    body: { run_ids: runIds },
+  });
+  return payload.deleted ?? [];
+}

@@ -1769,6 +1769,9 @@ body {
 .chat-gate-inline textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 5px; font: inherit; box-sizing: border-box; background: #fff; }
 .chat-gate-inline .local-gate-label { margin-top: 12px; }
 .chat-gate-inline .local-gate-actions { margin-top: 12px; }
+.chat-gate-actions { margin-top: 12px; padding-top: 12px; border-top: 1px dashed #e4e7ec; }
+.chat-gate-actions .local-gate-label { margin-top: 0; }
+.chat-gate-inline-hint { margin-top: 10px; color: #64748b; font-size: 12px; line-height: 1.5; }
 
 .local-gate-notification .ant-notification-notice-description { margin-inline-start: 0; }
 .local-gate-notification-card { display: grid; gap: 8px; }
@@ -1778,6 +1781,7 @@ body {
 .local-gate-notification-advice { padding: 7px 9px; border-left: 3px solid #2563eb; background: #eff6ff; color: #344054; font-size: 12px; line-height: 1.45; }
 .local-gate-notification-card textarea { width: 100%; resize: vertical; padding: 7px 9px; border: 1px solid #d0d5dd; border-radius: 5px; font: inherit; box-sizing: border-box; }
 .local-gate-notification-actions { margin-top: 2px; }
+.local-gate-notification-hint { display: block; margin-top: 6px; color: #98a2b3; font-size: 11px; }
 .local-gate-notification-error { color: #b42318; font-size: 12px; }
 
 .auth-state {

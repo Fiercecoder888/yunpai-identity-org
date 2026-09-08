@@ -32,3 +32,13 @@ export const rememberLocalOrder = (record: Omit<LocalOrderRecord, 'updatedAt'>) 
   }
   return next;
 };
+
+export const removeLocalOrder = (orderId: string) => {
+  const existing = readRaw().filter((item) => item.orderId !== orderId);
+  try {
+    globalThis.localStorage?.setItem(LOCAL_ORDER_REGISTRY_KEY, JSON.stringify(existing));
+  } catch {
+    // Storage failure must not block the UI; the in-memory list refresh still applies.
+  }
+  return existing;
+};

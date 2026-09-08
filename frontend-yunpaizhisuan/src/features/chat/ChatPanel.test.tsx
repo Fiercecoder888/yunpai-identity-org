@@ -459,4 +459,88 @@ describe('ChatPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '手动补录' }));
     expect(onToolAction).toHaveBeenCalledWith('m7-warehouse', { m7Tab: 'delivery' });
   });
+
+  it('embeds gate decision actions in the conversation and resumes the run on approval', async () => {
+    const user = userEvent.setup();
+    const resumeSpy = vi.spyOn(chatApi, 'resumeLocalRunStream').mockImplementation(async function* () {
+      yield { type: 'message_start', message_id: 'g1', session_id: 's', conversation_id: 'c', created_at: '2026-09-01T00:00:00Z' };
+      yield { type: 'delta', message_id: 'g1', content: '已按你的指示继续。' };
+      yield { type: 'message_done', message_id: 'g1', finish_reason: 'stop' };
+    });
+    try {
+      useChatStore.setState({
+        selectedConversationId: 'c-gate-1',
+        messages: [{
+          id: 'assistant-gate',
+          role: 'assistant',
+          content: '订单解析完成，需要你复核候选订单。',
+          status: 'completed',
+          gate: {
+            runId: 'run-g1',
+            gate: {
+              type: 'candidate',
+              title: '订单候选审核',
+              message: '请确认候选订单是否准确',
+              recommendation: '建议通过',
+              step_index: 2,
+              module: 'm1',
+            },
+            status: 'pending',
+          },
+        }],
+      });
+
+      renderWithApp(<ChatPanel />);
+
+      expect(await screen.findByText('请阅读上面的分析与建议，在会话里直接选择处理方式，Agent 会在你的指示下继续。')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '批准执行' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '补充后重试' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /终\s*止/ })).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: '批准执行' }));
+
+      await waitFor(() => expect(resumeSpy).toHaveBeenCalledWith(
+        'run-g1',
+        'approve',
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ));
+      // 决策落库为已批准后，会话内卡片保留审计记录并显示状态
+      await waitFor(() => expect(useChatStore.getState().messages[0]?.gate?.status).toBe('approved'));
+      expect(screen.getByText('已批准，Agent 已继续')).toBeInTheDocument();
+    } finally {
+      resumeSpy.mockRestore();
+      useChatStore.setState({ messages: [] });
+    }
+  });
+
+  it('requires supplementary info before retrying a data gate inside the conversation', async () => {
+    const user = userEvent.setup();
+    const resumeSpy = vi.spyOn(chatApi, 'resumeLocalRunStream');
+    try {
+      useChatStore.setState({
+        messages: [{
+          id: 'assistant-m2-gate',
+          role: 'assistant',
+          content: 'BOM 数据不完整。',
+          status: 'completed',
+          gate: {
+            runId: 'run-m2',
+            gate: { type: 'data', module: 'm2', title: '业务数据补充', message: '缺少产品编码' },
+            status: 'pending',
+          },
+        }],
+      });
+
+      renderWithApp(<ChatPanel />);
+
+      await user.click(await screen.findByRole('button', { name: '补充后重试' }));
+
+      expect(await screen.findByText('M2 需要产品编码和至少一条已确认 BOM 行。')).toBeInTheDocument();
+      expect(resumeSpy).not.toHaveBeenCalled();
+    } finally {
+      resumeSpy.mockRestore();
+      useChatStore.setState({ messages: [] });
+    }
+  });
 });

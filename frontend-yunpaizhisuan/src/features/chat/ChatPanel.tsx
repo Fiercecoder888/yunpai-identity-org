@@ -12,9 +12,10 @@ import {
   type M7DeliveryDraft,
 } from '../m7/m7RecognitionMessages';
 import { ToolDataRefPreview } from './ToolDataRefPreview';
+import { GateDecisionActions } from './GateDecisionActions';
 
 type ChatStreamFactory = (prompt: string, options?: ChatStreamOptions) => AsyncGenerator<ChatStreamItem>;
-export type ChatToolAction = 'order-upload' | 'm0-import' | 'master-data-upload' | 'm7-warehouse' | 'pmc-progress' | 'piece-wage' | 'evidence-adjudication';
+export type ChatToolAction = 'order-upload' | 'm0-import' | 'm7-warehouse' | 'pmc-progress' | 'piece-wage' | 'evidence-adjudication';
 export type ChatToolActionOptions = {
   m7Tab?: M7WarehouseTab;
   m7Panel?: 'file-recognition';
@@ -69,12 +70,12 @@ const gateTypeLabels: Record<string, string> = {
   data: '业务数据补充', procurement: '采购建议确认', apply: '排程发布确认',
 };
 
-function LocalGateInlineCard({ messageId, runId, gate, status }: { messageId: string; runId: string; gate: Record<string, unknown>; status?: 'pending' | 'approved' | 'retrying' | 'rejected' | 'error' }) {
+function LocalGateInlineCard({ messageId, runId, gate, status }: { messageId: string; runId: string; gate: Record<string, unknown>; status?: 'pending' | 'approved' | 'retrying' | 'rejected' | 'error' | 'resolved' }) {
   const recommendation = gate.recommendation ?? gate.suggestion ?? gate.advice;
   const risk = gate.risk ?? gate.impact;
   const evidence = Array.isArray(gate.evidence) ? gate.evidence : [];
   const pending = !status || status === 'pending' || status === 'error';
-  const statusLabel = status === 'approved' ? '已批准，Agent 已继续' : status === 'retrying' ? '已补充，Agent 正在重新评估' : status === 'rejected' ? '已终止' : status === 'error' ? '提交失败，可重新处理' : '等待你的判断';
+  const statusLabel = status === 'approved' ? '已批准，Agent 已继续' : status === 'retrying' ? '已补充，Agent 正在重新评估' : status === 'rejected' ? '已终止' : status === 'resolved' ? '已处理，运行已完成' : status === 'error' ? '提交失败，可重新处理' : '等待你的判断';
 
   return <section className={`chat-gate-inline ${pending ? 'chat-gate-inline-pending' : 'chat-gate-inline-resolved'}`} role="group" aria-labelledby={`chat-gate-title-${messageId}`} data-testid="chat-gate-record" tabIndex={-1}>
     <div className="chat-gate-inline-header"><Tag color={pending ? 'error' : 'default'}>{pending ? '需要人工处理' : '人工处理记录'}</Tag><span className="chat-gate-inline-status">{statusLabel}</span></div>
@@ -87,6 +88,12 @@ function LocalGateInlineCard({ messageId, runId, gate, status }: { messageId: st
       {risk ? <div className="local-gate-risk"><b>潜在影响</b><span>{String(risk)}</span></div> : null}
       {evidence.length ? <ul className="local-gate-evidence"><li>依据（{evidence.length}）</li>{evidence.slice(0, 6).map((item, index) => <li key={index}>{typeof item === 'string' ? item : JSON.stringify(item)}</li>)}</ul> : null}
     </details>
+    {pending ? (
+      <p className="chat-gate-inline-hint">请阅读上面的分析与建议，在会话里直接选择处理方式，Agent 会在你的指示下继续。</p>
+    ) : null}
+    {pending ? (
+      <GateDecisionActions messageId={messageId} runId={runId} gate={gate} compact />
+    ) : null}
   </section>;
 }
 
@@ -197,12 +204,10 @@ export function ChatPanel({
     items: localLangGraph
       ? [
           { key: 'order-upload', label: '上传订单文件并运行 Agent' },
-          { key: 'master-data-upload', label: '基础资料识别落库（agent 理解）' },
           { key: 'pmc-progress', label: '查看本地 M5 排程输出' },
         ]
       : [
           { key: 'order-upload', label: '上传订单文件（订单到排程）' },
-          { key: 'master-data-upload', label: '基础资料识别落库（agent 理解）' },
           { key: 'm0-import', label: 'M0 数据导入（基础数据库建设）' },
           { key: 'm7-warehouse', label: 'M7 仓库（送货、抽检、领料）' },
           { key: 'pmc-progress', label: '查看 PMC 实际进度' },
@@ -410,7 +415,7 @@ export function ChatPanel({
                 ...toolMenu,
                 onClick: ({ key }) => {
                   setToolMenuOpen(false);
-                  if (key === 'order-upload' || key === 'm0-import' || key === 'master-data-upload' || key === 'm7-warehouse' || key === 'pmc-progress' || key === 'piece-wage' || key === 'evidence-adjudication') {
+                  if (key === 'order-upload' || key === 'm0-import' || key === 'm7-warehouse' || key === 'pmc-progress' || key === 'piece-wage' || key === 'evidence-adjudication') {
                     onToolAction?.(key);
                   }
                 },

@@ -36,7 +36,6 @@ describe('sidebarConfig', () => {
     );
 
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
-    expect(keys).toContain('/home');
     expect(keys).toContain('/dashboard');
     expect(keys).toContain('/quality');
     expect(keys).toContain('/modules/m0-review');
@@ -52,14 +51,14 @@ describe('sidebarConfig', () => {
     const groups = filterSidebarGroups(role('quality-assurance', ['quality:supervise', 'qc:read', 'chat:read', 'chat:write']));
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
 
-    expect(keys).toEqual(['/home', '/quality']);
+    expect(keys).toEqual(['/quality']);
   });
 
   it('narrows the sidebar for the worker role to workbench only', () => {
     const groups = filterSidebarGroups(role('worker', ['worker:read', 'worker:report', 'chat:read', 'chat:write']));
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
 
-    expect(keys).toEqual(['/home', '/worker']);
+    expect(keys).toEqual(['/worker']);
   });
 
   it('keeps the leader scope for the team-leader role', () => {
@@ -68,7 +67,6 @@ describe('sidebarConfig', () => {
     );
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
 
-    expect(keys).toContain('/home');
     expect(keys).toContain('/leader');
     expect(keys).toContain('/worker');
     expect(keys).toContain('/modules/schedule');

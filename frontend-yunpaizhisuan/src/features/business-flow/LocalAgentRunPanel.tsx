@@ -8,17 +8,18 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
   ShoppingCartOutlined,
+  DeleteOutlined,
   DownOutlined,
   UpOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Empty, Select, Space, Tag, Tooltip } from 'antd';
+import { Alert, Button, Empty, Popconfirm, Select, Space, Tag, Tooltip, message } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { listLocalRuns, getLocalRun, type LocalRun, type LocalRunStep } from '../../services/localRunApi';
+import { deleteLocalRuns, listLocalRuns, getLocalRun, type LocalRun, type LocalRunStep } from '../../services/localRunApi';
 import type { ChatStreamRequest } from '../../services/chatApi';
 import { useChatStore } from '../../store/useChatStore';
-import { readLocalOrders, type LocalOrderRecord } from './localOrderRegistry';
+import { readLocalOrders, removeLocalOrder, type LocalOrderRecord } from './localOrderRegistry';
 import styles from './LocalAgentRunPanel.module.css';
 
 type StageId = 'm1' | 'm2' | 'm3' | 'm4' | 'm5';
@@ -105,6 +106,23 @@ const orderRefsFromRun = (run: LocalRun) => {
       else if (filename) refs.push({ orderId: filename, filename, productName });
     }
   }
+  // 请求体里只有文件名（中文/乱码）没有订单号时，M1 解析后才有真实 order_id
+  // （outputs.ingest_document.document.header.order_id）。用真实订单号覆盖文件名
+  // 兜底条目，否则面板会显示「桐曦PO...xlsx」这种乱码名，找不到真实单号。
+  const hasRealOrderId = refs.some((ref) =>
+    !(/\.(xlsx|xls|csv|pdf|zip|rar|txt)$/i.test(ref.orderId)) && !ref.orderId.includes('订单'),
+  );
+  const ingested = run.outputs?.ingest_document as Record<string, unknown> | undefined;
+  const document = ingested && typeof ingested.document === 'object' ? ingested.document as Record<string, unknown> : {};
+  const header = document.header && typeof document.header === 'object' ? document.header as Record<string, unknown> : {};
+  const outputOrderId = String(header.order_id ?? header.order_number ?? '').trim();
+  if (!hasRealOrderId && outputOrderId) {
+    const filename = (refs[0]?.filename
+      ?? String(document.source && typeof document.source === 'object' ? (document.source as Record<string, unknown>).original_filename ?? '' : '').trim())
+      || undefined;
+    const productName = String(header.product_code ?? header.product_name ?? '').trim() || undefined;
+    return [{ orderId: outputOrderId, productName: productName || undefined, filename: filename || undefined }];
+  }
   return refs.filter((item, index) => refs.findIndex((candidate) => candidate.orderId === item.orderId) === index);
 };
 
@@ -128,6 +146,7 @@ export function LocalAgentRunPanel({ pmcProgressRequest = 0 }: { pmcProgressRequ
   const sendMessage = useChatStore((state) => state.sendMessage);
   const sending = useChatStore((state) => state.sending);
   const activeLocalRunId = useChatStore((state) => state.activeLocalRunId);
+  const resolveStaleGate = useChatStore((state) => state.resolveStaleGate);
   const [focusedOrderId, setFocusedOrderId] = useState<string>();
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const [expanded, setExpanded] = useState(true);
@@ -142,6 +161,22 @@ export function LocalAgentRunPanel({ pmcProgressRequest = 0 }: { pmcProgressRequ
     refetchInterval: selectedFromList && ['running', 'queued', 'waiting_human'].includes(selectedFromList.status) ? 2_000 : false,
   });
   const selectedRun = detailQuery.data ?? selectedFromList;
+
+  // run 已结束（completed/failed）但会话消息里的 Gate 仍标记 pending/error 时，
+  // 视为已解决（例如「计划不存在」回读失败已由后端修复并重试完成），
+  // 避免右下角通知和会话卡片一直报旧错误。只在确认存在滞留 Gate 时才更新。
+  useEffect(() => {
+    if (!runsQuery.data) return;
+    const staleRunIds = runsQuery.data
+      .filter((run) => !['running', 'queued', 'waiting_human'].includes(String(run.status)))
+      .map((run) => run.run_id);
+    if (!staleRunIds.length) return;
+    const hasStale = [...Object.values(useChatStore.getState().messageSets), useChatStore.getState().messages]
+      .some((messages) => messages.some((item) =>
+        item.gate && staleRunIds.includes(item.gate.runId) && (!item.gate.status || item.gate.status === 'pending' || item.gate.status === 'error')));
+    if (!hasStale) return;
+    for (const runId of staleRunIds) resolveStaleGate(runId);
+  }, [runsQuery.data, resolveStaleGate]);
 
   const orderSummaries = useMemo<LocalOrderSummary[]>(() => {
     const map = new Map<string, LocalOrderSummary>();
@@ -209,6 +244,29 @@ export function LocalAgentRunPanel({ pmcProgressRequest = 0 }: { pmcProgressRequ
     });
   };
 
+  const [deletingOrder, setDeletingOrder] = useState<string>();
+  const deleteOrder = async (order: LocalOrderSummary) => {
+    setDeletingOrder(order.orderId);
+    try {
+      // 删除该订单关联的所有 run（历史运行/进行中），再清本地订单注册表。
+      const runIds = [...new Set(order.runs.map((run) => run.run_id).filter(Boolean))];
+      if (runIds.length) await deleteLocalRuns(runIds);
+      removeLocalOrder(order.orderId);
+      setLocalOrders(readLocalOrders());
+      if (focusedOrderId === order.orderId) {
+        setFocusedOrderId(undefined);
+        setSelectedRunId(undefined);
+        setDetailStage(undefined);
+      }
+      void runsQuery.refetch();
+      message.success(`订单 ${order.orderId} 已删除${runIds.length ? `（含 ${runIds.length} 条运行记录）` : ''}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '订单删除失败');
+    } finally {
+      setDeletingOrder(undefined);
+    }
+  };
+
   return (
     <section className={styles.panel} aria-label="订单管理与 M1-M5 流程">
       <div className={styles.context}>
@@ -250,7 +308,27 @@ export function LocalAgentRunPanel({ pmcProgressRequest = 0 }: { pmcProgressRequ
             <>
               <div className={styles.focusedOrderHeading}>
                 <div><b>当前查看订单：{focusedOrder.orderId}</b><span>{focusedOrder.productName ?? focusedOrder.filename ?? '未提供产品信息'}</span></div>
-                <span>{focusedOrder.runs.length ? `关联运行 ${focusedOrder.runs.length} 次` : '尚未运行'}</span>
+                <span>
+                  {focusedOrder.runs.length ? `关联运行 ${focusedOrder.runs.length} 次` : '尚未运行'}
+                  <Popconfirm
+                    title={`删除订单 ${focusedOrder.orderId}？`}
+                    description="将删除该订单的本地运行记录（M1-M5 历史），对话消息不受影响。"
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true, loading: deletingOrder === focusedOrder.orderId }}
+                    onConfirm={() => void deleteOrder(focusedOrder)}
+                  >
+                    <Button
+                      size="small"
+                      type="text"
+                      danger
+                      icon={<DeleteOutlined />}
+                      loading={deletingOrder === focusedOrder.orderId}
+                      aria-label={`删除订单 ${focusedOrder.orderId}`}
+                      style={{ marginLeft: 6 }}
+                    />
+                  </Popconfirm>
+                </span>
               </div>
               <div className={styles.badge}>ORDER FLOW · M1-M5</div>
               <div className={styles.flowTrack}>

@@ -44,7 +44,7 @@ export type ChatMessage = {
     runId: string;
     gate: Record<string, unknown>;
     /** Keeps the human-gate audit entry in chat history after a decision. */
-    status?: 'pending' | 'approved' | 'retrying' | 'rejected' | 'error';
+    status?: 'pending' | 'approved' | 'retrying' | 'rejected' | 'error' | 'resolved';
   };
 };
 
@@ -70,6 +70,8 @@ type ChatState = {
   failStreaming: (assistantId: string, content?: string, conversationId?: string) => void;
   stopStreaming: () => void; sendMessage: (prompt: string, streamFactory?: ChatStreamFactory, context?: Record<string, unknown>, requestOverrides?: Pick<ChatStreamRequest, 'document' | 'documents' | 'attachments' | 'options' | 'tools' | 'use_memory' | 'context'>) => Promise<void>;
   resumeGate: (messageId: string, runId: string, decision: string, supplement?: Record<string, unknown>) => Promise<void>;
+  /** 当本地 run 已结束（completed/failed）时，把会话里滞留的 Gate 记录标记为已解决。 */
+  resolveStaleGate: (runId: string) => void;
   appendUploadAttachment: (attachment: ChatAttachment) => void;
   persistAssistantMessage: (
     content: string,
@@ -419,6 +421,25 @@ export const useChatStore = create<ChatState>((set, get) => {
           get().failStreaming(messageId, error instanceof Error ? error.message : 'Gate 恢复失败', conversationId);
         }
       }
+    },
+    resolveStaleGate: (runId) => {
+      // run 已结束（completed/failed）但会话消息里的 Gate 仍标记 pending/error：
+      // 视为已解决，避免右下角通知与卡片继续报旧错误（如「计划不存在」）。
+      // 在所有会话的消息集中匹配，不只在当前选中会话。
+      set((state) => {
+        const clean = (messages: ChatMessage[]): ChatMessage[] => messages.map((item) => {
+          if (item.gate && item.gate.runId === runId && (!item.gate.status || item.gate.status === 'pending' || item.gate.status === 'error')) {
+            return { ...item, gate: { ...item.gate, status: 'resolved' as const } };
+          }
+          return item;
+        });
+        const messageSets = Object.fromEntries(
+          Object.entries(state.messageSets).map(([id, messages]) => [id, clean(messages)]),
+        );
+        for (const [id, messages] of Object.entries(messageSets)) persistLocalMessages(id, messages);
+        const nextMessages = state.selectedConversationId ? clean(state.messages) : undefined;
+        return nextMessages ? { messageSets, messages: nextMessages } : { messageSets };
+      });
     },
     sendMessage: async (prompt, streamFactory = streamChatFromOrchestrator, context, requestOverrides) => {
       const value = prompt.trim();
