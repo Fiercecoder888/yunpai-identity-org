@@ -123,24 +123,41 @@ def verify_session_token(secret: str, token: str, *, now: float | None = None) -
 
 def login(store: IdentityStore, *, tenant_id: str, user_id: str,
           password: str) -> dict[str, Any] | None:
-    """账号密码登录：验证通过返回用户记录，否则 None（不区分用户不存在/密码错）。"""
+    """账号密码登录：验证通过返回用户记录，否则 None（不区分用户不存在/密码错）。
+
+    停用账号一律 None（仍空跑一次校验，保持响应时间与"密码错"一致，不泄露账号状态）。
+    """
     user = store.get_user(tenant_id=tenant_id, user_id=str(user_id or ""))
     if not user:
         # 空跑一次哈希，避免「用户不存在」与「密码错误」的响应时间差。
         verify_password(str(password or ""), hash_password(str(password or "")))
         return None
-    if not verify_password(str(password or ""), str(user.get("password_hash") or "")):
+    matched = verify_password(str(password or ""), str(user.get("password_hash") or ""))
+    if not matched or str(user.get("status") or "active") != "active":
         return None
     return user
 
 
+#: 一次性初始密码字符集（去掉 0/O/1/l/I 等易混字符）。
+_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+
+
+def generate_password(length: int = 10) -> str:
+    """生成一次性初始密码：只回显一次，服务端只落哈希、不落明文。"""
+    return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(max(8, int(length))))
+
+
 def session_from_token(store: IdentityStore, token: str) -> dict[str, Any] | None:
-    """会话令牌 → {tenant_id, user_id}（无效/过期/用户已不存在返回 None）。"""
+    """会话令牌 → {tenant_id, user_id}（无效/过期/用户不存在/已停用返回 None）。
+
+    会话是无状态签名令牌，停用账号后旧 Cookie 仍在有效期内；这里每请求回查
+    用户状态，使「停用」立即生效（下一请求即 401），无需会话黑名单表。
+    """
     payload = verify_session_token(store.session_secret(), token)
     if payload is None:
         return None
     user = store.get_user(tenant_id=payload["tenant_id"], user_id=payload["user_id"])
-    if not user:
+    if not user or str(user.get("status") or "active") != "active":
         return None
     return {"tenant_id": payload["tenant_id"], "user_id": payload["user_id"],
             "display_name": user.get("display_name"), "org_id": user.get("org_id")}

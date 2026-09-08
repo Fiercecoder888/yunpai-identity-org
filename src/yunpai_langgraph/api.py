@@ -4,14 +4,23 @@ import base64
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
-from .auth import SESSION_COOKIE, login, session_from_token, sign_session_token
+from .auth import (
+    SESSION_COOKIE,
+    generate_password,
+    hash_password,
+    login,
+    session_from_token,
+    sign_session_token,
+    verify_password,
+)
 from .graph import YunpaiGraph
 from .guided_chat import SCALE_OPTIONS, handle_message as handle_guidance_message
 from .guided_setup import catalog_payload
-from .identity import IdentityStore, authorize, permission_for_gate
+from .identity import BOOTSTRAP_ADMIN_ROLES, IdentityStore, authorize, permission_for_gate
 from .models import new_state
 from .registry import ToolRegistry, build_runtime_registry
 from .repository import RunRepository, SQLiteRunRepository
@@ -546,6 +555,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "roles": resolved["roles"],
             "role_names": resolved["role_names"],
             "permissions": resolved["permissions"],
+            "must_change_password": bool(user.get("must_change_password")),
         })
         response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", path="/")
         return response
@@ -568,10 +578,99 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED",
                                       "message": "principal 缺租户上下文"})
         resolved = identity_store.resolve(tenant_id=tenant_id, user_id=actor)
+        user = identity_store.get_user(tenant_id=tenant_id, user_id=actor) or {}
         return {"principal": {"actor": actor, "tenant_id": tenant_id,
                               "roles": list(principal.get("roles") or []),
                               "source": principal.get("source")},
+                "display_name": user.get("display_name"),
+                "must_change_password": bool(user.get("must_change_password")),
                 **resolved}
+
+    # ------------------------------------------- 厂长自助注册 / 改密（F-013 补）
+
+    def _bootstrap_tenant(explicit: Any, request) -> str:
+        """注册/状态端点租户解析：显式 → 租户头 → YUNPAI_DEFAULT_TENANT → default。
+
+        这两个端点在登录前调用，不能要求已认证 principal；单租户交付下默认
+        落 ``default``，避免前端登录页被迫先拿租户。
+        """
+        tenant = str(explicit or "").strip()
+        if not tenant and request is not None:
+            tenant = str(_header_tenant(request).get("x-yunpai-tenant-id") or "").strip()
+        return tenant or (os.getenv("YUNPAI_DEFAULT_TENANT", "").strip() or "default")
+
+    @app.get("/api/auth/bootstrap-status")
+    async def auth_bootstrap_status(request: Request, tenant_id: str = ""):
+        """系统是否已初始化：无任何账号 → 前端跳「厂长注册」，否则跳登录页。"""
+        tenant = _bootstrap_tenant(tenant_id, request)
+        users = identity_store.count_users(tenant_id=tenant)
+        company = next((node for node in identity_store.org_tree(tenant_id=tenant)
+                        if node.get("org_type") == "company"), None)
+        return {"tenant_id": tenant, "needs_bootstrap": users == 0, "user_count": users,
+                "company_name": (company or {}).get("name")}
+
+    @app.post("/api/auth/register-admin")
+    async def auth_register_admin(body: dict[str, Any], request: Request):
+        """厂长自助注册（全系统唯一一次）：建公司 → 建账号 → 绑双角色 → 自动登录。
+
+        幂等闸：租户已有任意账号即 409，之后新增账号只能由厂长在账号管理里分配。
+        角色绑 ``BOOTSTRAP_ADMIN_ROLES`` = factory-director + org-admin（不动种子）。
+        """
+        tenant = _bootstrap_tenant(body.get("tenant_id"), request)
+        if identity_store.count_users(tenant_id=tenant) > 0:
+            raise HTTPException(409, {"code": "ALREADY_BOOTSTRAPPED",
+                                      "message": "系统已完成初始化；请由厂长在「账号管理」中分配账号"})
+        user_id = str(body.get("user_id") or "").strip()
+        password = str(body.get("password") or "")
+        company_name = str(body.get("company_name") or "").strip()
+        display_name = str(body.get("display_name") or "").strip() or user_id
+        if not company_name:
+            raise HTTPException(422, {"code": "INVALID_REGISTRATION", "message": "公司名称不能为空"})
+        if not re.match(r"^[A-Za-z0-9_.@-]{3,64}$", user_id):
+            raise HTTPException(422, {"code": "INVALID_USER_ID",
+                                      "message": "账号只允许字母/数字/_ . @ -，长度 3~64"})
+        if len(password) < 8:
+            raise HTTPException(422, {"code": "WEAK_PASSWORD", "message": "密码至少 8 位"})
+        identity_store.upsert_org(tenant_id=tenant, org_id="company", name=company_name,
+                                  org_type="company", source="manual")
+        identity_store.create_user(tenant_id=tenant, user_id=user_id,
+                                   password_hash=hash_password(password),
+                                   display_name=display_name, org_id="company",
+                                   status="active", must_change_password=0)
+        identity_store.bind_user(tenant_id=tenant, user_id=user_id,
+                                 role_codes=list(BOOTSTRAP_ADMIN_ROLES), org_id="company")
+        token = sign_session_token(identity_store.session_secret(),
+                                   tenant_id=tenant, user_id=user_id)
+        resolved = identity_store.resolve(tenant_id=tenant, user_id=user_id)
+        response = JSONResponse({
+            "tenant_id": tenant, "user_id": user_id, "display_name": display_name,
+            "roles": resolved["roles"], "role_names": resolved["role_names"],
+            "permissions": resolved["permissions"], "must_change_password": False,
+        })
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="lax", path="/")
+        return response
+
+    @app.post("/api/auth/change-password")
+    async def auth_change_password(body: dict[str, Any], request: Request):
+        """改密（首登强制改密与主动改密同一入口）。"""
+        principal, trusted = _request_principal(request)
+        actor = str(principal.get("actor") or "")
+        if not trusted or not actor:
+            raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED", "message": "未登录"})
+        tenant = str(principal.get("tenant_id") or "")
+        user = identity_store.get_user(tenant_id=tenant, user_id=actor)
+        if not user:
+            raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED", "message": "账号不存在"})
+        if not verify_password(str(body.get("old_password") or ""),
+                               str(user.get("password_hash") or "")):
+            raise HTTPException(403, {"code": "INVALID_CREDENTIALS", "message": "原密码不正确"})
+        new_password = str(body.get("new_password") or "")
+        if len(new_password) < 8:
+            raise HTTPException(422, {"code": "WEAK_PASSWORD", "message": "新密码至少 8 位"})
+        identity_store.set_password(tenant_id=tenant, user_id=actor,
+                                    password_hash=hash_password(new_password),
+                                    must_change_password=0)
+        return {"ok": True, "user_id": actor}
 
     # ------------------------------------------- identity 管理 API（P-011/P-012）
 
@@ -618,6 +717,19 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
                 "created": result["created"],
                 "skipped_manual": result["skipped_manual"],
                 "departments": result["departments"]}
+
+    @app.delete("/api/identity/org/{org_id:path}")
+    async def identity_org_delete(org_id: str, tenant_id: str = "", request: Request = None):
+        """删除组织节点（有子节点/账号/绑定时 409，先挪人或先删子节点）。"""
+        tenant = _tenant_for_request(tenant_id, request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        try:
+            deleted = identity_store.delete_org(tenant_id=tenant, org_id=org_id)
+        except ValueError as exc:
+            raise HTTPException(409, {"code": "ORG_IN_USE", "message": str(exc)}) from exc
+        if not deleted:
+            raise HTTPException(404, {"code": "ORG_NOT_FOUND", "message": f"组织节点不存在: {org_id}"})
+        return {"tenant_id": tenant, "org_id": org_id, "deleted": True}
 
     @app.get("/api/identity/roles")
     async def identity_roles(tenant_id: str = "", request: Request = None):
@@ -677,6 +789,103 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
                 tenant_id=tenant, bindings=[item for item in items if isinstance(item, dict)])
         except ValueError as exc:
             raise HTTPException(422, {"code": "INVALID_BULK_BINDING", "message": str(exc)}) from exc
+
+    @app.get("/api/identity/users")
+    async def identity_users(tenant_id: str = "", request: Request = None):
+        """账号列表（含所属组织与角色），厂长账号管理页数据源。"""
+        tenant = _tenant_for_request(tenant_id, request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        return {"tenant_id": tenant, "users": identity_store.list_users(tenant_id=tenant)}
+
+    @app.post("/api/identity/users")
+    async def identity_create_user(body: dict[str, Any], request: Request):
+        """厂长给员工分配账号：建账号 + 绑角色/组织，初始密码只回显这一次。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        user_id = str(body.get("user_id") or "").strip()
+        if not re.match(r"^[A-Za-z0-9_.@-]{3,64}$", user_id):
+            raise HTTPException(422, {"code": "INVALID_USER_ID",
+                                      "message": "账号只允许字母/数字/_ . @ -，长度 3~64"})
+        if identity_store.get_user(tenant_id=tenant, user_id=user_id):
+            raise HTTPException(409, {"code": "USER_EXISTS", "message": f"账号已存在: {user_id}"})
+        initial_password = str(body.get("password") or "") or generate_password()
+        if len(initial_password) < 8:
+            raise HTTPException(422, {"code": "WEAK_PASSWORD", "message": "初始密码至少 8 位"})
+        role_codes = [str(role) for role in (body.get("role_codes") or [])] or ["worker"]
+        org_id = body.get("org_id") or None
+        try:
+            identity_store.create_user(
+                tenant_id=tenant, user_id=user_id,
+                password_hash=hash_password(initial_password),
+                display_name=str(body.get("display_name") or "").strip() or user_id,
+                org_id=org_id, status="active", must_change_password=1)
+            identity_store.bind_user(tenant_id=tenant, user_id=user_id,
+                                     role_codes=role_codes, org_id=org_id,
+                                     skill=body.get("skill"))
+        except ValueError as exc:
+            raise HTTPException(422, {"code": "INVALID_USER", "message": str(exc)}) from exc
+        return {"tenant_id": tenant, "user_id": user_id,
+                "display_name": str(body.get("display_name") or "").strip() or user_id,
+                "org_id": org_id, "role_codes": role_codes, "status": "active",
+                "must_change_password": True,
+                "initial_password": initial_password,
+                "password_returned_once": True}
+
+    @app.patch("/api/identity/users/{user_id}")
+    async def identity_update_user(user_id: str, body: dict[str, Any], request: Request):
+        """改姓名 / 调组织 / 启用停用 / 重绑角色（停用即吊销其现有会话）。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        try:
+            updated = identity_store.update_user(
+                tenant_id=tenant, user_id=user_id,
+                display_name=body.get("display_name"),
+                org_id=body.get("org_id") if "org_id" in body else None,
+                status=body.get("status"))
+        except ValueError as exc:
+            raise HTTPException(422, {"code": "INVALID_USER", "message": str(exc)}) from exc
+        role_codes = body.get("role_codes")
+        if isinstance(role_codes, list) and role_codes:
+            try:
+                identity_store.bind_user(tenant_id=tenant, user_id=user_id,
+                                         role_codes=[str(role) for role in role_codes],
+                                         org_id=body.get("org_id") or updated.get("org_id"),
+                                         skill=body.get("skill"))
+            except ValueError as exc:
+                raise HTTPException(422, {"code": "INVALID_BINDING", "message": str(exc)}) from exc
+        return {**updated, "role_codes": role_codes if isinstance(role_codes, list) else None}
+
+    @app.post("/api/identity/users/{user_id}/reset-password")
+    async def identity_reset_password(user_id: str, body: dict[str, Any], request: Request):
+        """重置密码：生成新初始密码，只回显这一次，并要求首登改密。"""
+        tenant = _tenant_for_request(body.get("tenant_id"), request)
+        _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        if not identity_store.get_user(tenant_id=tenant, user_id=user_id):
+            raise HTTPException(404, {"code": "USER_NOT_FOUND", "message": f"账号不存在: {user_id}"})
+        new_password = generate_password()
+        identity_store.set_password(tenant_id=tenant, user_id=user_id,
+                                    password_hash=hash_password(new_password),
+                                    must_change_password=1)
+        return {"tenant_id": tenant, "user_id": user_id,
+                "initial_password": new_password, "password_returned_once": True,
+                "must_change_password": True}
+
+    @app.delete("/api/identity/users/{user_id}")
+    async def identity_delete_user(user_id: str, tenant_id: str = "",
+                                   request: Request = None):
+        """删除账号（不能删自己；不能删最后一个账号）。"""
+        tenant = _tenant_for_request(tenant_id, request)
+        principal = _require_identity_permission("identity.admin", tenant_id=tenant, request=request)
+        if user_id == str(principal.get("actor") or ""):
+            raise HTTPException(409, {"code": "CANNOT_DELETE_SELF", "message": "不能删除当前登录账号"})
+        if not identity_store.get_user(tenant_id=tenant, user_id=user_id):
+            raise HTTPException(404, {"code": "USER_NOT_FOUND", "message": f"账号不存在: {user_id}"})
+        if identity_store.count_users(tenant_id=tenant) <= 1:
+            raise HTTPException(409, {"code": "LAST_USER", "message": "系统至少保留一个账号"})
+        deleted = identity_store.delete_user(tenant_id=tenant, user_id=user_id)
+        if not deleted:
+            raise HTTPException(404, {"code": "USER_NOT_FOUND", "message": f"账号不存在: {user_id}"})
+        return {"tenant_id": tenant, "user_id": user_id, "deleted": True}
 
     @app.get("/api/identity/resolve")
     async def identity_resolve(tenant_id: str = "", user_id: str = "",

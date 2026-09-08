@@ -116,6 +116,14 @@ DEFAULT_ROLE_SEEDS: tuple[dict[str, Any], ...] = (
 
 _DEPT_SPLIT_RE = re.compile(r"[、，,／/]")
 
+#: 厂长自助注册时绑定的角色：业务总控（factory-director）+ 组织管理员（org-admin）。
+#: 不改种子角色（厂长本身仍不含 identity.admin，保持既有断言与权责分离），
+#: 而是给首个管理员同时绑两个角色——他既是厂长也是组织管理员。
+BOOTSTRAP_ADMIN_ROLES: tuple[str, ...] = ("factory-director", "org-admin")
+
+#: 组织节点类型（company 根 / dept 部门 / team 班组，三层）。
+ORG_TYPES: tuple[str, ...] = ("company", "dept", "team")
+
 
 def parse_permission_spec(spec: str) -> tuple[str, str | None]:
     """解析角色权限元素 ``code`` 或 ``code@scope`` → (code, scope|None)。"""
@@ -243,6 +251,22 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _ensure_columns(db: sqlite3.Connection, table: str, columns: dict[str, str]) -> list[str]:
+    """老库就地补列（SQLite ALTER TABLE ADD COLUMN）；返回本次实际新增的列名。
+
+    PR #6 的 users 表只存账号/密码/组织；账号生命周期（停用、首登改密）需要
+    ``status``/``must_change_password`` 两列。CREATE TABLE IF NOT EXISTS 不会给
+    已存在的表加列，故在此显式补齐，保证老库与新库行为一致。
+    """
+    existing = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
+    added: list[str] = []
+    for name, ddl in columns.items():
+        if name not in existing:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+            added.append(name)
+    return added
+
+
 class IdentityStore:
     """组织架构/角色/用户绑定/登录用户 的 SQLite 事实源（db_utils 底座约定）。
 
@@ -324,6 +348,12 @@ class IdentityStore:
                     FOREIGN KEY(tenant_id, org_id) REFERENCES org_nodes(tenant_id, org_id)
                 )"""
             )
+            # 账号生命周期列（F-013 补充）：停用/首登改密；老库就地补列。
+            _ensure_columns(db, "users", {
+                "status": "TEXT NOT NULL DEFAULT 'active'",
+                "must_change_password": "INTEGER NOT NULL DEFAULT 0",
+                "updated_at": "TEXT",
+            })
             db.execute(
                 """CREATE TABLE IF NOT EXISTS authz_audit (
                     seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -385,6 +415,34 @@ class IdentityStore:
             path.append(current)
             current = by_id[current].get("parent_id")
         return list(reversed(path))
+
+    def org_usage(self, *, tenant_id: str, org_id: str) -> dict[str, int]:
+        """节点占用情况（删除前守卫）：子节点 / 账号 / 角色绑定。"""
+        with self._txn() as db:
+            children = db.execute(
+                "SELECT COUNT(*) AS n FROM org_nodes WHERE tenant_id=? AND parent_id=?",
+                (tenant_id, org_id)).fetchone()
+            users = db.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE tenant_id=? AND org_id=?",
+                (tenant_id, org_id)).fetchone()
+            bindings = db.execute(
+                "SELECT COUNT(*) AS n FROM user_bindings WHERE tenant_id=? AND org_id=?",
+                (tenant_id, org_id)).fetchone()
+        return {"children": int(children["n"]), "users": int(users["n"]),
+                "bindings": int(bindings["n"])}
+
+    def delete_org(self, *, tenant_id: str, org_id: str) -> int:
+        """删除组织节点；有子节点/账号/绑定时拒绝（先挪人或先删子节点）。"""
+        usage = self.org_usage(tenant_id=tenant_id, org_id=org_id)
+        if usage["children"]:
+            raise ValueError(f"组织节点仍有 {usage['children']} 个子节点，不能删除")
+        if usage["users"] or usage["bindings"]:
+            raise ValueError(
+                f"组织节点仍挂着 {usage['users']} 个账号 / {usage['bindings']} 条角色绑定，不能删除")
+        with self._txn() as db:
+            cur = db.execute(
+                "DELETE FROM org_nodes WHERE tenant_id=? AND org_id=?", (tenant_id, org_id))
+            return cur.rowcount
 
     def derive_org_from_workers(self, workers: list[dict[str, Any]], *, tenant_id: str = "default") -> dict[str, Any]:
         """接缝 3 正式派生：花名册 → 部门两级树（company ← dept），落库。
@@ -546,7 +604,8 @@ class IdentityStore:
     # ------------------------------------------------------ 登录用户（接缝 5）
 
     def create_user(self, *, tenant_id: str, user_id: str, password_hash: str,
-                    display_name: str | None = None, org_id: str | None = None) -> dict[str, Any]:
+                    display_name: str | None = None, org_id: str | None = None,
+                    status: str = "active", must_change_password: int = 0) -> dict[str, Any]:
         org_id = org_id or None
         with self._txn() as db:
             if org_id:
@@ -555,22 +614,109 @@ class IdentityStore:
                 if not node:
                     raise ValueError(f"组织节点不存在: {org_id}（租户 {tenant_id}）")
             db.execute(
-                """INSERT INTO users(tenant_id, user_id, display_name, password_hash, org_id, created_at)
-                   VALUES(?,?,?,?,?,?)
+                """INSERT INTO users(tenant_id, user_id, display_name, password_hash, org_id,
+                                     created_at, status, must_change_password, updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(tenant_id, user_id) DO UPDATE SET
                      display_name=excluded.display_name,
-                     password_hash=excluded.password_hash, org_id=excluded.org_id""",
-                (tenant_id, user_id, display_name, password_hash, org_id, _now()),
+                     password_hash=excluded.password_hash, org_id=excluded.org_id,
+                     status=excluded.status, must_change_password=excluded.must_change_password,
+                     updated_at=excluded.updated_at""",
+                (tenant_id, user_id, display_name, password_hash, org_id, _now(),
+                 status, 1 if must_change_password else 0, _now()),
             )
         return {"tenant_id": tenant_id, "user_id": user_id,
-                "display_name": display_name, "org_id": org_id}
+                "display_name": display_name, "org_id": org_id,
+                "status": status, "must_change_password": bool(must_change_password)}
 
     def get_user(self, *, tenant_id: str, user_id: str) -> dict[str, Any] | None:
         with self._txn() as db:
             row = db.execute(
-                "SELECT user_id, display_name, password_hash, org_id FROM users WHERE tenant_id=? AND user_id=?",
+                "SELECT user_id, display_name, password_hash, org_id, status, must_change_password"
+                " FROM users WHERE tenant_id=? AND user_id=?",
                 (tenant_id, user_id)).fetchone()
         return dict(row) if row else None
+
+    def count_users(self, *, tenant_id: str) -> int:
+        """租户已有账号数（厂长自助注册的幂等闸：>0 即已初始化）。"""
+        with self._txn() as db:
+            row = db.execute(
+                "SELECT COUNT(*) AS n FROM users WHERE tenant_id=?", (tenant_id,)).fetchone()
+        return int(row["n"])
+
+    def list_users(self, *, tenant_id: str) -> list[dict[str, Any]]:
+        """账号列表（含绑定角色/组织），供厂长账号管理页与引导AI 使用。"""
+        with self._txn() as db:
+            rows = db.execute(
+                """SELECT u.user_id, u.display_name, u.org_id, u.status,
+                          u.must_change_password, u.created_at,
+                          b.role_codes, b.skill
+                     FROM users u
+                     LEFT JOIN user_bindings b
+                       ON b.tenant_id=u.tenant_id AND b.user_id=u.user_id
+                    WHERE u.tenant_id=? ORDER BY u.user_id""",
+                (tenant_id,)).fetchall()
+        return [
+            {"user_id": row["user_id"], "display_name": row["display_name"],
+             "org_id": row["org_id"], "status": row["status"],
+             "must_change_password": bool(row["must_change_password"]),
+             "created_at": row["created_at"],
+             "role_codes": _load(row["role_codes"]) if row["role_codes"] else [],
+             "skill": row["skill"]}
+            for row in rows
+        ]
+
+    def set_password(self, *, tenant_id: str, user_id: str, password_hash: str,
+                     must_change_password: int = 0) -> None:
+        with self._txn() as db:
+            cur = db.execute(
+                """UPDATE users SET password_hash=?, must_change_password=?, updated_at=?
+                    WHERE tenant_id=? AND user_id=?""",
+                (password_hash, 1 if must_change_password else 0, _now(), tenant_id, user_id),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"账号不存在: {user_id}（租户 {tenant_id}）")
+
+    def update_user(self, *, tenant_id: str, user_id: str,
+                    display_name: str | None = None, org_id: str | None = None,
+                    status: str | None = None) -> dict[str, Any]:
+        """改姓名/所属组织/启用停用（只更新显式传入的字段）。"""
+        fields: list[str] = []
+        params: list[Any] = []
+        if display_name is not None:
+            fields.append("display_name=?")
+            params.append(display_name)
+        if org_id is not None:
+            fields.append("org_id=?")
+            params.append(org_id or None)
+        if status is not None:
+            if status not in {"active", "disabled"}:
+                raise ValueError(f"非法账号状态: {status}（合法: active/disabled）")
+            fields.append("status=?")
+            params.append(status)
+        if not fields:
+            user = self.get_user(tenant_id=tenant_id, user_id=user_id)
+            if not user:
+                raise ValueError(f"账号不存在: {user_id}（租户 {tenant_id}）")
+            return user
+        fields.append("updated_at=?")
+        params.append(_now())
+        with self._txn() as db:
+            cur = db.execute(
+                f"UPDATE users SET {', '.join(fields)} WHERE tenant_id=? AND user_id=?",
+                (*params, tenant_id, user_id),
+            )
+            if cur.rowcount == 0:
+                raise ValueError(f"账号不存在: {user_id}（租户 {tenant_id}）")
+        return {"tenant_id": tenant_id, "user_id": user_id,
+                "display_name": display_name, "org_id": org_id, "status": status}
+
+    def delete_user(self, *, tenant_id: str, user_id: str) -> int:
+        """删除账号及其角色绑定（不可删最后一个 active 账号，由调用方保证）。"""
+        with self._txn() as db:
+            db.execute("DELETE FROM user_bindings WHERE tenant_id=? AND user_id=?", (tenant_id, user_id))
+            cur = db.execute("DELETE FROM users WHERE tenant_id=? AND user_id=?", (tenant_id, user_id))
+            return cur.rowcount
 
     def session_secret(self) -> str:
         """会话签名密钥：环境变量优先，否则首用生成并持久化在 kv_secrets。"""

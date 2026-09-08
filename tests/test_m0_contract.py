@@ -16,7 +16,10 @@ from yunpai_langgraph.registry import build_default_registry
 
 
 def _m0_schema(name: str) -> dict:
-    data = json.load(open("src/yunpai_langgraph/manifests/m0.json"))
+    # 显式 UTF-8：Windows 中文区域默认 open() 用 GBK 读 UTF-8 manifest 会
+    # UnicodeDecodeError（账本 PROJECT_PROGRESS 已记录的"Windows 多 1 个失败"）。
+    with open("src/yunpai_langgraph/manifests/m0.json", encoding="utf-8") as handle:
+        data = json.load(handle)
     return next(tool for tool in data["tools"] if tool["name"] == name)
 
 
