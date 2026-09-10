@@ -54,9 +54,11 @@ export const roleQuickNavs: RoleQuickNav[] = [
   {
     roleId: 'quality-assurance',
     roleName: '品保',
-    description: '监督 M1-M5 全流程进度与异常任务',
+    // 品保口径（2026-09-10）：落地 /quality，与厂长同一个对话页，但**看不到 M1–M5 主链进度**、
+    // 没有查流程与分配账号权限。这里不再承诺「全流程进度监督」。
+    description: 'M7 来料待验、抽样与放行',
     items: [
-      { key: 'quality', title: '流程监督', description: '查看全流程进度与任务提醒', path: '/quality', icon: EyeOutlined, permission: 'quality:supervise' },
+      { key: 'quality', title: '品保工作台', description: 'M7 来料待验、抽样记录与合格放行', path: '/quality', icon: EyeOutlined, permission: 'quality:supervise' },
     ],
   },
   {
