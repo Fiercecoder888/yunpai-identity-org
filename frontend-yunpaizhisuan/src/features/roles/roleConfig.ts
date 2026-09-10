@@ -30,7 +30,8 @@ export const roleLandingConfigById: Record<string, RoleLandingConfig> = {
     kind: 'quality-assurance',
     title: '品保工作台',
     description: '处理 M7 来料待验、抽样记录、合格放行与不合格拒收',
-    landingPath: '/',
+    // 品保有独立落地页 /quality（M7 来料待验与放行）；**不含 M1–M5 主链进度**。
+    landingPath: '/quality',
     metrics: ['pendingInspection', 'sampling', 'passed', 'rejected'],
   },
   'team-leader': {

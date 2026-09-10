@@ -38,6 +38,7 @@ export type RouteMeta = {
 const routeMetaSource = {
   '/leader': { navTitle: '小组长工作台', groupKey: 'production', icon: 'leader', description: '今日任务、报工、班组工作量台账、工时对比与订单追溯', closable: true },
   '/worker': { navTitle: '工人工作台', groupKey: 'production', icon: 'leader', description: '我的订单与对话报工', closable: true },
+  '/quality': { navTitle: '品保工作台', groupKey: 'quality', icon: 'audit', description: 'M7 来料待验、抽样记录、合格放行与不合格拒收', closable: true },
   '/org': { navTitle: '组织架构', groupKey: 'org', icon: 'leader', description: '公司 → 部门 → 班组 三层组织树；增删节点、查看来源（手工/花名册派生）', closable: true },
   '/accounts': { navTitle: '账号管理', groupKey: 'org', icon: 'leader', description: '给员工分配账号与角色、重置初始密码、启用停用', closable: true },
   '/roles': { navTitle: '角色与权限', groupKey: 'org', icon: 'audit', description: '权限目录与角色矩阵（只读）：13 项权限 × 9 个角色', closable: true },
@@ -57,6 +58,9 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: withSuspense(<EnterpriseAssistantPage />) },
       { path: 'c/:conversationId', element: withSuspense(<EnterpriseAssistantPage />) },
+      // 品保落地页 /quality：与厂长同一个对话页（EnterpriseAssistantPage），
+      // 差别只在可见性——品保看不到 M1–M5 面板、没有分配账号、没有查流程入口（由权限与页面内容收口）。
+      { path: 'quality', element: withSuspense(<RoleGuard path="/quality"><EnterpriseAssistantPage /></RoleGuard>) },
       {
         element: <AssistantRoleLayout />,
         children: [

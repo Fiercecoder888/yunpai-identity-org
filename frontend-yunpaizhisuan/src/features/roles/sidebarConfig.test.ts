@@ -20,6 +20,7 @@ describe('sidebarConfig', () => {
         'leader:write',
         'worker:read',
         'worker:report',
+        'quality:supervise',
         'chat:read',
         'chat:write',
         'chat:delete',
@@ -32,14 +33,20 @@ describe('sidebarConfig', () => {
     );
 
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
-    expect(keys).toEqual(['/leader', '/worker', '/org', '/accounts', '/roles']);
+    expect(keys).toEqual(['/leader', '/worker', '/quality', '/org', '/accounts', '/roles']);
   });
 
-  it('leaves no sidebar entry for the quality assurance role', () => {
+  it('leaves only the quality workbench entry for the quality assurance role', () => {
     const groups = filterSidebarGroups(role('quality-assurance', ['quality:supervise', 'qc:read', 'chat:read', 'chat:write']));
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
 
-    expect(keys).toEqual([]);
+    // 品保只有自己的落地页；既看不到管理页，也看不到组长/工人工作台
+    expect(keys).toEqual(['/quality']);
+    expect(keys).not.toContain('/org');
+    expect(keys).not.toContain('/accounts');
+    expect(keys).not.toContain('/roles');
+    expect(keys).not.toContain('/leader');
+    expect(keys).not.toContain('/worker');
   });
 
   it('narrows the sidebar for the worker role to workbench only', () => {

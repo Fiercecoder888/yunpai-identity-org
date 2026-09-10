@@ -32,6 +32,14 @@ export const sidebarGroups: SidebarGroupDef[] = [
     ],
   },
   {
+    key: 'quality',
+    title: '品保',
+    items: [
+      // 品保只有自己的落地页：M7 来料待验/放行；不含 M1–M5 主链进度。
+      { key: '/quality', label: '品保工作台', requiredPermission: 'quality:supervise' },
+    ],
+  },
+  {
     key: 'org',
     title: '组织与账号',
     items: [

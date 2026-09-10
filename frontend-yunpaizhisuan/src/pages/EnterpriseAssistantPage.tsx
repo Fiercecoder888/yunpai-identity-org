@@ -298,7 +298,9 @@ export function EnterpriseAssistantPage() {
           <div className="assistant-subtitle">工业智造 Agent</div>
         </div>
         <div className="assistant-header-right">
-          <AgentTaskCenter />
+          {/* 「Agent 任务 / 流程任务」入口列出的是 M0–M5 主链任务，属于「查流程」能力：
+              品保没有查流程权限（order.ingest 也没有），因此与 M1–M5 面板一起收口。 */}
+          {canRunOrderFlow ? <AgentTaskCenter /> : null}
           {demoRoles ? <RoleSwitcher /> : null}
           <input
             ref={m0FolderInputRef}

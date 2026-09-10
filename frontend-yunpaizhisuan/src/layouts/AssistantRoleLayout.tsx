@@ -5,7 +5,6 @@ import { isDemoRoleEnabled } from '../app/runtimeMode';
 import { RoleSwitcher } from '../features/roles/RoleSwitcher';
 import { UserMenu } from '../features/roles/UserMenu';
 import { VersionBadge } from '../components/VersionBadge';
-import { AgentTaskCenter } from '../features/agent-tasks/AgentTaskCenter';
 import { useCurrentRole } from '../features/roles/useCurrentRole';
 
 /**
@@ -33,11 +32,13 @@ export function AssistantRoleLayout() {
           </Button>
         </div>
         <div className="assistant-header-center">
-          <div className="assistant-title">{qualityMode ? '品保流程监督' : '生产工作台'}</div>
-          <div className="assistant-subtitle">{qualityMode ? 'M1-M5 全流程进度与任务提醒' : '按当前角色展示工人/组长任务'}</div>
+          <div className="assistant-title">{qualityMode ? '品保工作台' : '生产工作台'}</div>
+          <div className="assistant-subtitle">
+            {qualityMode ? 'M7 来料待验、抽样与放行' : '按当前角色展示工人/组长任务'}
+          </div>
         </div>
         <div className="assistant-header-right">
-          {qualityMode ? <AgentTaskCenter supervision /> : null}
+          {/* 品保不提供「流程任务」（M1–M5 主链进度）入口：那是厂长视图，品保看不到主链进度。 */}
           {demoRoles ? <RoleSwitcher /> : <UserMenu />}
           <div className="assistant-header-version">
             <VersionBadge />

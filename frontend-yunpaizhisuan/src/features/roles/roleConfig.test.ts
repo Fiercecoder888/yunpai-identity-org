@@ -29,11 +29,19 @@ describe('roleConfig', () => {
 
   it('maps every role to a concrete landing path', () => {
     expect(landingKindForRoleId('factory-director').landingPath).toBe('/');
-    expect(landingKindForRoleId('quality-assurance').landingPath).toBe('/');
+    // 品保有独立落地页 /quality（M7 来料待验/放行），不再与厂长共用对话页
+    expect(landingKindForRoleId('quality-assurance').landingPath).toBe('/quality');
     expect(landingKindForRoleId('team-leader').landingPath).toBe('/leader');
     expect(landingKindForRoleId('worker').landingPath).toBe('/worker');
     // 未知角色/权限服务故障时的默认落地页 = 对话页（/home 已随角色首页删除）
     expect(defaultRoleLanding.landingPath).toBe('/');
+  });
+
+  it('gives each of the four roles its own landing path', () => {
+    const paths = ['factory-director', 'quality-assurance', 'team-leader', 'worker'].map(
+      (roleId) => landingKindForRoleId(roleId).landingPath,
+    );
+    expect(new Set(paths).size).toBe(paths.length);
   });
 
   it('defines role-specific metric keys without sharing an empty default', () => {
