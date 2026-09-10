@@ -66,9 +66,10 @@ $env:PYTHONPATH="<repo>\src"
 
 ### 证据快照
 
-| 文件 | 内容 |
+| 文件 / 目录 | 内容 |
 |---|---|
 | `regression-sweep-REPORT.md` | 回归巡检报告：`e2e_chat_isolation` 11/11 + `e2e_first_login` 11/11 + `askback-ui` 25/25 = **47/47**，退出码全 0，无回归 |
+| **`evidence/role-landing/`** | **四角色落地页 E2E 的一次完整通过产物**（`result.json` 28 PASS / 0 FAIL / 12 INFO、`report.md`、5 张截图），对应 dist `index-DSeyC87p.js`（`dirty:false`、commit `3bb4bc8`）。文件→结论对照、复现步骤、以及「怎么区分『忘了重建 dist』和『真回归』」见 **`evidence/README.md`** |
 
 ## 单元测试与前端校验
 
@@ -83,7 +84,8 @@ cd frontend-yunpaizhisuan
 npm run typecheck ; npm run lint ; npm run build ; npm test -- --run
 ```
 
-> 前端已知失败：`apiContractMatrix`(2) + `dockerConfig`(5) 在基线提交 `f586e4a` 上同样失败，与本次改动无关。
+> 前端本次实测：`typecheck` 0 / `lint` 0 / `build` 0；`pnpm test` **1189 passed / 7 failed（1196）**。
+> 那 7 个失败是 `apiContractMatrix`(2) + `dockerConfig`(5)，**在基线提交 `f586e4a` 上同样失败**（已用 detached worktree 独立复核），与本次改动无关。
 
 ## 演示栈怎么起（人工验收用）
 
@@ -94,4 +96,11 @@ powershell -File verify\restart-19012.ps1
 & <venv>\Scripts\python.exe _deploy-gb10\static_proxy.py --directory <dist> --host 0.0.0.0 --port 18003 --backend-port 19012 --m0-port 8010
 ```
 
-打开 `http://localhost:18003`，演示账号 `boss`（厂长）。
+打开 `http://localhost:18003`（换了 dist 后**要强刷** Ctrl+F5），演示账号：
+
+| 账号 | 角色 | 落地页 | 备注 |
+|---|---|---|---|
+| `boss` | 厂长（双角色）+ 组织管理员 | `/` | 有 M1–M5 面板、「管理」下拉、「Agent 任务」入口 |
+| `qa001` | 品保 `quality-assurance` | **`/quality`** | **看不到** M1–M5、「管理」、「Agent 任务」；对话功能与厂长一致。首登会要求改密 |
+
+> 租户里 `worker003` 也是品保角色；`worker001` / `worker002` / `worker100` 是工人（落地 `/worker`）。

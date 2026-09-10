@@ -1,0 +1,1271 @@
+{
+  "ticket": "Q2",
+  "generatedAt": "2026-09-10T10:54:23.949Z",
+  "base": "http://127.0.0.1:18041",
+  "ports": {
+    "backend": 19041,
+    "proxy": 18041
+  },
+  "headless": true,
+  "dist": {
+    "buildInfo": {
+      "commit": "3bb4bc8380840b4d43b2f808c9385343e4333431",
+      "branch": "feat/identity-org-20260907",
+      "buildTime": "2026-09-10T10:54:07.369Z",
+      "dirty": false
+    },
+    "buildTime": "2026-09-10T10:54:07.369Z",
+    "buildTimeMs": 1789037647369,
+    "srcMtime": {
+      "src/features/roles/roleConfig.ts": "2026-09-10T10:51:18.128Z",
+      "src/app/router.tsx": "2026-09-10T10:51:18.125Z",
+      "src/pages/QualitySupervisionPage.tsx": null
+    },
+    "srcNewestMs": 1789037478128.4668,
+    "distStale": false,
+    "src": {
+      "qaLandingIsQuality": true,
+      "qualityRouteInRouter": true,
+      "qualityRouteGuarded": true,
+      "qualityPageFileExists": false
+    },
+    "markers": {
+      "qualityRoute": [
+        "index-DSeyC87p.js"
+      ],
+      "qualityTitle": []
+    },
+    "distHasQualityRoute": true,
+    "assetCount": 16
+  },
+  "accounts": [
+    {
+      "key": "director",
+      "label": "厂长",
+      "user_id": "bossRL",
+      "role_codes": null,
+      "expectedLanding": "/"
+    },
+    {
+      "key": "qa",
+      "label": "品保",
+      "user_id": "qaRL",
+      "role_codes": [
+        "quality-assurance"
+      ],
+      "expectedLanding": "/quality"
+    },
+    {
+      "key": "leader",
+      "label": "组长",
+      "user_id": "leadRL",
+      "role_codes": [
+        "team-leader"
+      ],
+      "expectedLanding": "/leader"
+    },
+    {
+      "key": "worker",
+      "label": "工人",
+      "user_id": "workerRL",
+      "role_codes": [
+        "worker"
+      ],
+      "expectedLanding": "/worker"
+    }
+  ],
+  "prep": {
+    "qa": {
+      "user_id": "qaRL",
+      "loginStatus": 200,
+      "roles": [
+        "quality-assurance"
+      ]
+    },
+    "leader": {
+      "user_id": "leadRL",
+      "loginStatus": 200,
+      "roles": [
+        "team-leader"
+      ]
+    },
+    "worker": {
+      "user_id": "workerRL",
+      "loginStatus": 200,
+      "roles": [
+        "worker"
+      ]
+    }
+  },
+  "landings": [
+    {
+      "role": "director",
+      "label": "厂长",
+      "user_id": "bossRL",
+      "expected": "/",
+      "observed": "/",
+      "url": "http://127.0.0.1:18041/",
+      "pass": true,
+      "settled": true,
+      "urlChanges": [],
+      "elapsedMs": 1799,
+      "loginError": null,
+      "isChangePasswordPage": false,
+      "isLoginPage": false,
+      "screenshot": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-director.png",
+      "bodyTextHead": "新建会话\n示例任务\n订单全链路\n物料库存追踪\n成品库汇总\n成本差异\n采购预警\n排程与齐套\nBOM/SOP 制品\n工程图纸\n暂无会话\n云湃企业助手\n工业智造 Agent\nM0 上传文件夹\n管理\n厂长\n落地页厂长\n订单管理\n已上传 0 个订单\n选择订单查看 M1-M5\n重新运行\n订单列表已收起；通过上方“选择订单”查看指定订单的 M1-M5 流程。切换订单不会切换会话或重新执行。\n暂无已上传订单\n今天要处理什么？\n检查采购预警与物料齐套风险\n排查本周排程冲突\n查看最近订单全链路\n有一批供应商的货要入库了"
+    },
+    {
+      "role": "qa",
+      "label": "品保",
+      "user_id": "qaRL",
+      "expected": "/quality",
+      "observed": "/quality",
+      "url": "http://127.0.0.1:18041/quality",
+      "pass": true,
+      "settled": true,
+      "urlChanges": [],
+      "elapsedMs": 1800,
+      "loginError": null,
+      "isChangePasswordPage": false,
+      "isLoginPage": false,
+      "screenshot": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-qa.png",
+      "bodyTextHead": "新建会话\n示例任务\n订单全链路\n物料库存追踪\n成品库汇总\n成本差异\n采购预警\n排程与齐套\nBOM/SOP 制品\n工程图纸\n暂无会话\n云湃企业助手\n工业智造 Agent\nM0 上传文件夹\n品保监督\n品保一号\n今天要处理什么？\n检查采购预警与物料齐套风险\n排查本周排程冲突\n查看最近订单全链路\n有一批供应商的货要入库了"
+    },
+    {
+      "role": "leader",
+      "label": "组长",
+      "user_id": "leadRL",
+      "expected": "/leader",
+      "observed": "/leader",
+      "url": "http://127.0.0.1:18041/leader",
+      "pass": true,
+      "settled": true,
+      "urlChanges": [
+        {
+          "from": "/",
+          "to": "/leader",
+          "atMs": 352
+        }
+      ],
+      "elapsedMs": 2154,
+      "loginError": null,
+      "isChangePasswordPage": false,
+      "isLoginPage": false,
+      "screenshot": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-leader.png",
+      "bodyTextHead": "对话\n生产工作台\n按当前角色展示工人/组长任务\n组长\n组长一号\n小组长工作台\n组长代工人报工：今日任务、报工、班组工作量台账、工时对比与订单追溯\n登录主体：共享开发用户 · undefined\n组长身份（测试工号，开发期未绑定登录主体）：\n组长-张组长\n班组初始化（首次使用）\n班组编码\n班组名称\n资源范围（资源 ID，逗号分隔）\n创建班组"
+    },
+    {
+      "role": "worker",
+      "label": "工人",
+      "user_id": "workerRL",
+      "expected": "/worker",
+      "observed": "/worker",
+      "url": "http://127.0.0.1:18041/worker",
+      "pass": true,
+      "settled": true,
+      "urlChanges": [],
+      "elapsedMs": 1809,
+      "loginError": null,
+      "isChangePasswordPage": false,
+      "isLoginPage": false,
+      "screenshot": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-worker.png",
+      "bodyTextHead": "对话\n生产工作台\n按当前角色展示工人/组长任务\n工人\n工人一号\n工人工作台\n输入工号查看你绑定的订单，并去对话页自然语言报工。\n我的订单与报工\n搜索选择测试工人（工人-张三…）\n对话报工\n请先选择你的测试工号，才能查看已派发工序并报工。\n去对话报工\n选择测试工号后显示你绑定的订单\n刷新我的工序"
+    }
+  ],
+  "denials": [
+    {
+      "roleKey": "director",
+      "roleLabel": "厂长",
+      "target": "/accounts",
+      "expected": "/",
+      "observed": "/accounts",
+      "pass": false,
+      "settled": true,
+      "urlChanges": [],
+      "blankPage": false,
+      "landedOnDashboard": false,
+      "bodyLength": 281,
+      "infoOnly": true
+    },
+    {
+      "roleKey": "qa",
+      "roleLabel": "品保",
+      "target": "/accounts",
+      "expected": "/quality",
+      "observed": "/quality",
+      "pass": true,
+      "settled": true,
+      "urlChanges": [
+        {
+          "from": "/accounts",
+          "to": "/quality",
+          "atMs": 357
+        }
+      ],
+      "blankPage": false,
+      "landedOnDashboard": false,
+      "bodyLength": 157,
+      "infoOnly": true
+    },
+    {
+      "roleKey": "leader",
+      "roleLabel": "组长",
+      "target": "/accounts",
+      "expected": "/leader",
+      "observed": "/leader",
+      "pass": true,
+      "settled": true,
+      "urlChanges": [
+        {
+          "from": "/accounts",
+          "to": "/leader",
+          "atMs": 362
+        }
+      ],
+      "blankPage": false,
+      "landedOnDashboard": false,
+      "bodyLength": 170,
+      "infoOnly": true
+    }
+  ],
+  "assertions": [
+    {
+      "step": "stack",
+      "name": "健康检查",
+      "status": "INFO",
+      "detail": "tools=123 bound=undefined transport=undefined"
+    },
+    {
+      "step": "dist",
+      "name": "被托管 dist 版本",
+      "status": "INFO",
+      "detail": "buildTime=2026-09-10T10:54:07.369Z dirty=false assets=16"
+    },
+    {
+      "step": "dist",
+      "name": "dist 是否过期（buildTime 早于 roleConfig/router 源码 mtime）",
+      "status": "INFO",
+      "detail": "false"
+    },
+    {
+      "step": "dist",
+      "name": "dist 里 /quality 路由标记",
+      "status": "INFO",
+      "detail": "true 命中=[\"index-DSeyC87p.js\"]"
+    },
+    {
+      "step": "src",
+      "name": "源码侧改动是否落地",
+      "status": "INFO",
+      "detail": "roleConfig 品保=/quality：true；router 有 /quality：true；套 RoleGuard：true；QualitySupervisionPage 文件存在：false"
+    },
+    {
+      "step": "数据准备",
+      "name": "注册厂长（空库首管）",
+      "status": "PASS",
+      "detail": "status=200 roles=[\"factory-director\",\"org-admin\"]"
+    },
+    {
+      "step": "数据准备",
+      "name": "厂长身份",
+      "status": "INFO",
+      "detail": "roles=[\"factory-director\",\"org-admin\"] permissions=13"
+    },
+    {
+      "step": "数据准备",
+      "name": "建品保账号 qaRL",
+      "status": "PASS",
+      "detail": "status=200 role_codes=[\"quality-assurance\"] must_change=true"
+    },
+    {
+      "step": "数据准备",
+      "name": "品保首登改密（不带 old_password）",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "step": "数据准备",
+      "name": "品保用固定密码可登录",
+      "status": "PASS",
+      "detail": "status=200 roles=[\"quality-assurance\"] must_change=false"
+    },
+    {
+      "step": "数据准备",
+      "name": "建组长账号 leadRL",
+      "status": "PASS",
+      "detail": "status=200 role_codes=[\"team-leader\"] must_change=true"
+    },
+    {
+      "step": "数据准备",
+      "name": "组长首登改密（不带 old_password）",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "step": "数据准备",
+      "name": "组长用固定密码可登录",
+      "status": "PASS",
+      "detail": "status=200 roles=[\"team-leader\"] must_change=false"
+    },
+    {
+      "step": "数据准备",
+      "name": "建工人账号 workerRL",
+      "status": "PASS",
+      "detail": "status=200 role_codes=[\"worker\"] must_change=true"
+    },
+    {
+      "step": "数据准备",
+      "name": "工人首登改密（不带 old_password）",
+      "status": "PASS",
+      "detail": "status=200"
+    },
+    {
+      "step": "数据准备",
+      "name": "工人用固定密码可登录",
+      "status": "PASS",
+      "detail": "status=200 roles=[\"worker\"] must_change=false"
+    },
+    {
+      "step": "落地页 · 厂长",
+      "name": "厂长(bossRL) 登录后落在 /",
+      "status": "PASS",
+      "detail": "实测 pathname=/ url=http://127.0.0.1:18041/ 稳定=true 跳转链=[]"
+    },
+    {
+      "step": "管理入口",
+      "name": "厂长在落地页有「管理」下拉",
+      "status": "INFO",
+      "detail": "admin-nav-menu=1（落地页 /）"
+    },
+    {
+      "step": "厂长反向断言",
+      "name": "厂长对话页仍能看到 M1-M5 进度面板（可见容器 ≥1）",
+      "status": "PASS",
+      "detail": "容器总数=1 可见=1 pathname=/"
+    },
+    {
+      "step": "厂长反向断言",
+      "name": "厂长页仍有「订单管理」文案",
+      "status": "PASS",
+      "detail": "命中=true"
+    },
+    {
+      "step": "厂长反向断言",
+      "name": "厂长页仍有「选择订单查看 M1-M5」入口",
+      "status": "PASS",
+      "detail": "选择订单查看 M1-M5=true M1-M5=true"
+    },
+    {
+      "step": "厂长反向断言",
+      "name": "厂长页 shell class / Agent 任务入口（参考）",
+      "status": "INFO",
+      "detail": "shell=[\"assistant-shell\"] agentTaskEntry=1"
+    },
+    {
+      "step": "越权拦截 · 厂长",
+      "name": "访问 /accounts → /accounts（期望 /）",
+      "status": "INFO",
+      "detail": "空白=false 跳/dashboard=false"
+    },
+    {
+      "step": "落地页 · 品保",
+      "name": "品保(qaRL) 登录后落在 /quality",
+      "status": "PASS",
+      "detail": "实测 pathname=/quality url=http://127.0.0.1:18041/quality 稳定=true 跳转链=[]"
+    },
+    {
+      "step": "品保收口",
+      "name": "品保页不出现 M1-M5 进度面板（容器数 0，隐藏的也算）",
+      "status": "PASS",
+      "detail": "容器总数=0 可见=0 pathname=/quality"
+    },
+    {
+      "step": "品保收口",
+      "name": "品保页不出现「订单管理」文案",
+      "status": "PASS",
+      "detail": "命中=false"
+    },
+    {
+      "step": "品保收口",
+      "name": "品保页不出现「选择订单查看 M1-M5」/「M1-M5」文案",
+      "status": "PASS",
+      "detail": "选择订单查看 M1-M5=false M1-M5=false"
+    },
+    {
+      "step": "品保收口",
+      "name": "品保页不出现「流程任务」文案",
+      "status": "PASS",
+      "detail": "命中=false bodyLen=157"
+    },
+    {
+      "step": "品保收口",
+      "name": "品保页没有「打开流程任务」入口（无 AgentTaskCenter supervision / 无流程任务徽标）",
+      "status": "PASS",
+      "detail": "[aria-label=\"打开流程任务\"]=0 [aria-label*=流程任务]=0"
+    },
+    {
+      "step": "品保收口",
+      "name": "品保页不出现「全流程监督」",
+      "status": "PASS",
+      "detail": "命中=false"
+    },
+    {
+      "step": "品保收口·不过度",
+      "name": "品保页对话输入框仍在（只收口 M1-M5，不砍对话）",
+      "status": "PASS",
+      "detail": "chat-composer=1"
+    },
+    {
+      "step": "品保收口",
+      "name": "品保页 shell class / Agent 任务入口（参考）",
+      "status": "INFO",
+      "detail": "shell=[\"assistant-shell assistant-shell-no-flow\"] agentTaskEntry[打开 Agent 任务]=0（新源码把 AgentTaskCenter 也按 order.ingest 一起收口，dist 重建后预期该值为 0；stale dist 下仍会渲染非 supervision 的「Agent 任务」入口，但它不含 M1-M5 流程任务，故不设为硬断言）"
+    },
+    {
+      "step": "越权拦截 · 品保",
+      "name": "访问 /accounts → /quality（期望 /quality）",
+      "status": "INFO",
+      "detail": "空白=false 跳/dashboard=false"
+    },
+    {
+      "step": "落地页 · 组长",
+      "name": "组长(leadRL) 登录后落在 /leader",
+      "status": "PASS",
+      "detail": "实测 pathname=/leader url=http://127.0.0.1:18041/leader 稳定=true 跳转链=[\"/→/leader\"]"
+    },
+    {
+      "step": "越权拦截 · 组长",
+      "name": "访问 /accounts → /leader（期望 /leader）",
+      "status": "INFO",
+      "detail": "空白=false 跳/dashboard=false"
+    },
+    {
+      "step": "落地页 · 工人",
+      "name": "工人(workerRL) 登录后落在 /worker",
+      "status": "PASS",
+      "detail": "实测 pathname=/worker url=http://127.0.0.1:18041/worker 稳定=true 跳转链=[]"
+    },
+    {
+      "step": "越权拦截 · 工人",
+      "name": "工人访问 /quality → 被拦下并回到 /worker",
+      "status": "PASS",
+      "detail": "实测 pathname=/worker 空白=false 跳 /dashboard=false 跳转链=[\"/quality→/worker\"] bodyLen=147"
+    },
+    {
+      "step": "越权拦截 · 工人",
+      "name": "工人访问 /leader → 被拦下并回到 /worker",
+      "status": "PASS",
+      "detail": "实测 pathname=/worker 空白=false 跳 /dashboard=false 跳转链=[\"/leader→/worker\"] bodyLen=147"
+    },
+    {
+      "step": "越权拦截 · 工人",
+      "name": "工人访问 /accounts → 被拦下并回到 /worker",
+      "status": "PASS",
+      "detail": "实测 pathname=/worker 空白=false 跳 /dashboard=false 跳转链=[\"/accounts→/worker\"] bodyLen=147"
+    },
+    {
+      "step": "噪声",
+      "name": "无 JS pageerror",
+      "status": "PASS",
+      "detail": "0 个"
+    }
+  ],
+  "diagnosis": {
+    "verdict": "PASS",
+    "likelyCause": "none",
+    "hint": "四角色落地页、越权跳转、品保收口与厂长反向断言全部符合拍板口径。"
+  },
+  "noise": {
+    "pageErrors": [],
+    "consoleErrors": [
+      {
+        "role": "director",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (not found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+      },
+      {
+        "role": "director",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "director",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "qa",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+      },
+      {
+        "role": "qa",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "qa",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "qa",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+      },
+      {
+        "role": "leader",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "leader",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "worker",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+      },
+      {
+        "role": "worker",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "worker",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "worker",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "worker",
+        "text": "The report-only Content Security Policy 'default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'' was delivered via a <meta> element,"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      },
+      {
+        "role": "worker",
+        "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    ],
+    "failedApi": [
+      {
+        "role": "director",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "qa",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m7/qc-pending"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m7/qc-pending"
+      },
+      {
+        "role": "leader",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "worker",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      }
+    ],
+    "badResponses": [
+      {
+        "role": "director",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/orchestrator/tasks?include_dismissed=true"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "director",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "qa",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m7/qc-pending"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "qa",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m7/qc-pending"
+      },
+      {
+        "role": "leader",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "leader",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/leader/teams?leader_user_id=leader-zhang"
+      },
+      {
+        "role": "worker",
+        "status": 401,
+        "method": "GET",
+        "url": "/api/auth/me"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m3/persisted/procurement-plans?page=1&page_size=50"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m4/alerts?page=1&page_size=100&status=open"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m5/ops/flow-dashboard?limit=50"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "GET",
+        "url": "/api/m0/parser-compat/review/queue"
+      },
+      {
+        "role": "worker",
+        "status": 404,
+        "method": "POST",
+        "url": "/api/audit/logs"
+      }
+    ]
+  },
+  "screenshots": [
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-director.png",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-qa.png",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-leader.png",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-worker.png",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-worker-denied.png"
+  ],
+  "textDumps": [
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-director.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-director-accounts.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-qa.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-qa-accounts.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-leader.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-leader-accounts.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-worker.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-worker-quality.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-worker-leader.txt",
+    "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-worker-accounts.txt"
+  ],
+  "artifacts": {
+    "resultJson": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\result.json",
+    "reportMd": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\report.md",
+    "screenshots": [
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-director.png",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-qa.png",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-leader.png",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-worker.png",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\role-landing-worker-denied.png"
+    ],
+    "textDumps": [
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-director.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-director-accounts.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-qa.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-qa-accounts.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-leader.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-leader-accounts.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\landing-worker.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-worker-quality.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-worker-leader.txt",
+      "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\denied-worker-accounts.txt"
+    ],
+    "backendLog": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\backend-19041.log",
+    "proxyLog": "E:\\AIStudy\\AIProjects\\factory\\NewWork1\\_pkg\\_verify\\role-landing\\proxy-18041.log"
+  },
+  "verdict": "PASS",
+  "directorFlowProbe": {
+    "pathname": "/",
+    "panelTotal": 1,
+    "panelVisible": 1,
+    "textHits": {
+      "订单管理": true,
+      "选择订单查看 M1-M5": true,
+      "M1-M5": true,
+      "流程任务": false,
+      "全流程监督": false,
+      "M5 生产排程": false
+    },
+    "supervisionEntry": 0,
+    "agentEntry": 1,
+    "flowTaskAriaAny": 0,
+    "composer": 1,
+    "shellClasses": [
+      "assistant-shell"
+    ],
+    "bodyLength": 252,
+    "bodyHead": "新建会话\n示例任务\n订单全链路\n物料库存追踪\n成品库汇总\n成本差异\n采购预警\n排程与齐套\nBOM/SOP 制品\n工程图纸\n暂无会话\n云湃企业助手\n工业智造 Agent\nM0 上传文件夹\n管理\n厂长\n落地页厂长\n订单管理\n已上传 0 个订单\n选择订单查看 M1-M5\n重新运行\n订单列表已收起；通过上方“选择订单”查看指定订单的 M1-M5 流程。切换订单不会切换会话或重新执行。\n暂无已上传订单\n今天要处理什么？\n检查采购预警与物料齐套风险\n排查本周排程冲突\n查看最近订单全链路\n有一批供应商的货要入库了"
+  },
+  "qaFlowProbe": {
+    "pathname": "/quality",
+    "panelTotal": 0,
+    "panelVisible": 0,
+    "textHits": {
+      "订单管理": false,
+      "选择订单查看 M1-M5": false,
+      "M1-M5": false,
+      "流程任务": false,
+      "全流程监督": false,
+      "M5 生产排程": false
+    },
+    "supervisionEntry": 0,
+    "agentEntry": 0,
+    "flowTaskAriaAny": 0,
+    "composer": 1,
+    "shellClasses": [
+      "assistant-shell assistant-shell-no-flow"
+    ],
+    "bodyLength": 157,
+    "bodyHead": "新建会话\n示例任务\n订单全链路\n物料库存追踪\n成品库汇总\n成本差异\n采购预警\n排程与齐套\nBOM/SOP 制品\n工程图纸\n暂无会话\n云湃企业助手\n工业智造 Agent\nM0 上传文件夹\n品保监督\n品保一号\n今天要处理什么？\n检查采购预警与物料齐套风险\n排查本周排程冲突\n查看最近订单全链路\n有一批供应商的货要入库了"
+  },
+  "counts": {
+    "total": 28,
+    "pass": 28,
+    "fail": 0,
+    "info": 12
+  }
+}
