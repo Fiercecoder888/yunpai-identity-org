@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { authRuntime } from './authRuntime';
 import type { AuthConfig, AuthMe } from './authApi';
 import { useAuthStore } from './useAuthStore';
+import { chatStorageKey, getChatStorageScope, setChatStorageScope } from '../services/chatStorageScope';
 
 const config: AuthConfig = { auth_mode: 'shared_anonymous', oidc_enabled: false, shared_data: true, csrf_required: true,
   capabilities: { anonymous_session: true, oidc_login: false, session_management: true, user_isolation: false } };
@@ -74,5 +75,32 @@ describe('auth bootstrap', () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('connection refused'));
     await expect(useAuthStore.getState().bootstrap()).rejects.toThrow('connection refused');
     expect(useAuthStore.getState()).toMatchObject({ status: 'error', error: 'connection refused' });
+  });
+
+  it('scopes chat local storage by tenant and user, and clears it on logout', async () => {
+    const authenticated: AuthMe = {
+      tenant_id: 'default', user_id: 'boss', roles: ['factory-director'], permissions: ['order.view'],
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json(authenticated)).mockResolvedValueOnce(json({}));
+
+    await useAuthStore.getState().refreshMe();
+
+    expect(getChatStorageScope()).toEqual({ tenantId: 'default', userId: 'boss' });
+    expect(chatStorageKey('yunpai.local-agent-conversations')).toBe('yunpai.default:boss.local-agent-conversations');
+
+    await useAuthStore.getState().logout();
+
+    expect(getChatStorageScope()).toBeUndefined();
+    expect(chatStorageKey('yunpai.local-agent-conversations')).toBe('yunpai.local-agent-conversations');
+  });
+
+  it('keeps the legacy global keys for anonymous shared sessions without a user id', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json(config)).mockResolvedValueOnce(json(me));
+
+    await useAuthStore.getState().bootstrap();
+
+    expect(getChatStorageScope()).toBeUndefined();
+    expect(chatStorageKey('yunpai.local-agent-message-sets')).toBe('yunpai.local-agent-message-sets');
+    setChatStorageScope(null);
   });
 });

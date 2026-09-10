@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ChatStreamHttpError,
   ChatStreamParseError,
@@ -169,5 +169,79 @@ describe('chatApi NDJSON stream client', () => {
         '{"type":"tool_result","message_id":"m1","step_id":"s1","tool":"lookup","status":"ok","duration_ms":"fast","summary":1}',
       ),
     ).toThrow(ChatStreamParseError);
+  });
+});
+
+/**
+ * 本地编排（/runs/stream）把每个 step_result 映射成聊天事件：
+ * 成功的仍是 tool_result；被拒/失败的（如 TOOL_FORBIDDEN）必须是 tool_error，
+ * 否则工具卡片会假显示「完成」。
+ */
+describe('local run step_result mapping', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const localFetch = (lines: string[]) => {
+    vi.stubEnv('VITE_LOCAL_LANGGRAPH', 'true');
+    return vi.fn(async () =>
+      new Response(streamFromChunks(lines.map((line) => `${line}\n`)), {
+        status: 200,
+        headers: { 'Content-Type': 'application/x-ndjson' },
+      }),
+    ) as typeof fetch;
+  };
+
+  const collect = async (fetchImpl: typeof fetch) => {
+    const received: ChatStreamEvent[] = [];
+    for await (const event of streamChatFromOrchestrator('查账号', { fetchImpl })) {
+      received.push(event);
+    }
+    return received;
+  };
+
+  it('maps a successful step_result to tool_result and a failed one to tool_error', async () => {
+    const received = await collect(localFetch([
+      '{"type":"run_start","run_id":"run-1","task_id":"task-1"}',
+      '{"type":"step_start","run_id":"run-1","step":{"id":"step-ok","tool":"list_m1_tasks","label":"查询订单"}}',
+      '{"type":"step_result","run_id":"run-1","step":{"id":"step-ok","tool":"list_m1_tasks","status":"ok"},"output_summary":{"status":"ok","count":2}}',
+      '{"type":"step_start","run_id":"run-1","step":{"id":"step-denied","tool":"list_identity_users","label":"查询账号"}}',
+      '{"type":"step_result","run_id":"run-1","step":{"id":"step-denied","tool":"list_identity_users","status":"failed","error":{"code":"TOOL_FORBIDDEN","message":"当前账号无权调用 list_identity_users"}},"output_summary":{"status":"failed","code":"TOOL_FORBIDDEN","message":"当前账号无权调用 list_identity_users"}}',
+      '{"type":"run_done","run_id":"run-1","state":{"status":"failed"}}',
+    ]));
+
+    expect(received.map((event) => event.type)).toEqual([
+      'message_start', 'tool_start', 'tool_result', 'tool_start', 'tool_error', 'message_done',
+    ]);
+    expect(received[2]).toMatchObject({
+      type: 'tool_result',
+      step_id: 'step-ok',
+      tool: 'list_m1_tasks',
+      status: 'ok',
+      result: { status: 'ok', count: 2 },
+    });
+    expect(received[4]).toMatchObject({
+      type: 'tool_error',
+      step_id: 'step-denied',
+      tool: 'list_identity_users',
+      status: 'failed',
+      error: '当前账号无权调用 list_identity_users',
+    });
+    expect(received[5]).toMatchObject({ type: 'message_done', finish_reason: 'error' });
+  });
+
+  it('falls back to the string output_summary and then to 执行失败 for the error reason', async () => {
+    const received = await collect(localFetch([
+      '{"type":"run_start","run_id":"run-2","task_id":"task-2"}',
+      '{"type":"step_result","run_id":"run-2","step":{"id":"step-forbidden","tool":"list_identity_users","status":"failed"},"output_summary":"TOOL_FORBIDDEN：工人账号没有 order.view 权限"}',
+      '{"type":"step_result","run_id":"run-2","step":{"id":"step-broken","tool":"list_m1_tasks","status":"failed"},"output_summary":{"status":"failed"}}',
+    ]));
+
+    expect(received[1]).toMatchObject({
+      type: 'tool_error',
+      step_id: 'step-forbidden',
+      error: 'TOOL_FORBIDDEN：工人账号没有 order.view 权限',
+    });
+    expect(received[2]).toMatchObject({ type: 'tool_error', step_id: 'step-broken', error: '执行失败' });
   });
 });

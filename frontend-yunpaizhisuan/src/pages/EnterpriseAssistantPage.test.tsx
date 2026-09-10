@@ -12,6 +12,25 @@ import { CHAT_LAST_CONVERSATION_KEY, useChatStore } from '../store/useChatStore'
 
 const fileDataTransfer = (files: File[]) => ({ types: ['Files'], files });
 
+/**
+ * 厂长 / 主数据管理员：种子角色里唯一拥有 `order.ingest`（上传、导入订单）的岗位，
+ * 因此能看到 M1–M5 订单全链路面板。
+ */
+const ORDER_INGEST_PERMISSIONS = ['order.ingest', 'order.view', 'report.view'];
+
+/** 品保：只有订单查看/复核/报表权限，没有 `order.ingest` → 不该看到 M1–M5 面板。 */
+const QUALITY_ASSURANCE_PERMISSIONS = ['order.view', 'order.review', 'report.view'];
+
+/** 写入当前登录身份（真实鉴权模式下 `/api/auth/me` 的结构）。 */
+const signIn = (permissions: string[]) => {
+  useAuthStore.setState({
+    status: 'ready',
+    me: { tenant_id: 'default', user_id: 'u-test', display_name: '测试用户', roles: [], permissions },
+  });
+};
+
+const orderFlowPanelRegion = () => screen.queryByRole('region', { name: '订单业务流程' });
+
 const dispatchDrag = (
   type: string,
   dataTransfer: unknown,
@@ -46,6 +65,7 @@ describe('EnterpriseAssistantPage', () => {
     );
 
   it('renders the assistant as the user entry without a legacy dashboard link', () => {
+    signIn(ORDER_INGEST_PERMISSIONS);
     renderWithApp(
       <MemoryRouter>
         <EnterpriseAssistantPage />
@@ -215,6 +235,7 @@ describe('EnterpriseAssistantPage', () => {
   });
 
   it('loads the selected order trace before showing PMC progress from a cold start', async () => {
+    signIn(ORDER_INGEST_PERMISSIONS);
     const user = userEvent.setup();
     let tracedOrderId: string | undefined;
     server.use(http.get('/api/orchestrator/business-orders/:orderId/trace', ({ params }) => {
@@ -246,6 +267,7 @@ describe('EnterpriseAssistantPage', () => {
   });
 
   it('reloads PMC progress for the newly selected order instead of reusing the previous plan', async () => {
+    signIn(ORDER_INGEST_PERMISSIONS);
     const user = userEvent.setup();
     const tracedOrderIds: string[] = [];
     server.use(http.get('/api/orchestrator/business-orders/:orderId/trace', ({ params }) => {
@@ -283,6 +305,7 @@ describe('EnterpriseAssistantPage', () => {
   });
 
   it('refreshes the trace when reopening PMC for the same order so a newer plan is selected', async () => {
+    signIn(ORDER_INGEST_PERMISSIONS);
     const user = userEvent.setup();
     let traceCalls = 0;
     server.use(http.get('/api/orchestrator/business-orders/:orderId/trace', ({ params }) => {
@@ -320,6 +343,7 @@ describe('EnterpriseAssistantPage', () => {
   });
 
   it('does not let a slow trace response from the previous order replace the selected order', async () => {
+    signIn(ORDER_INGEST_PERMISSIONS);
     const user = userEvent.setup();
     let releaseFirstTrace: (() => void) | undefined;
     let firstTraceStarted = false;
@@ -377,6 +401,7 @@ describe('EnterpriseAssistantPage', () => {
   });
 
   it('keeps the PMC empty state repeatable when no order is available', async () => {
+    signIn(ORDER_INGEST_PERMISSIONS);
     const user = userEvent.setup();
     server.use(
       http.get('/historical-order-catalog.json', () => HttpResponse.json([])),
@@ -394,5 +419,42 @@ describe('EnterpriseAssistantPage', () => {
     await user.click(screen.getByRole('button', { name: '上传或导入' }));
     await user.click(await screen.findByText('查看 PMC 实际进度'));
     expect(await screen.findByText('PMC 数据未完善')).toBeInTheDocument();
+  });
+
+  it('shows the M1-M5 order flow panel for an account that can ingest orders', () => {
+    signIn(ORDER_INGEST_PERMISSIONS);
+    renderPage();
+
+    expect(orderFlowPanelRegion()).toBeInTheDocument();
+    expect(document.querySelector('main.assistant-shell')).not.toHaveClass('assistant-shell-no-flow');
+  });
+
+  it('hides the M1-M5 order flow panel for quality assurance but keeps the chat usable', () => {
+    signIn(QUALITY_ASSURANCE_PERMISSIONS);
+    renderPage();
+
+    expect(orderFlowPanelRegion()).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: '订单管理与 M1-M5 流程' })).not.toBeInTheDocument();
+    // 品保只是看不到这个框，对话功能与厂长一致。
+    expect(screen.getByPlaceholderText('询问订单、风险或排程状态')).toBeInTheDocument();
+    // 不占位、不留空列：外壳切到两行布局。
+    expect(document.querySelector('main.assistant-shell')).toHaveClass('assistant-shell-no-flow');
+  });
+
+  it('hides the M1-M5 order flow panel without crashing when nobody is signed in', () => {
+    useAuthStore.setState({ status: 'ready', config: undefined, me: undefined, error: undefined });
+    renderPage();
+
+    expect(orderFlowPanelRegion()).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('询问订单、风险或排程状态')).toBeInTheDocument();
+    expect(document.querySelector('main.assistant-shell')).toHaveClass('assistant-shell-no-flow');
+  });
+
+  it('keeps the panel hidden when the signed-in account has no permissions at all', () => {
+    signIn([]);
+    renderPage();
+
+    expect(orderFlowPanelRegion()).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('询问订单、风险或排程状态')).toBeInTheDocument();
   });
 });

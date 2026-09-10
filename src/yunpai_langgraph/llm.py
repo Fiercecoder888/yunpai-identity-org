@@ -103,8 +103,62 @@ class QwenRouter:
             "必须只输出一个 JSON 对象，不要 Markdown 或思维过程。route 必须是字面值 workflow、free、chat，绝对不能使用 production_planning、erp 或其他自定义路由名。"
             "workflow 仅用于完整 M0 到 M5 订单/采购/排程主链；free 用于一个或多个已注册工具或已注册高阶 Skill；chat 用于解释性对话。"
             "JSON 字段必须为 intent、route、tools、confidence、reason；route=chat 时必须额外返回 answer，用中文直接回答用户问题。可选 skills 字段用于选择高阶 Skill，只能从给定 skill catalog 中按 name 精确选择。"
+            "route=free 时还要返回 args 对象：{\"工具名\": {该工具的入参}}，参数只能来自用户原话，缺失就留空不要编造。"
+            "疑问句不是命令，但要先分清两类："
+            "①纯能力/可能性提问——没有点明具体对象（人名/账号/组织名），也没有让你现在就去做的，例如「能创建品保的账号吗？」「可以建班组吗？」「怎么给工人建号？」「能不能给员工建品保账号」→ route=chat、tools=[]，"
+            "answer 用中文直接回答（能/不能 + 一句怎么做，缺具体对象就顺口问一句给谁做），绝对不要选工具执行；"
+            "②礼貌请求——已经点明具体对象（人名/账号/组织名）并说了要做什么，只是用了「能不能/可以帮我/麻烦你」的语气，例如「能不能帮我把刘福的品保角色加上？」「可以帮我把张伟调到1班组吗？」「麻烦给王五开个工人号」→ 按执行请求处理：route=free，正常选工具并给出 args，和祈使句完全一样，绝对不要回 chat 敷衍。"
+            "礼貌请求的 args 示例：「能不能帮我把刘福的品保角色加上？」→ route=free, tools=[\"assign_identity_account\"], "
+            "args={\"assign_identity_account\":{\"user_id\":\"刘福\",\"role_codes\":[\"quality-assurance\"],\"role_mode\":\"add\"}}；"
+            "「可以帮我把张伟调到1班组吗？」→ route=free, tools=[\"assign_identity_account\"], "
+            "args={\"assign_identity_account\":{\"user_id\":\"张伟\",\"org_name\":\"1班组\"}}；"
+            "「麻烦给王五开个工人号」→ route=free, tools=[\"create_identity_user\"], "
+            "args={\"create_identity_user\":{\"display_name\":\"王五\",\"role_codes\":[\"worker\"]}}。"
+            "判断要点一句话：「能不能/可以吗」只影响语气，不影响是否执行；只要句子里点了具体的人/组织/账号并说了要做什么，就照做。"
+            "祈使句（「给张伟建号」「把张伟分到1班组」「创建1班组」「给王五安排小组长」）和上面第②类礼貌请求都要 route=free 并选工具。"
+            "凡是身份/账号类请求（建号、分配账号、查账号）都必须选对应工具并给出 args，不能只给工具名。示例："
+            "「给张伟建个工人账号 worker100，放在装配班组」→ route=free, tools=[\"create_identity_user\"], "
+            "args={\"create_identity_user\":{\"user_id\":\"worker100\",\"display_name\":\"张伟\",\"role_codes\":[\"worker\"],\"org_name\":\"装配班组\"}}；"
+            "「给张一申请一个工人账户 worker101」→ tools=[\"create_identity_user\"], "
+            "args={\"create_identity_user\":{\"user_id\":\"worker101\",\"display_name\":\"张一\",\"role_codes\":[\"worker\"]}}；"
+            "「给5个工人分配账号，他们分别是赵一 李二 王三 孙四 高五」→ tools=[\"create_identity_user\"], "
+            "args={\"create_identity_user\":{\"people\":[{\"display_name\":\"赵一\"},{\"display_name\":\"李二\"},{\"display_name\":\"王三\"},{\"display_name\":\"孙四\"},{\"display_name\":\"高五\"}],\"role_codes\":[\"worker\"]}}"
+            "（人数必须与用户说的一致，不要只建一个人）；"
+            "「把 worker100 调到装配班组，让他当组长」→ tools=[\"assign_identity_account\"], "
+            "args={\"assign_identity_account\":{\"user_id\":\"worker100\",\"org_name\":\"装配班组\",\"role_codes\":[\"team-leader\"]}}；"
+            "「给 worker100 加上品保角色」→ tools=[\"assign_identity_account\"], "
+            "args={\"assign_identity_account\":{\"user_id\":\"worker100\",\"role_codes\":[\"quality-assurance\"],\"role_mode\":\"add\"}}"
+            "（role_mode=add 表示在原角色上追加；改成/换成某个角色则用默认的 set）；"
+            "「现在有哪些账号 / 有哪些工人」→ tools=[\"list_identity_users\"], args={\"list_identity_users\":{}}。"
+            "建组织（公司/部门/班组）用 create_org_node，org_type 只能取 company、dept、team；父节点用 parent_name 或 parent_id。示例："
+            "「创建1班组」→ route=free, tools=[\"create_org_node\"], args={\"create_org_node\":{\"name\":\"1班组\",\"org_type\":\"team\"}}；"
+            "「新建生产部」→ tools=[\"create_org_node\"], args={\"create_org_node\":{\"name\":\"生产部\",\"org_type\":\"dept\"}}；"
+            "「在装配班组下面建个2班组」→ tools=[\"create_org_node\"], args={\"create_org_node\":{\"name\":\"2班组\",\"org_type\":\"team\",\"parent_name\":\"装配班组\"}}。"
+            "一句话里有多个动作时，tools 必须按执行顺序一次给全（不要只给最后一个），args 里每个工具各给一份。示例："
+            "「创建1班组 小组长是王五 把张伟分到1班组里面」→ tools=[\"create_org_node\",\"create_identity_user\",\"assign_identity_account\"], "
+            "args={\"create_org_node\":{\"name\":\"1班组\",\"org_type\":\"team\"},\"create_identity_user\":{\"display_name\":\"王五\",\"role_codes\":[\"team-leader\"],\"org_name\":\"1班组\"},"
+            "\"assign_identity_account\":{\"user_id\":\"张伟\",\"org_name\":\"1班组\"}}"
+            "（先建组织、再建账号、最后把已有的人挂进组织；assign_identity_account 没有账号 id 时就把姓名写进 user_id（如 user_id 写「张伟」，也可以额外带上 display_name），工具会按账号或姓名匹配，匹配不到会给出人话提示，绝对不要瞎编账号 id；"
+            "某个参数用户没给就留空，系统会追问）。"
+            "role_codes 必须用角色 code，不能写中文：worker、team-leader、quality-assurance、planner、engineer、data-steward、release-manager、org-admin、factory-director；"
+            "用户说中文角色也要翻译，例如「品保」→quality-assurance、「组长/小组长」→team-leader、「计划员」→planner、「厂长」→factory-director。"
+            "assign_identity_account 支持按名称挂组织（org_name）和 role_mode（set 覆盖 / add 追加）。"
+            "区分规则：给了姓名名单或人数＝建号（create_identity_user，多人用 people）；只对已有账号要求换组织/加角色＝调岗（assign_identity_account）；只问现状＝查号（list_identity_users）；"
+            "建班组/建部门/建公司＝create_org_node；建组织同时还要建人/挂人＝按上面复合请求一次给全多个工具。"
+            "同一个工具在一句话里只能用一次（tools 里不能出现重复的工具名，系统按工具名传参，重复会互相覆盖）。"
+            "如果用户一句话要求用同一个工具做两次（例如「新建品质部和品质二部」「建两个班组」「把张伟和李娜都调到1班组」），"
+            "**不要重复列该工具，也不要只执行其中第一个动作**：route=chat，用中文提醒用户分两步说，并给出示例，"
+            "例如「一次只能建一个组织，请先「新建品质部」，再补一句「在品质部下建个出货检验组」」。"
+            "例外：一次给多个人的账号用 create_identity_user 的 people 数组，一次调用即可，不需要拆。"
+            "如果用户没说清关键信息（例如只说「帮我建几个工人账号」），仍然要选出最可能的工具、把已知参数放进 args、缺的留空（不要编造），系统会据此向用户追问；"
+            "只有当请求与账号管理无关、用户是在做纯能力/可能性提问（见上面第①类疑问句规则）、或完全无法判断该用哪个工具时，才 route=chat，answer 用中文一次把缺的信息问清楚。"
             "tools 只能从给定 catalog 选择。skill 名称必须与 catalog 中的 name 完全一致，不能自造或拼接版本号。"
             "上传订单文件时优先 workflow 或 ingest_document；上传基础资料/业务资料（BOM、SOP、设备、工位、人员、库存、供应商、财务、目录批量）时必须在 skills 中给出 business-data-identification。"
+            "route=chat 时 answer 必须是**人能直接看懂的中文**：绝对不要出现工具名、参数名、字段名、JSON、角色 code（写「品保」「组长」「工人」这种中文角色名），"
+            "也不要提「工具」「接口」「系统」这类内部说法，就像同事之间说话一样。"
+            "请求里的 caller 是**当前登录人**的信息（user_id/display_name/role_names/permissions/org_path）。"
+            "用户问「我是谁 / 我的角色是什么 / 我有什么权限 / 我在哪个部门」时，直接用 caller 回答（例如「你是厂长（赵厂长），角色：厂长、组织管理员」），"
+            "route=chat、tools=[]，**不要让用户提供账号、也不要调用工具查自己**；caller 为空（无身份）时才说明需要登录。"
         )
 
     @staticmethod
@@ -115,6 +169,7 @@ class QwenRouter:
         skill_names = [str(skill) for skill in (request.get("skills") or [])] if isinstance(request.get("skills"), list) else []
         return json.dumps({
             "message": message,
+            "caller": request.get("caller") or None,
             "uploaded_files": file_names,
             "catalog": catalog,
             "skills": skill_catalog or [{"name": "business-data-identification", "description": "识别业务资料并写入可审核候选库；不直接发布 M0 canonical 事实"}],
@@ -165,6 +220,7 @@ class QwenRouter:
             "confidence": confidence,
             "reason": str(value.get("reason") or ""),
             "answer": str(value.get("answer") or ""),
+            "args": value.get("args") if isinstance(value.get("args"), dict) else {},
         }
 
     async def map_to_canonical(self, sample: dict[str, Any]) -> dict[str, Any]:
@@ -305,6 +361,69 @@ class QwenRouter:
                            self.config.model, elapsed, f"{type(exc).__name__}: {exc}")
             return {"ok": False, "status": "error", "error": f"{type(exc).__name__}: {exc}",
                     "model": {**metadata, "status": "error", "latency_ms": elapsed}}
+
+    async def complete_json(self, system: str, user: str, *, schema_hint: dict | None = None) -> dict | None:
+        """让模型输出一个 JSON 对象。**永不抛异常**：失败一律返回 None。
+
+        未启用 / 未配置 api_key / 网络或 HTTP 失败 / 响应非 JSON → None。
+        复用本文件既有 httpx 调用模式（``/chat/completions``、``Bearer
+        self.config.api_key``、``timeout=self.config.timeout_s``、
+        ``trust_env=False``）；解析失败时尝试从 ```json 代码块或首个 ``{...}``
+        里抠出 JSON 对象。调用方（如 slot_filling.fill_tool_args）据此走降级分支。
+        """
+        started = time.perf_counter()
+        try:
+            if not self.config.enabled or not self.config.api_key:
+                return None
+            import httpx
+
+            prompt = str(user)
+            if schema_hint:
+                prompt += "\n输出结构提示（仅供参考，不要原样回显）：" + json.dumps(schema_hint, ensure_ascii=False)
+            headers = {"Authorization": f"Bearer {self.config.api_key}", "Content-Type": "application/json"}
+            body = {
+                "model": self.config.model,
+                "messages": [
+                    {"role": "system", "content": str(system)},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0,
+                "max_tokens": 2048,
+                "stream": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "response_format": {"type": "json_object"},
+            }
+            # trust_env=False prevents an HTTP proxy from intercepting the private model address.
+            async with httpx.AsyncClient(timeout=self.config.timeout_s, trust_env=False) as client:
+                response = await client.post(f"{self.config.base_url}/chat/completions", headers=headers, json=body)
+                response.raise_for_status()
+                payload = response.json()
+            value = self._json_object(self._content(payload))
+            elapsed = round((time.perf_counter() - started) * 1000, 1)
+            logger.info("qwen.complete_json status=ok model=%s latency_ms=%s keys=%s",
+                        self.config.model, elapsed, sorted(value.keys()))
+            return value
+        except Exception as exc:
+            elapsed = round((time.perf_counter() - started) * 1000, 1)
+            logger.warning("qwen.complete_json status=error model=%s latency_ms=%s error=%s",
+                           self.config.model, elapsed, f"{type(exc).__name__}: {exc}")
+            return None
+
+    @staticmethod
+    def _json_object(content: str) -> dict[str, Any]:
+        """从模型文本里抠出一个 JSON 对象；抠不出就抛错（由调用方降级）。"""
+        cleaned = content.strip()
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+        try:
+            value = json.loads(cleaned)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+            if not match:
+                raise ValueError("Qwen response is not valid JSON")
+            value = json.loads(match.group(0))
+        if not isinstance(value, dict):
+            raise ValueError("Qwen response must be a JSON object")
+        return value
 
     @staticmethod
     def _canonical_system_prompt() -> str:

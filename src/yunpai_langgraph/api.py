@@ -207,7 +207,8 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "x-tenant-id": x_tenant_id or "",
         })
         try:
-            state = await graph.run(new_state(request_payload, tenant_id=tenant_id,
+            state = await graph.run(new_state(_with_caller(request, tenant_id, request_payload),
+                                              tenant_id=tenant_id,
                                               principal=_run_principal(request, tenant_id=tenant_id)))
             return graph._public_state(state)
         except (KeyError, ValueError) as exc:
@@ -235,7 +236,7 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "x-yunpai-tenant-id": x_yunpai_tenant_id or "",
             "x-tenant-id": x_tenant_id or "",
         })
-        state = new_state(request_payload, tenant_id=tenant_id,
+        state = new_state(_with_caller(request, tenant_id, request_payload), tenant_id=tenant_id,
                           principal=_run_principal(request, tenant_id=tenant_id))
         graph.repository.save(state)
         return ndjson_response(graph.stream(state))
@@ -371,14 +372,71 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             raise HTTPException(400, str(exc)) from exc
 
     @app.get("/runs")
-    async def list_runs(tenant_id: str | None = None, limit: int = 100):
-        return {"runs": [graph._public_state(state) for state in graph.repository.list(tenant_id=tenant_id, limit=limit)]}
+    async def list_runs(tenant_id: str | None = None, limit: int = 100, request: Request = None):
+        """运行列表（多用户隔离）：有身份时只返回本人 run，租户管理员可见本租户全部。
+
+        无有效身份 = legacy/本地行为，返回全部（见 ``_run_access_scope`` 说明）。
+        """
+        scope = _run_access_scope(request, tenant_id=tenant_id) if request is not None else None
+        if scope is not None:
+            # 客户端传的 tenant_id 不能放大范围：有身份时一律以调用者租户为准
+            # （前端目前硬编码 tenant_id=default，忽略它才不会让别的租户用户看不到自己的会话）。
+            tenant_id = scope["tenant_id"]
+            # 归属过滤在仓库层之后做，故按租户多取（仓库上限 1000）再截断到 limit，
+            # 避免别人的 run 把本人的挤掉。
+            states = graph.repository.list(tenant_id=tenant_id, limit=1000)
+            visible = [state for state in states if _run_visible(state, scope)][:max(1, limit)]
+        else:
+            visible = graph.repository.list(tenant_id=tenant_id, limit=limit)
+        return {"runs": [graph._public_state(state) for state in visible]}
 
     @app.get("/runs/{run_id}")
-    async def get_run(run_id: str):
+    async def get_run(run_id: str, request: Request = None):
         state = graph.repository.get(run_id)
         if state is None: raise HTTPException(404, "run not found")
+        scope = _run_access_scope(
+            request, tenant_id=str(state.get("tenant_id") or "")) if request is not None else None
+        if not _run_visible(state, scope):
+            # 非本人且非管理员 → 404（不用 403，避免泄露该 run 是否存在）
+            raise HTTPException(404, "run not found")
         return graph._public_state(state)
+
+    @app.delete("/runs/{run_id}")
+    async def delete_run(run_id: str, tenant_id: str | None = None, request: Request = None):
+        """删除运行（订单删除）：归属校验同 GET，非本人且非管理员 → 404。"""
+        state = graph.repository.get(run_id)
+        if state is None:
+            raise HTTPException(404, "run not found")
+        scope = _run_access_scope(
+            request, tenant_id=tenant_id or str(state.get("tenant_id") or "")) if request is not None else None
+        if not _run_visible(state, scope):
+            raise HTTPException(404, "run not found")
+        if tenant_id and tenant_id != str(state.get("tenant_id") or "default"):
+            raise HTTPException(409, "cross-tenant delete rejected")
+        deleted = graph.repository.delete(run_id)
+        return {"run_id": run_id, "deleted": bool(deleted)}
+
+    @app.post("/runs/batch-delete")
+    async def batch_delete_runs(body: dict[str, Any], tenant_id: str | None = None, request: Request = None):
+        """批量删除运行：非本人且非管理员 → 跳过并计数（不报错、不泄露归属）。"""
+        run_ids = body.get("run_ids") if isinstance(body, dict) else None
+        if not isinstance(run_ids, list):
+            raise HTTPException(422, "run_ids must be an array")
+        scope = _run_access_scope(request, tenant_id=tenant_id) if request is not None else None
+        deleted_ids: list[str] = []
+        for run_id in run_ids:
+            if not isinstance(run_id, str) or not run_id.strip():
+                continue
+            state = graph.repository.get(run_id)
+            if state is None:
+                continue
+            if not _run_visible(state, scope):
+                continue
+            if tenant_id and tenant_id != str(state.get("tenant_id") or "default"):
+                continue
+            if graph.repository.delete(run_id):
+                deleted_ids.append(run_id)
+        return {"deleted": deleted_ids, "count": len(deleted_ids)}
 
     def _request_principal(request) -> tuple[dict[str, Any], bool]:
         return _principal_from_headers({
@@ -388,6 +446,46 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "x-tenant-id": request.headers.get("x-tenant-id", "")
             or request.headers.get("x-yunpai-tenant-id", ""),
         }, cookies=dict(request.cookies))
+
+    def _caller_profile(request, *, tenant_id: str) -> dict[str, Any] | None:
+        """当前登录人的身份画像（注入 run 请求，供对话直接回答「我的角色是什么」）。
+
+        无有效会话 → None（不注入），行为与之前完全一致。
+        """
+        try:
+            principal, trusted = _request_principal(request)
+        except HTTPException:
+            return None
+        actor = str(principal.get("actor") or "")
+        if not trusted or not actor:
+            return None
+        tenant = str(principal.get("tenant_id") or tenant_id or "")
+        try:
+            resolved = identity_store.resolve(tenant_id=tenant, user_id=actor) or {}
+        except Exception:  # 身份库异常不应阻断对话
+            resolved = {}
+        user = identity_store.get_user(tenant_id=tenant, user_id=actor) or {}
+        # org_path 只给 org_id（如 ["company"]），翻成名字更好答「我在哪个部门」
+        org_ids = [str(item) for item in (resolved.get("org_path") or [])]
+        try:
+            names = {str(node.get("org_id")): str(node.get("name") or "")
+                     for node in identity_store.org_tree(tenant_id=tenant)}
+        except Exception:
+            names = {}
+        org_path_names = [names.get(org_id) or org_id for org_id in org_ids]
+        return {
+            "user_id": actor,
+            "display_name": user.get("display_name") or actor,
+            "roles": list(resolved.get("roles") or principal.get("roles") or []),
+            "role_names": list(resolved.get("role_names") or []),
+            "org_path": org_path_names,
+            "org_path_ids": org_ids,
+            "permissions": list(resolved.get("permissions") or []),
+        }
+
+    def _with_caller(request, tenant_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        caller = _caller_profile(request, tenant_id=tenant_id)
+        return {**payload, "caller": caller} if caller else payload
 
     def _run_principal(request, *, tenant_id: str) -> dict[str, Any]:
         """运行入口身份（工具级权限闸用）：会话/受信头 → 角色+生效权限。
@@ -416,6 +514,58 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
             "tenant_id": tenant_id,
             "source": principal.get("source"),
         }
+
+    def _run_access_scope(request, *, tenant_id: str | None = None) -> dict[str, Any] | None:
+        """``/runs*`` 调用者数据范围（多用户隔离，2026-09-09）。
+
+        返回 ``None`` = **无有效身份**：按 legacy/本地行为放行（列表返回全部 run）。
+        这与本文件既有约定一致（``YUNPAI_REQUIRE_TRUSTED_PRINCIPAL`` 默认 0，本地
+        联调 / 测试 / 内网直连不带 Cookie 与受信头都要能跑）。**生产必须设
+        ``YUNPAI_REQUIRE_TRUSTED_PRINCIPAL=1``**（或在网关强制注入受信头），否则
+        这个放行口依然存在。
+
+        返回 dict 时按调用者归属过滤：
+
+        - ``actor`` / ``tenant_id``：来自会话 Cookie 或受信头（受信头的
+          ``tenant_id`` 为空时退回入参 tenant，再退回 ``YUNPAI_DEFAULT_TENANT``）；
+        - ``is_admin``：生效权限含租户级管理权限 ``identity.admin``（厂长注册时
+          绑定的 ``org-admin`` 角色，或 legacy 受信头 ``admin``）→ 可见本租户全部
+          run（「厂长能看全厂」）；
+        - 否则只可见 ``state.principal.actor == actor`` 的 run（本人聊天记录）。
+        """
+        try:
+            principal, trusted = _request_principal(request)
+        except HTTPException:
+            return None
+        actor = str(principal.get("actor") or "").strip()
+        if not trusted or not actor:
+            return None
+        tenant = str(principal.get("tenant_id") or "").strip() or str(tenant_id or "").strip()
+        if not tenant:
+            tenant = os.getenv("YUNPAI_DEFAULT_TENANT", "").strip() or "default"
+        effective = effective_permissions(
+            identity_store, tenant_id=tenant, user_id=actor,
+            legacy_roles=[str(role) for role in (principal.get("roles") or [])],
+        )
+        permissions = [str(item) for item in effective["permissions"]]
+        return {
+            "actor": actor,
+            "tenant_id": tenant,
+            "is_admin": "identity.admin" in permissions,
+            "permissions": permissions,
+        }
+
+    @staticmethod
+    def _run_visible(state: dict[str, Any], scope: dict[str, Any] | None) -> bool:
+        """run 是否对调用者可见：``scope is None``（无身份）= legacy 放行全部。"""
+        if scope is None:
+            return True
+        if str(state.get("tenant_id") or "default") != scope["tenant_id"]:
+            return False
+        if scope["is_admin"]:
+            return True
+        principal = state.get("principal") if isinstance(state.get("principal"), dict) else {}
+        return str(principal.get("actor") or "") == scope["actor"]
 
     def _identity_gate_check(state: dict[str, Any], *, actor: str, roles: list[str],
                              principal: dict[str, Any], trusted: bool) -> None:
@@ -734,7 +884,13 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
 
     @app.post("/api/auth/change-password")
     async def auth_change_password(body: dict[str, Any], request: Request):
-        """改密（首登强制改密与主动改密同一入口）。"""
+        """改密（首登强制改密与主动改密同一入口）。
+
+        首登强制改密（库中 ``must_change_password == 1``）不要求当前密码：用户手上
+        只有一次性初始密码、且可能已经看不到了。普通主动改密仍必须校验当前密码
+        （缺 → 422 OLD_PASSWORD_REQUIRED，错 → 403 INVALID_CREDENTIALS）。
+        是否需要当前密码以**库中该用户**为准，不信任请求体。
+        """
         principal, trusted = _request_principal(request)
         actor = str(principal.get("actor") or "")
         if not trusted or not actor:
@@ -743,9 +899,13 @@ def create_app(*, repository: RunRepository | None = None, registry: ToolRegistr
         user = identity_store.get_user(tenant_id=tenant, user_id=actor)
         if not user:
             raise HTTPException(401, {"code": "AUTHENTICATION_REQUIRED", "message": "账号不存在"})
-        if not verify_password(str(body.get("old_password") or ""),
-                               str(user.get("password_hash") or "")):
-            raise HTTPException(403, {"code": "INVALID_CREDENTIALS", "message": "原密码不正确"})
+        if not bool(user.get("must_change_password")):
+            old_password = str(body.get("old_password") or "")
+            if not old_password:
+                raise HTTPException(422, {"code": "OLD_PASSWORD_REQUIRED",
+                                          "message": "请提供当前密码"})
+            if not verify_password(old_password, str(user.get("password_hash") or "")):
+                raise HTTPException(403, {"code": "INVALID_CREDENTIALS", "message": "原密码不正确"})
         new_password = str(body.get("new_password") or "")
         if len(new_password) < 8:
             raise HTTPException(422, {"code": "WEAK_PASSWORD", "message": "新密码至少 8 位"})

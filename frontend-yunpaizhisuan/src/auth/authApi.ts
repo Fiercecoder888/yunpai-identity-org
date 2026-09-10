@@ -111,9 +111,14 @@ export const loginUser = (userId: string, password: string) =>
 
 export const logoutUser = () => jsonPost<{ ok: boolean }>('/logout', {});
 
-export const changePassword = (oldPassword: string, newPassword: string) =>
+/**
+ * 改密。`oldPassword` 省略时请求体**不含** `old_password`——用于首登强制改密
+ * （用户只有一次性初始密码，后端按库中 `must_change_password` 放行）；
+ * 主动改密必须传当前密码，否则后端返回 422 `OLD_PASSWORD_REQUIRED`。
+ */
+export const changePassword = (oldPassword: string | undefined, newPassword: string) =>
   jsonPost<{ ok: boolean }>('/change-password', {
-    old_password: oldPassword,
+    ...(oldPassword ? { old_password: oldPassword } : {}),
     new_password: newPassword,
   });
 

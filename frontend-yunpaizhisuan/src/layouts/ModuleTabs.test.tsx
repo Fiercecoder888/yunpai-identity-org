@@ -4,19 +4,17 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { routeMeta } from '../app/router';
 import { AppProviders } from '../app/providers';
 import { WorkbenchLayout } from './WorkbenchLayout';
-import { DashboardPage } from '../pages/DashboardPage';
-import { TaskBoardPage } from '../pages/TaskBoardPage';
 import { useTabsStore } from '../store/useTabsStore';
 
-const renderRouter = (initialEntries = ['/dashboard']) => {
+const renderRouter = (initialEntries = ['/org']) => {
   const router = createMemoryRouter(
     [
       {
         path: '/',
         element: <WorkbenchLayout />,
         children: [
-          { path: 'dashboard', element: <DashboardPage /> },
-          { path: 'tasks', element: <TaskBoardPage /> },
+          { path: 'org', element: <div>org-page</div> },
+          { path: 'accounts', element: <div>accounts-page</div> },
         ],
       },
     ],
@@ -38,17 +36,22 @@ describe('ModuleTabs', () => {
     useTabsStore.getState().resetTabs();
   });
 
-  it('keeps Dashboard as the fixed tab', async () => {
-    renderRouter(['/dashboard']);
+  it('opens a tab for the current route', async () => {
+    renderRouter(['/org']);
 
-    expect(await screen.findByRole('tab', { name: routeMeta['/dashboard'].title })).toBeInTheDocument();
-    expect(screen.queryByLabelText('remove')).not.toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: routeMeta['/org'].title })).toBeInTheDocument();
+    await waitFor(() => expect(useTabsStore.getState().tabs.some((tab) => tab.path === '/org')).toBe(true));
   });
 
-  it('opens a tab for the current route', async () => {
-    renderRouter(['/tasks']);
+  it('keeps a tab for every visited route', async () => {
+    useTabsStore.getState().openTab({ path: '/accounts', title: routeMeta['/accounts'].title, closable: true });
 
-    expect(await screen.findByRole('tab', { name: '任务看板' })).toBeInTheDocument();
-    await waitFor(() => expect(useTabsStore.getState().tabs.some((tab) => tab.path === '/tasks')).toBe(true));
+    renderRouter(['/org']);
+
+    expect(await screen.findByRole('tab', { name: routeMeta['/org'].title })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: routeMeta['/accounts'].title })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(useTabsStore.getState().tabs.map((tab) => tab.path)).toEqual(['/accounts', '/org']),
+    );
   });
 });

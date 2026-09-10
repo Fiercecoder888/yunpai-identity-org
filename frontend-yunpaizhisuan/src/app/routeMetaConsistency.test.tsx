@@ -1,10 +1,10 @@
 import { screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { AuditLogPage } from '../pages/AuditLogPage';
-import { M5FlowDashboardPage } from '../pages/M5FlowDashboardPage';
-import { PurchaseWarningsPage } from '../pages/PurchaseWarningsPage';
-import { TaskBoardPage } from '../pages/TaskBoardPage';
+import { AccountsPage } from '../pages/AccountsPage';
+import { LeaderWorkbenchPage } from '../pages/LeaderWorkbenchPage';
+import { OrgStructurePage } from '../pages/OrgStructurePage';
+import { RolesPermissionsPage } from '../pages/RolesPermissionsPage';
 import { renderWithApp } from '../tests/testUtils';
 import { sidebarGroups } from '../features/roles/sidebarConfig';
 import { routeMeta, type AppPath } from './router';
@@ -27,10 +27,10 @@ describe('routeMeta consistency', () => {
   });
 
   it.each([
-    ['/modules/purchase-warnings', <PurchaseWarningsPage key="purchase-warnings" />],
-    ['/modules/m5-flow', <M5FlowDashboardPage key="m5-flow" />],
-    ['/tasks', <TaskBoardPage key="tasks" />],
-    ['/audit', <AuditLogPage key="audit" />],
+    ['/leader', <LeaderWorkbenchPage key="leader" />],
+    ['/org', <OrgStructurePage key="org" />],
+    ['/accounts', <AccountsPage key="accounts" />],
+    ['/roles', <RolesPermissionsPage key="roles" />],
   ] as Array<[AppPath, React.ReactElement]>)(
     'renders an h2 page heading on %s matching routeMeta navTitle',
     async (path, node) => {

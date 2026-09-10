@@ -1,6 +1,7 @@
 import { toApiUrl } from './apiGateway';
 import { z } from 'zod';
 import { authRuntime } from '../auth/authRuntime';
+import { chatStorageKey } from './chatStorageScope';
 import { requestJson, requestText } from './httpClient';
 import { uuidV4 } from '../utils/uuid';
 
@@ -275,12 +276,38 @@ async function* streamLocalRun(path: string, body: Record<string, unknown>, opti
   if (!response.body) throw new ChatStreamParseError('浏览器不支持流式响应');
   const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let runId = ''; let messageId = '';
   const requestedConversationId = typeof (body.request as Record<string, unknown> | undefined)?.conversation_id === 'string' ? String((body.request as Record<string, unknown>).conversation_id) : undefined;
+  /** 工具步骤是否失败：后端可能在 step.status / step.error / output_summary.status 任一处置为失败。 */
+  const stepFailed = (step: Record<string, unknown>, outputSummary: unknown): boolean =>
+    step.status === 'failed' || Boolean(step.error) || (isObject(outputSummary) && outputSummary.status === 'failed');
+  /**
+   * 失败原因（中文可读优先）：step.error.message → output_summary.message/code。
+   * 后端 `output_summary` 可能是字符串（直接就是给人看的那句话），此时用它当原因。
+   */
+  const stepFailureReason = (step: Record<string, unknown>, outputSummary: unknown): string | undefined => {
+    const stepError = step.error;
+    if (typeof stepError === 'string' && stepError.trim()) return stepError;
+    if (isObject(stepError) && typeof stepError.message === 'string' && stepError.message.trim()) return stepError.message;
+    if (typeof outputSummary === 'string' && outputSummary.trim()) return outputSummary;
+    if (isObject(outputSummary)) {
+      if (typeof outputSummary.message === 'string' && outputSummary.message.trim()) return outputSummary.message;
+      if (typeof outputSummary.code === 'string' && outputSummary.code.trim()) return outputSummary.code;
+    }
+    return undefined;
+  };
   const map = (raw: LocalRunEvent): ChatStreamEvent | null => {
     runId = raw.run_id || runId; messageId ||= localMessageId(runId || 'pending');
     if (raw.type === 'run_start') return { type: 'message_start', message_id: messageId, session_id: raw.task_id || runId, conversation_id: requestedConversationId || runId, created_at: raw.at || new Date().toISOString(), run_id: runId };
     if (raw.type === 'assistant_delta') return { type: 'delta', message_id: messageId, content: raw.content || '' };
     if (raw.type === 'step_start') { const step = raw.step || {}; return { type: 'tool_start', message_id: messageId, step_id: String(step.id || step.tool || `step-${Date.now()}`), tool: String(step.tool || 'unknown'), label: String(step.label || step.module || step.tool || '执行步骤') }; }
-    if (raw.type === 'step_result') { const step = raw.step || {}; const summary = raw.output_summary ?? step.output_summary ?? {}; return { type: 'tool_result', message_id: messageId, step_id: String(step.id || step.tool || ''), tool: String(step.tool || 'unknown'), status: 'ok', duration_ms: 0, summary: typeof summary === 'string' ? summary : JSON.stringify(summary), result: summary }; }
+    if (raw.type === 'step_result') {
+      const step = raw.step || {};
+      const summary = raw.output_summary ?? step.output_summary ?? {};
+      // 被拒/失败的步骤（如 TOOL_FORBIDDEN）必须映射成 tool_error，否则聊天里工具卡片会假显示「完成」。
+      if (stepFailed(step, raw.output_summary)) {
+        return { type: 'tool_error', message_id: messageId, step_id: String(step.id || step.tool || 'step'), tool: String(step.tool || 'unknown'), status: 'failed', duration_ms: 0, error: stepFailureReason(step, raw.output_summary) ?? '执行失败' };
+      }
+      return { type: 'tool_result', message_id: messageId, step_id: String(step.id || step.tool || ''), tool: String(step.tool || 'unknown'), status: 'ok', duration_ms: 0, summary: typeof summary === 'string' ? summary : JSON.stringify(summary), result: summary };
+    }
     if (raw.type === 'gate_opened' && raw.gate) return { type: 'gate_opened', message_id: messageId, run_id: runId, task_id: raw.task_id, gate: raw.gate };
     if (raw.type === 'run_error') return { type: 'error', message_id: messageId, code: raw.code || 'RUN_ERROR', message: raw.message || '本地运行失败', recoverable: true };
     if (raw.type === 'run_done') { const state = raw.state || {}; return { type: 'message_done', message_id: messageId, finish_reason: state.status === 'failed' ? 'error' : 'stop' }; }
@@ -405,13 +432,14 @@ export type ChatHistoryMessage = {
     taskId?: string;
     runId?: string;
   }>;
-  run?: { status: string; finish_reason?: string; error?: string; tool_steps: Array<{ step_id: string; tool: string; status: string; safe_summary?: string; duration_ms?: number; safe_result?: string | null; result_truncated?: boolean }> } | null;
+  run?: { status: string; finish_reason?: string; error?: string; tool_steps: Array<{ step_id: string; tool: string; status: string; safe_summary?: string; duration_ms?: number; safe_result?: string | null; result_truncated?: boolean; /** 后端步骤失败详情：TOOL_FORBIDDEN 等为 `{code,message}`，也可能直接是字符串。 */ error?: { code?: string; message?: string } | string | null }> } | null;
 };
 
 export type ChatPage<T> = { items: T[]; next_cursor?: string | null };
 const LOCAL_CONVERSATIONS_KEY = 'yunpai.local-agent-conversations';
-const readLocalConversations = (): ChatConversation[] => { try { const value = JSON.parse(globalThis.localStorage?.getItem(LOCAL_CONVERSATIONS_KEY) || '[]'); return Array.isArray(value) ? value as ChatConversation[] : []; } catch { return []; } };
-const writeLocalConversations = (items: ChatConversation[]) => globalThis.localStorage?.setItem(LOCAL_CONVERSATIONS_KEY, JSON.stringify(items));
+/** 本地会话列表按当前登录用户（租户+用户）命名空间存放；无用户时回退全局键。 */
+const readLocalConversations = (): ChatConversation[] => { try { const value = JSON.parse(globalThis.localStorage?.getItem(chatStorageKey(LOCAL_CONVERSATIONS_KEY)) || '[]'); return Array.isArray(value) ? value as ChatConversation[] : []; } catch { return []; } };
+const writeLocalConversations = (items: ChatConversation[]) => globalThis.localStorage?.setItem(chatStorageKey(LOCAL_CONVERSATIONS_KEY), JSON.stringify(items));
 const localConversation = (title = '新对话'): ChatConversation => { const now = new Date().toISOString(); return { id: `local-${uuidV4()}`, title, title_source: 'auto', status: 'active', created_at: now, updated_at: now, last_message_at: now, version: 1 }; };
 
 /** Keep local conversation labels useful when the local graph has no title-generation endpoint. */

@@ -10,8 +10,11 @@ const renderPalette = (initialEntries: string[] = ['/']) =>
     <MemoryRouter initialEntries={initialEntries}>
       <Routes>
         <Route path="/" element={<div>home-page</div>} />
-        <Route path="/dashboard" element={<div>dashboard-page</div>} />
-        <Route path="/tasks" element={<div>tasks-page</div>} />
+        <Route path="/worker" element={<div>worker-page</div>} />
+        <Route path="/leader" element={<div>leader-page</div>} />
+        <Route path="/org" element={<div>org-page</div>} />
+        <Route path="/accounts" element={<div>accounts-page</div>} />
+        <Route path="/roles" element={<div>roles-page</div>} />
         <Route path="/modules/purchase-warnings" element={<div>purchase-warnings-page</div>} />
       </Routes>
       <CommandPalette />
@@ -27,19 +30,19 @@ describe('CommandPalette', () => {
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
 
     expect(screen.getByTestId('command-palette-input')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /任务看板/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /排程甘特图/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /法务终审/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /工人工作台/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /组织架构/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /角色与权限/ })).toBeInTheDocument();
   });
 
   it('filters commands by the typed query', () => {
     renderPalette();
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
-    fireEvent.change(screen.getByTestId('command-palette-input'), { target: { value: '排程' } });
+    fireEvent.change(screen.getByTestId('command-palette-input'), { target: { value: '组织' } });
 
-    expect(screen.getByRole('button', { name: /排程甘特图/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /任务看板/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /组织架构/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /工人工作台/ })).not.toBeInTheDocument();
   });
 
   it('shows an empty hint when no command matches', () => {
@@ -55,9 +58,9 @@ describe('CommandPalette', () => {
     renderPalette();
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
-    fireEvent.click(screen.getByRole('button', { name: /任务看板/ }));
+    fireEvent.click(screen.getByRole('button', { name: /工人工作台/ }));
 
-    expect(screen.getByText('tasks-page')).toBeInTheDocument();
+    expect(screen.getByText('worker-page')).toBeInTheDocument();
   });
 
   it('aggregates entity results and switches tabs', async () => {
@@ -79,25 +82,25 @@ describe('CommandPalette', () => {
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
     const input = screen.getByTestId('command-palette-input');
-    fireEvent.change(input, { target: { value: '任务' } });
+    fireEvent.change(input, { target: { value: '工人' } });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /任务看板/ })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /工人工作台/ })).toBeInTheDocument());
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(screen.getByText('tasks-page')).toBeInTheDocument();
+    expect(screen.getByText('worker-page')).toBeInTheDocument();
   });
 
   it('remembers recent selections in localStorage and shows them on reopen', async () => {
     renderPalette();
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
-    fireEvent.change(screen.getByTestId('command-palette-input'), { target: { value: '任务' } });
-    fireEvent.click(await screen.findByRole('button', { name: /任务看板/ }));
+    fireEvent.change(screen.getByTestId('command-palette-input'), { target: { value: '工人' } });
+    fireEvent.click(await screen.findByRole('button', { name: /工人工作台/ }));
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
     expect(await screen.findByText('最近使用')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /任务看板/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /工人工作台/ })).toBeInTheDocument();
   });
 
   it('opens an entity result via keyboard from the entity tab', async () => {

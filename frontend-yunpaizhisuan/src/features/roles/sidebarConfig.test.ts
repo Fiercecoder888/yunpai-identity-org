@@ -13,45 +13,33 @@ describe('sidebarConfig', () => {
     expect(filterSidebarGroups(undefined).map((group) => group.key)).toEqual(sidebarGroups.map((group) => group.key));
   });
 
-  it('keeps the full navigation for the factory director role with all permissions', () => {
+  it('keeps the surviving navigation for the factory director role with all permissions', () => {
     const groups = filterSidebarGroups(
       role('factory-director', [
-        'dashboard:read',
         'leader:read',
         'leader:write',
         'worker:read',
         'worker:report',
-        'm1:read',
-        'm4:read',
-        'm4:operate',
-        'schedule:read',
-        'schedule:write',
-        'qc:read',
-        'quality:supervise',
-        'audit:read',
         'chat:read',
         'chat:write',
         'chat:delete',
+        'org:read',
+        'org:write',
+        'account:read',
+        'account:write',
+        'role:manage',
       ]),
     );
 
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
-    expect(keys).toContain('/dashboard');
-    expect(keys).toContain('/quality');
-    expect(keys).toContain('/modules/m0-review');
-    expect(keys).toContain('/modules/purchase-warnings');
-    expect(keys).toContain('/modules/legal-final-review');
-    expect(keys).toContain('/modules/qc');
-    expect(keys).toContain('/modules/data-construction');
-    expect(keys).toContain('/audit');
-    expect(keys).toContain('/modules/trace-workbench');
+    expect(keys).toEqual(['/leader', '/worker', '/org', '/accounts', '/roles']);
   });
 
-  it('keeps the supervision view as a secondary entry for quality assurance', () => {
+  it('leaves no sidebar entry for the quality assurance role', () => {
     const groups = filterSidebarGroups(role('quality-assurance', ['quality:supervise', 'qc:read', 'chat:read', 'chat:write']));
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
 
-    expect(keys).toEqual(['/quality']);
+    expect(keys).toEqual([]);
   });
 
   it('narrows the sidebar for the worker role to workbench only', () => {
@@ -67,15 +55,9 @@ describe('sidebarConfig', () => {
     );
     const keys = groups.flatMap((group) => group.items.map((item) => item.key));
 
-    expect(keys).toContain('/leader');
-    expect(keys).toContain('/worker');
-    expect(keys).toContain('/modules/schedule');
-    expect(keys).toContain('/modules/m5-flow');
-    expect(keys).toContain('/audit');
-    expect(keys).not.toContain('/dashboard');
-    expect(keys).not.toContain('/modules/qc');
-    expect(keys).not.toContain('/modules/data-construction');
-    expect(keys).not.toContain('/modules/m0-wiki');
-    expect(keys).not.toContain('/modules/trace-workbench');
+    expect(keys).toEqual(['/leader', '/worker']);
+    expect(keys).not.toContain('/org');
+    expect(keys).not.toContain('/accounts');
+    expect(keys).not.toContain('/roles');
   });
 });

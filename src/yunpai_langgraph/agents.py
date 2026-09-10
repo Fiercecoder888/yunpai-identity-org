@@ -25,6 +25,173 @@ INTENT_TO_TOOL = (
 
 BUSINESS_DATA_SKILL = "business-data-identification"
 
+#: 对话建账号/分配账号的中文参数抽取（模型不可用或模型只给工具名时的兜底）。
+_ACCOUNT_TOKEN_RE = re.compile(
+    r"(?:账号|帐号|账户|工号|用户名|user[_ ]?id)\s*(?:叫|是|为|:|：)?\s*([A-Za-z0-9_.@-]{3,64})")
+_ASCII_TOKEN_RE = re.compile(r"\b([A-Za-z][A-Za-z0-9_.@-]{2,63})\b")
+_DISPLAY_NAME_RE = re.compile(
+    r"(?:给|帮|替|为)\s*((?:(?![我给帮他她你替为])[\u4e00-\u9fa5]){2,4})(?=建|开|创建|注册|新建|加|分配|申请|办|开通)")
+_DISPLAY_NAME_STOPWORDS = {"工人", "员工", "账号", "组长", "品保", "操作工", "管理员", "公司", "工厂",
+                           "几个人", "个人", "大家", "全员", "所有", "几个", "一批"}
+#: 「他们分别是赵一 李二 王三」这类姓名列表
+_PEOPLE_LIST_RE = re.compile(
+    r"(?:分别(?:是|为)?|名字(?:是|分别)?|叫)\s*([\u4e00-\u9fa5]{2,4}(?:[\s、,，和及]+[\u4e00-\u9fa5]{2,4}){1,19})")
+_PEOPLE_AFTER_GIVE_RE = re.compile(
+    r"给\s*([\u4e00-\u9fa5]{2,4}(?:[\s、,，和及]+[\u4e00-\u9fa5]{2,4})+)")
+_NAME_STOP_CHARS = set("建开注册账号给他她请帮配员申新创个的们人工作为叫及和与")
+
+
+def _extract_people(text: str) -> list[str]:
+    """从「他们分别是赵一 李二 王三」里抽姓名列表（去动词噪声，最多 20 人）。"""
+    for pattern in (_PEOPLE_LIST_RE, _PEOPLE_AFTER_GIVE_RE):
+        match = pattern.search(text)
+        if not match:
+            continue
+        names: list[str] = []
+        for raw in re.split(r"[\s、,，和及]+", match.group(1)):
+            name = raw.strip()
+            if 2 <= len(name) <= 4 and not (set(name) & _NAME_STOP_CHARS):
+                names.append(name)
+        if names:
+            return names[:20]
+    return []
+
+
+_ORG_NAME_RE = re.compile(r"(?:放在|调到|分配到|加入|挂到|归到)\s*([\u4e00-\u9fa5A-Za-z0-9]{2,12})")
+_ROLE_KEYWORDS = (
+    (("组长", "班长"), "team-leader"),
+    (("品保", "质检", "品控"), "quality-assurance"),
+    (("计划员", "计划"), "planner"),
+    (("工程师", "工程"), "engineer"),
+    (("主数据", "资料员"), "data-steward"),
+    (("发布负责人",), "release-manager"),
+    (("组织管理员", "管理员"), "org-admin"),
+    (("工人", "操作工", "员工", "装配工"), "worker"),
+)
+
+
+def identity_intent_args(tool: str, text: str) -> dict[str, Any]:
+    """从中文原话里抽身份/账号工具参数（不编造：抽不到就不给该字段）。"""
+    args: dict[str, Any] = {}
+    people = _extract_people(text) if tool == "create_identity_user" else []
+    if people:
+        args["people"] = [{"display_name": name} for name in people]
+    else:
+        account = _ACCOUNT_TOKEN_RE.search(text)
+        if account:
+            args["user_id"] = account.group(1)
+        else:
+            token = _ASCII_TOKEN_RE.search(text)
+            if token and token.group(1).lower() not in {"worker", "boss", "user", "id"}:
+                args["user_id"] = token.group(1)
+    if tool == "create_identity_user" and not people:
+        name = _DISPLAY_NAME_RE.search(text)
+        if name and name.group(1) not in _DISPLAY_NAME_STOPWORDS:
+            args["display_name"] = name.group(1)
+    for keywords, role in _ROLE_KEYWORDS:
+        if any(word in text for word in keywords):
+            args["role_codes"] = [role]
+            break
+    org = _ORG_NAME_RE.search(text)
+    if org:
+        args["org_name"] = org.group(1)
+    if tool == "assign_identity_account":
+        args.pop("display_name", None)
+    return args
+
+
+IDENTITY_TOOL_NAMES = ("list_identity_users", "create_identity_user", "assign_identity_account")
+
+#: 明显不是姓名/账号的噪声值（模型和词表都可能给出，统一清掉，避免建出「几个人」这种账号）
+_NON_NAME_PATTERNS = ("几个", "多少", "哪些", "什么", "若干", "一批", "一批人", "所有人")
+
+
+def sanitize_identity_args(tool: str, args: Any) -> dict[str, Any]:
+    """清掉身份工具入参里明显不是人的值。模型与词表两条路都过一遍（不改写合法值）。"""
+    if not isinstance(args, dict):
+        return {}
+    cleaned = dict(args)
+    if tool == "create_identity_user":
+        name = cleaned.get("display_name")
+        if isinstance(name, str):
+            stripped = name.strip()
+            if not stripped or stripped in _DISPLAY_NAME_STOPWORDS or any(
+                    token in stripped for token in _NON_NAME_PATTERNS):
+                cleaned.pop("display_name", None)
+        people = cleaned.get("people")
+        if isinstance(people, list):
+            kept = []
+            for item in people:
+                if not isinstance(item, dict):
+                    continue
+                person = dict(item)
+                label = person.get("display_name")
+                if isinstance(label, str):
+                    stripped = label.strip()
+                    if not stripped or stripped in _DISPLAY_NAME_STOPWORDS or any(
+                            token in stripped for token in _NON_NAME_PATTERNS):
+                        person.pop("display_name", None)
+                if any(str(value or "").strip() for key, value in person.items() if key != "role_codes"):
+                    kept.append(person)
+            if kept:
+                cleaned["people"] = kept
+            else:
+                cleaned.pop("people", None)
+    return cleaned
+
+
+def merge_identity_args(request: dict[str, Any], plan: dict[str, Any]) -> None:
+    """模型选了身份工具但没给（或没给全）参数时，用中文抽取兜底补齐。
+
+    模型给的参数优先（同键覆盖），缺失字段由 `identity_intent_args` 补，
+    这样「给张二申请一个工人账户worker101」这类说法即使模型漏参数也能落地。
+    """
+    text = str(request.get("message") or request.get("task") or "")
+    for step in plan.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        tool = str(step.get("tool") or "")
+        if tool not in IDENTITY_TOOL_NAMES:
+            continue
+        args = identity_intent_args(tool, text)
+        if not args:
+            continue
+        payloads = request.get("payloads")
+        if not isinstance(payloads, dict):
+            payloads = {}
+            request["payloads"] = payloads
+        existing = payloads.get(tool)
+        payloads[tool] = {**args, **existing} if isinstance(existing, dict) else args
+
+
+def identity_intent_tool(text: str) -> str | None:
+    """中文意图 → 身份/账号工具（模型不可用或只给工具名时的确定性兜底）。
+
+    顺序很重要：
+    1. 「调到/分配到<组织>」这类**调岗**动词优先（不需要出现“账号”）；
+    2. 必须出现「账号/帐号/账户/工号」才继续；
+    3. 查询动词 → 查账号；
+    4. 带**姓名列表**（「他们分别是钱七 周八 吴九」）→ 建账号（不是调岗）；
+    5. 「分配账号」但没名单 → 给已有账号分配；
+    6. 其余建号动词（建/申请/开通/分配…）→ 建账号。
+    """
+    if any(word in text for word in ("调到", "分配到", "调去", "调岗", "换岗",
+                                     "加角色", "改角色", "调整角色", "调部门", "换部门")):
+        return "assign_identity_account"
+    if not any(word in text for word in ("账号", "帐号", "账户", "工号", "用户名")):
+        return None
+    if any(word in text for word in ("有哪些", "列表", "查看", "多少", "查询", "列一下", "看看有")):
+        return "list_identity_users"
+    if _extract_people(text):
+        return "create_identity_user"
+    if "分配账号" in text or "分配账户" in text or "分配帐号" in text:
+        return "assign_identity_account"
+    if any(word in text for word in ("建", "注册", "创建", "新建", "开", "添加", "加", "新增",
+                                     "申请", "办", "开通", "分配", "发个")):
+        return "create_identity_user"
+    return None
+
+
 # 任务书 5.1 的使用顺序：高阶 Skill 多步提案必须满足此偏序。
 SKILL_USAGE_ORDER = (
     "business-data-identification",
@@ -66,14 +233,23 @@ class PlannerAgent:
     async def aplan(self, request: dict[str, Any], registry: ToolRegistry) -> dict[str, Any]:
         """Ask Qwen for an intent/route proposal, then validate it against local contracts."""
         fallback = self._deterministic_plan(request, registry, self.skills)
+        # 上一轮在会话里追问过的「待补全意图」：用户这次的消息若能补齐，就直接继续执行
+        pending = request.get("pending_intent") if isinstance(request.get("pending_intent"), dict) else None
+        if pending:
+            resumed = await self._resume_pending_intent(request, registry, pending)
+            if resumed is not None:
+                return resumed
         explicit_workflow = str(request.get("workflow") or "").strip()
         # 无显式 workflow/tool/skill 且带非订单文件附件时，走 agent 识别分支：
         # sample_file 采样 → map_to_canonical（多模态理解映射）→ ingest_canonical 落库。
         # agent 不可用/低置信/映射失败时返回 None，回落到 classify + 确定性兜底
         # （business_catalog 写死规则，仅作兜底）。
+        # 空 tools 列表不算显式路由：正式前端每条消息都带 tools: []，
+        # 若把任意 list 当显式，会永远走确定性兜底、模型 answer 永不采用。
+        tools_arg = request.get("tools")
         has_explicit_route = bool(
             request.get("workflow") or request.get("tool") or request.get("skill")
-            or isinstance(request.get("tools"), list)
+            or (isinstance(tools_arg, list) and bool(tools_arg))
         )
         if explicit_workflow not in KNOWN_WORKFLOWS and not has_explicit_route and self._has_unrouted_file(request):
             recognition = await self._agent_recognize_plan(request, registry)
@@ -94,12 +270,27 @@ class PlannerAgent:
                 },
                 "model": model_result.get("model", {}),
             }
-        explicit = bool(request.get("workflow") or request.get("tool") or isinstance(request.get("tools"), list))
+        explicit = bool(request.get("workflow") or request.get("tool")
+                        or (isinstance(tools_arg, list) and bool(tools_arg)))
         decision = model_result.get("decision") if model_result.get("ok") else None
         if explicit or not isinstance(decision, dict):
             source = "explicit" if explicit else "deterministic_fallback"
             intent = {"name": fallback.get("route", "chat"), "confidence": 1.0 if explicit else 0.0, "source": source}
             return {**fallback, "intent": intent, "route_decision": {"source": source, "model_status": model_result.get("status"), "model_error": model_result.get("error")}, "model": model_result.get("model", {})}
+        # 只有模型不可用时才用中文词表兜底；模型可用时一律由 AI 主导（缺参数走反问）
+        if str(model_result.get("status") or "") in {"not_configured", "disabled", "error"}:
+            identity_tool = identity_intent_tool(str(request.get("message") or request.get("task") or "").lower())
+            if identity_tool and fallback.get("route") == "free" and any(
+                    step.get("tool") == identity_tool for step in fallback.get("steps", [])):
+                merge_identity_args(request, fallback)
+                return {
+                    **fallback,
+                    "intent": {"name": "身份/账号", "confidence": 1.0, "source": "identity_intent"},
+                    "route_decision": {"source": "identity_intent",
+                                       "model_status": model_result.get("status"),
+                                       "model_proposal": decision},
+                    "model": model_result.get("model", {}),
+                }
         has_unparsed_order_attachment = (
             not request.get("document")
             and any(isinstance(item, dict) and item.get("kind") == "order" for item in request.get("attachments", []))
@@ -126,7 +317,175 @@ class PlannerAgent:
             return {**fallback, "intent": {"name": decision.get("intent", "unknown"), "confidence": decision.get("confidence", 0.0), "source": "qwen_rejected"}, "route_decision": {"source": "deterministic_fallback", "model_status": "invalid_decision", "model_proposal": decision}, "model": model_result.get("model", {})}
         if proposed.get("route") == "chat" and not proposed.get("response"):
             proposed["response"] = self._chat_fallback(str(request.get("message") or request.get("task") or "").lower())
+        # 同一工具在一句话里被排了多次：参数按工具名传递，第二次会覆盖第一次，
+        # 与其执行出「上级组织没找到」这类怪错，不如提醒用户拆成两句（多人建号走 people，不受影响）。
+        duplicate = self._duplicate_tool_steps(proposed)
+        if duplicate:
+            return {
+                "route": "chat",
+                "steps": [],
+                "response": self._duplicate_tool_reminder(duplicate),
+                "intent": {"name": "需要拆成两步", "confidence": 1.0, "source": "duplicate_tool_guard"},
+                "route_decision": {"source": "duplicate_tool_guard", "model_status": model_result.get("status")},
+                "reason": f"同一工具在一句话里被排了多次：{sorted(duplicate)}",
+            }
+        # 模型给出的工具入参落到 request.payloads（graph._payload_for 优先读它）
+        tool_args = proposed.get("tool_args") if isinstance(proposed.get("tool_args"), dict) else {}
+        if tool_args:
+            payloads = request.get("payloads")
+            if not isinstance(payloads, dict):
+                payloads = {}
+                request["payloads"] = payloads
+            for tool_name, tool_payload in tool_args.items():
+                if not isinstance(tool_payload, dict):
+                    continue
+                existing = payloads.get(tool_name)
+                merged_payload = ({**existing, **tool_payload}
+                                  if isinstance(existing, dict) else tool_payload)
+                if str(tool_name) in IDENTITY_TOOL_NAMES:
+                    merged_payload = sanitize_identity_args(str(tool_name), merged_payload)
+                payloads[tool_name] = merged_payload
+        # 身份工具：模型漏参数时由 AI 抽参数；AI 不可用才退回中文词表兜底
+        slot_gate = await self._slot_filling_gate(request, registry, proposed)
+        if slot_gate is not None:
+            return slot_gate
         return {**proposed, "intent": {"name": decision["intent"], "confidence": decision["confidence"], "source": "qwen"}, "route_decision": {"source": "qwen", "model_status": model_result.get("status"), "model_proposal": decision}, "model": model_result.get("model", {})}
+
+    # ------------------------------------------------------------------ 参数抽取 / 反问
+
+    #: 同一工具一句话里被排多次时的提醒（参数按工具名传递，第二次会覆盖第一次）
+    _DUPLICATE_TOOL_REMINDERS = {
+        "create_org_node": "一次只能建一个组织：请分两步说，先「新建品质部」，再补一句「在品质部下建个出货检验组」。",
+        "assign_identity_account": "一次只能调整一个账号：请分两步说，例如先「把 worker001 调到1班组」，再「给 worker002 加上品保角色」。",
+        "create_identity_user": "建多个账号请一次把名单给全（如「给赵一 李二 王三 建工人账号」），或者分两步说。",
+    }
+
+    @staticmethod
+    def _duplicate_tool_steps(plan: dict[str, Any]) -> set[str]:
+        """free 步骤里出现多次的工具名（同一工具排两次 → 参数会互相覆盖）。"""
+        names = [str(step.get("tool")) for step in (plan.get("steps") or [])
+                 if isinstance(step, dict) and step.get("mode") == "free"]
+        return {name for name in names if name and names.count(name) > 1}
+
+    @classmethod
+    def _duplicate_tool_reminder(cls, tools: set[str]) -> str:
+        base = "这句话里有一个操作要做两次，我一次只能做一次。"
+        for name in sorted(tools):
+            hint = cls._DUPLICATE_TOOL_REMINDERS.get(name)
+            if hint:
+                return base + hint
+        return base + "请分两步告诉我：先说第一件事，我做完你再说第二件。"
+
+    @staticmethod
+    def _tool_payload_missing(spec: Any, payload: Any) -> list[str]:
+        """缺哪些必填参数。支持 `required` 与 `anyOf: [{required:[...]}, ...]`（三选一）。"""
+        schema = spec.input_schema or {}
+        present = payload if isinstance(payload, dict) else {}
+
+        def filled(field: str) -> bool:
+            return present.get(str(field)) not in (None, "", [], {})
+
+        missing = [str(field) for field in (schema.get("required") or []) if not filled(field)]
+        if missing:
+            return missing
+        options = [[str(field) for field in (group.get("required") or [])]
+                   for group in (schema.get("anyOf") or []) if isinstance(group, dict)]
+        if options and not any(all(filled(field) for field in option) for option in options):
+            # 没有一组满足：把最短的一组当「缺什么」报给追问
+            return min(options, key=len)
+        return []
+
+    @staticmethod
+    def _ask_back(tool: str, args: dict[str, Any], missing: list[str], question: str,
+                  *, model_status: Any = None, reason: str = "") -> dict[str, Any]:
+        return {
+            "route": "chat",
+            "steps": [],
+            "response": question,
+            "pending_intent": {"tool": tool, "args": dict(args or {}), "missing": list(missing), "question": question},
+            "intent": {"name": "待补充信息", "confidence": 1.0, "source": "slot_filling"},
+            "route_decision": {"source": "slot_filling", "model_status": model_status},
+            "reason": reason or f"缺少必填参数 {missing}，已在会话中追问用户",
+        }
+
+    #: 参数来自「对话原话」的工具（其余工具的参数来自上传文件/请求字段，不能反问）
+    CONVERSATION_ARG_MODULES = ("identity",)
+
+    async def _slot_filling_gate(self, request: dict[str, Any], registry: ToolRegistry,
+                                 plan: dict[str, Any]) -> dict[str, Any] | None:
+        """模型选定的会话型工具若缺必填参数：先让模型从原话抽参数，还缺就反问用户。"""
+        from .slot_filling import field_labels, fill_tool_args
+
+        for step in plan.get("steps") or []:
+            if not isinstance(step, dict) or step.get("mode") != "free":
+                continue
+            spec = registry.specs.get(str(step.get("tool") or ""))
+            if spec is None or spec.module not in self.CONVERSATION_ARG_MODULES:
+                continue
+            payloads = request.get("payloads") if isinstance(request.get("payloads"), dict) else {}
+            payload = payloads.get(spec.name)
+            missing_now = self._tool_payload_missing(spec, payload)
+            if not missing_now:
+                continue
+            result = await fill_tool_args(
+                self.router, tool=spec.name, input_schema=spec.input_schema,
+                message=str(request.get("message") or request.get("task") or ""),
+                partial=dict(payload) if isinstance(payload, dict) else None,
+                required_hint=missing_now)
+            llm_args = result.get("args") if isinstance(result.get("args"), dict) else {}
+            if result.get("source") == "unavailable":
+                # 模型不可用：退回中文词表兜底（仅此路径）
+                llm_args = {**identity_intent_args(spec.name, str(request.get("message") or request.get("task") or "")),
+                            **llm_args}
+            merged = {**(payload if isinstance(payload, dict) else {}), **llm_args}
+            merged = sanitize_identity_args(spec.name, merged)
+            if merged:
+                request.setdefault("payloads", {})[spec.name] = merged
+            remaining = self._tool_payload_missing(spec, merged)
+            if remaining:
+                question = str(result.get("question") or "").strip() or (
+                    "我还需要一些信息才能继续，请补充：" + field_labels(remaining))
+                return self._ask_back(spec.name, merged, remaining, question,
+                                      model_status=result.get("source"))
+        return None
+
+    async def _resume_pending_intent(self, request: dict[str, Any], registry: ToolRegistry,
+                                     pending: dict[str, Any]) -> dict[str, Any] | None:
+        """把上一轮的追问 + 用户这次的消息合起来再抽一次参数：齐了就执行，否则继续问。"""
+        from .slot_filling import field_labels, fill_tool_args
+
+        tool = str(pending.get("tool") or "")
+        spec = registry.specs.get(tool)
+        if spec is None:
+            return None
+        hint = self._tool_payload_missing(spec, pending.get("args"))
+        result = await fill_tool_args(
+            self.router, tool=tool, input_schema=spec.input_schema,
+            message=str(request.get("message") or request.get("task") or ""),
+            history=[{"role": "assistant", "content": str(pending.get("question") or "")}],
+            partial=dict(pending.get("args") or {}),
+            required_hint=hint or None)
+        if result.get("off_topic"):
+            # 用户换了话题：放弃上一轮追问，交回正常路由（graph 会清掉 pending）
+            return None
+        # result["args"] 已经是「上一轮参数 + 本轮抽取」的安全合并（空值不覆盖已有值）
+        merged = result.get("args") if isinstance(result.get("args"), dict) else dict(pending.get("args") or {})
+        merged = sanitize_identity_args(tool, merged)
+        request.setdefault("payloads", {})[tool] = merged
+        remaining = self._tool_payload_missing(spec, merged)
+        if remaining:
+            question = str(result.get("question") or "").strip() or (
+                "还差一点信息：" + field_labels(remaining))
+            return self._ask_back(tool, merged, remaining, question, model_status=result.get("source"))
+        return {
+            "route": "free",
+            "steps": [{"id": "free-0", "module": spec.module, "tool": tool,
+                       "mode": "free", "http_method": spec.method}],
+            "reason": "用户补充信息后继续执行上一轮意图",
+            "pending_resolved": True,
+            "intent": {"name": "身份/账号", "confidence": 1.0, "source": "slot_filling"},
+            "route_decision": {"source": "slot_filling", "model_status": result.get("source")},
+        }
 
     @staticmethod
     def _model_plan(decision: dict[str, Any], registry: ToolRegistry, skills: SkillRegistry | None = None) -> dict[str, Any] | None:
@@ -156,7 +515,10 @@ class PlannerAgent:
                 return {"_invalid_reason": f"Skill 提案违反任务书使用顺序: {skill_names}"}
             steps = [{"id": f"free-{index}", "module": registry.specs[name].module, "tool": name, "mode": "free", "http_method": registry.specs[name].method} for index, name in enumerate(tools)]
             steps.extend({"id": f"skill-{index}", "module": "orchestrator", "tool": name, "kind": "skill", "mode": "free"} for index, name in enumerate(skill_names, start=len(steps)))
-            return {"route": "free", "steps": steps, "reason": decision.get("reason") or "Qwen 路由到自由工具/Skill 路径"}
+            raw_args = decision.get("args") if isinstance(decision.get("args"), dict) else {}
+            tool_args = {name: raw_args[name] for name in tools if isinstance(raw_args.get(name), dict)}
+            return {"route": "free", "steps": steps, "tool_args": tool_args,
+                    "reason": decision.get("reason") or "Qwen 路由到自由工具/Skill 路径"}
         return None
 
     @staticmethod
@@ -281,10 +643,14 @@ class PlannerAgent:
             if exact:
                 requested_tools.append(exact.group(1))
             else:
-                for keywords, tool in INTENT_TO_TOOL:
-                    if any(keyword in text for keyword in keywords):
-                        requested_tools.append(tool)
-                        break
+                identity_tool = identity_intent_tool(text)
+                if identity_tool:
+                    requested_tools.append(identity_tool)
+                else:
+                    for keywords, tool in INTENT_TO_TOOL:
+                        if any(keyword in text for keyword in keywords):
+                            requested_tools.append(tool)
+                            break
         if requested_tools:
             unknown = [name for name in requested_tools if name not in registry.specs]
             if unknown:
@@ -363,6 +729,11 @@ class ReviewerAgent:
     # 本地识别四件套：只写自描述/本地 canonical 表（幂等/可回滚）或只读，无外部副作用，
     # 不做 pre-execution 授权门（低置信已在 planner 识别分支拦下）。
     _SAFE_LOCAL_TOOLS = {"sample_file", "ingest_recognized", "query_recognized_table", "ingest_canonical"}
+    # 身份/账号工具：写操作，但已有工具级硬闸 identity.admin（只有厂长/组织管理员可调用）；
+    # 而 pre-execution 授权门的允许角色是 operator/admin，厂长无法自审，
+    # 故这里不再叠加授权门（权限闸仍然是唯一且 fail-closed 的入口）。
+    _IDENTITY_ADMIN_TOOLS = {"list_identity_users", "create_identity_user",
+                             "assign_identity_account", "create_org_node"}
     _READ_ONLY_SKILL_OPERATIONS = {
         "yunpai-m0-data-foundation": {"preview"},
         "yunpai-m1-document-parser": M1_READ_ONLY_SKILL_OPERATIONS,
@@ -383,6 +754,8 @@ class ReviewerAgent:
             if operation in self._READ_ONLY_SKILL_OPERATIONS.get(str(step["tool"]), set()):
                 return None
         if step["tool"] in self._SAFE_LOCAL_TOOLS:
+            return None
+        if step["tool"] in self._IDENTITY_ADMIN_TOOLS:
             return None
         method = str(step.get("http_method") or "POST").upper()
         if method not in {"GET", "HEAD", "OPTIONS"} and step["tool"] not in self._POST_REVIEWED_DRAFT_TOOLS:

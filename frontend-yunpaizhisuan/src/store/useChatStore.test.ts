@@ -1,7 +1,8 @@
 import { act, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useChatStore } from './useChatStore';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CHAT_LAST_CONVERSATION_KEY, lastSelectedConversationId, useChatStore } from './useChatStore';
 import { ChatStreamHttpError } from '../services/chatApi';
+import { chatStorageKey, setChatStorageScope } from '../services/chatStorageScope';
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'Content-Type': 'application/json' },
@@ -176,6 +177,61 @@ describe('useChatStore', () => {
     expect(localStorage.getItem('yunpai.chat.last-conversation-id')).toBe(conversationId);
   });
 
+  it('maps a blocked history step to failed with the permission reason after refresh', async () => {
+    const conversationId = '99999999-9999-4999-8999-999999999999';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({
+      items: [{
+        id: 'forbidden-message', role: 'assistant', content: '没有权限调用 IDENTITY · list_identity_users',
+        status: 'completed', created_at: 'now',
+        run: {
+          status: 'failed',
+          tool_steps: [{
+            step_id: 'step-denied', tool: 'list_identity_users', status: 'blocked',
+            error: { code: 'TOOL_FORBIDDEN', tool: 'list_identity_users', required: 'order.view', message: '没有权限调用 IDENTITY · list_identity_users（需要 order.view）' },
+          }],
+        },
+      }],
+      next_cursor: null,
+    })));
+
+    await act(async () => useChatStore.getState().selectConversation(conversationId));
+
+    const step = useChatStore.getState().messages[0]?.tools?.[0];
+    expect(step).toMatchObject({
+      id: 'step-denied',
+      status: 'failed',
+      error: '没有权限调用 IDENTITY · list_identity_users（需要 order.view）',
+    });
+    expect(step?.error).toBeTruthy();
+  });
+
+  it('keeps a gate-blocked history step as waiting_human and normalizes failed steps', async () => {
+    const conversationId = '97979797-9797-4797-8797-979797979797';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({
+      items: [{
+        id: 'gate-message', role: 'assistant', content: '请补充权威输入', status: 'completed', created_at: 'now',
+        run: {
+          status: 'waiting_human',
+          tool_steps: [
+            { step_id: 'step-gate', tool: 'run_bom_sop_workflow', status: 'blocked', safe_summary: '缺少权威输入' },
+            { step_id: 'step-failed', tool: 'solve_scheduling', status: 'failed', error: { code: 'TOOL_ERROR' } },
+            { step_id: 'step-ok', tool: 'list_m1_tasks', status: 'ok' },
+          ],
+        },
+      }],
+      next_cursor: null,
+    })));
+
+    await act(async () => useChatStore.getState().selectConversation(conversationId));
+
+    const tools = useChatStore.getState().messages[0]?.tools ?? [];
+    expect(tools.map((step) => step.status)).toEqual(['waiting_human', 'failed', 'ok']);
+    // 只有失败步骤带原因：Gate 等待与成功步骤不应出现红字原因。
+    expect(tools[1]?.error).toBe('TOOL_ERROR');
+    expect(tools[0]?.error).toBeUndefined();
+    expect(tools[2]?.error).toBeUndefined();
+  });
+
   it('persists an M7 workflow message and keeps structured draft data in history state', async () => {
     const conversationId = '12121212-1212-4212-8212-121212121212';
     const conversation = {
@@ -330,5 +386,73 @@ describe('useChatStore', () => {
       .mockResolvedValueOnce(response({ items: [{ ...conversation, version: 2 }], next_cursor: null })));
     await expect(useChatStore.getState().deleteConversation(conversation)).rejects.toThrow('确认最新状态');
     expect(useChatStore.getState().conversations[0]?.version).toBe(2);
+  });
+});
+
+/**
+ * 本地模式（VITE_LOCAL_LANGGRAPH）下会话与消息都在浏览器里：
+ * 换账号登录后只能看到自己的，切回去原来的还在；无用户时仍走全局键（MSW 演示 / 未登录）。
+ */
+describe('useChatStore local history isolation', () => {
+  beforeEach(() => {
+    useChatStore.getState().resetChat();
+    setChatStorageScope(null);
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    setChatStorageScope(null);
+    vi.unstubAllEnvs();
+  });
+
+  it('shows only the signed-in user conversations and messages', async () => {
+    vi.stubEnv('VITE_LOCAL_LANGGRAPH', 'true');
+    setChatStorageScope({ tenantId: 'default', userId: 'boss' });
+    useChatStore.getState().startStreaming('厂长的提问', 'assistant-boss', 'user-boss', 'conv-boss');
+
+    const bossMessageKey = chatStorageKey('yunpai.local-agent-message-sets');
+    expect(bossMessageKey).toBe('yunpai.default:boss.local-agent-message-sets');
+    expect(Object.keys(JSON.parse(localStorage.getItem(bossMessageKey) ?? '{}'))).toEqual(['conv-boss']);
+    expect(localStorage.getItem('yunpai.local-agent-message-sets')).toBeNull();
+
+    setChatStorageScope({ tenantId: 'default', userId: 'worker001' });
+    // 命名空间一变，内存里上一个账号的会话立即清空。
+    expect(useChatStore.getState().messages).toEqual([]);
+    expect(useChatStore.getState().selectedConversationId).toBeUndefined();
+    await act(async () => useChatStore.getState().selectConversation('conv-boss'));
+    expect(useChatStore.getState().messages).toEqual([]);
+    // 厂长的数据仍留在自己的命名空间里（不删、不迁移）。
+    expect(localStorage.getItem(bossMessageKey)).not.toBeNull();
+
+    setChatStorageScope({ tenantId: 'default', userId: 'boss' });
+    await act(async () => useChatStore.getState().selectConversation('conv-boss'));
+    expect(useChatStore.getState().messages.map((item) => item.content)).toEqual(['厂长的提问', '']);
+  });
+
+  it('remembers the last conversation per user and keeps the global key without a user', async () => {
+    vi.stubEnv('VITE_LOCAL_LANGGRAPH', 'true');
+
+    setChatStorageScope(null);
+    const demoConversationId = await useChatStore.getState().newConversation();
+    expect(lastSelectedConversationId()).toBe(demoConversationId);
+    expect(localStorage.getItem(CHAT_LAST_CONVERSATION_KEY)).toBe(demoConversationId);
+
+    setChatStorageScope({ tenantId: 'default', userId: 'boss' });
+    expect(lastSelectedConversationId()).toBeUndefined();
+    const bossConversationId = await useChatStore.getState().newConversation();
+    expect(lastSelectedConversationId()).toBe(bossConversationId);
+    expect(localStorage.getItem(CHAT_LAST_CONVERSATION_KEY)).toBe(demoConversationId);
+    await useChatStore.getState().loadConversations();
+    expect(useChatStore.getState().conversations.map((item) => item.id)).toEqual([bossConversationId]);
+
+    setChatStorageScope({ tenantId: 'default', userId: 'worker001' });
+    expect(lastSelectedConversationId()).toBeUndefined();
+    await useChatStore.getState().loadConversations();
+    expect(useChatStore.getState().conversations).toEqual([]);
+
+    setChatStorageScope({ tenantId: 'default', userId: 'boss' });
+    expect(lastSelectedConversationId()).toBe(bossConversationId);
+    await useChatStore.getState().loadConversations();
+    expect(useChatStore.getState().conversations.map((item) => item.id)).toEqual([bossConversationId]);
   });
 });

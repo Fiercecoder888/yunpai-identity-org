@@ -106,7 +106,7 @@ export function OrgStructurePage() {
           {orgQuery.isLoading ? (
             <Typography.Text type="secondary">加载中…</Typography.Text>
           ) : tree.length === 0 ? (
-            <Empty description="还没有组织架构。可以先新建部门，再用「架构设计引导页」让 AI 生成。" />
+            <Empty description="还没有组织架构。先新建部门 / 班组。" />
           ) : (
             <Tree
               data-testid="org-tree"

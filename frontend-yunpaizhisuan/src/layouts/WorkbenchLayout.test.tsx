@@ -3,7 +3,6 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppProviders } from '../app/providers';
 import { WorkbenchLayout } from './WorkbenchLayout';
-import { DashboardPage } from '../pages/DashboardPage';
 import { useTabsStore } from '../store/useTabsStore';
 import { useAuthStore } from '../auth/useAuthStore';
 
@@ -13,10 +12,10 @@ const renderLayout = () => {
       {
         path: '/',
         element: <WorkbenchLayout />,
-        children: [{ path: 'dashboard', element: <DashboardPage /> }],
+        children: [{ path: 'org', element: <div>org-page</div> }],
       },
     ],
-    { initialEntries: ['/dashboard'] },
+    { initialEntries: ['/org'] },
   );
 
   render(

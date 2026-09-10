@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { useAuthStore } from './useAuthStore';
 import { isDemoRoleEnabled } from '../app/runtimeMode';
 import { SessionExpiryNotice } from '../features/session/SessionExpiryNotice';
+import { OrgGuideGate } from '../features/org/OrgRecommendationModal';
 import { ChangePasswordPage } from '../pages/ChangePasswordPage';
 import { LoginPage } from '../pages/LoginPage';
 import { RegisterAdminPage } from '../pages/RegisterAdminPage';
@@ -50,6 +51,7 @@ export function AuthBoundary({ children }: { children: ReactNode }) {
   return (
     <>
       <SessionExpiryNotice />
+      <OrgGuideGate />
       {children}
     </>
   );

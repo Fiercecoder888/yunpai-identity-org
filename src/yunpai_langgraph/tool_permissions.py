@@ -10,7 +10,7 @@
 - **无 principal 不拦截**：内部调用/单测直接 `graph.run()` 时没有身份上下文，
   按 legacy 放行并记 trace；HTTP 入口（api.py）会带上 principal，所以真实用户
   请求一律受闸。
-- **启动期校验**：`assert_full_coverage()` 保证 119 个工具全部有映射，漏配即失败
+- **启动期校验**：`assert_full_coverage()` 保证注册表里全部工具都有映射，漏配即失败
   （否则「漏配 = 默认放行」就是漏洞）。
 """
 from __future__ import annotations
@@ -62,6 +62,11 @@ TOOL_PERMISSION_OVERRIDES: dict[str, str] = {
     # 部门消息与知识沉淀：管理层读报用。
     "prepare_m5_department_message": "report.view",
     "record_m5_knowledge": "report.view",
+    # 身份/账号（对话建账号、分配账号、建组织节点）：只有厂长/组织管理员可调用。
+    "list_identity_users": "identity.admin",
+    "create_identity_user": "identity.admin",
+    "assign_identity_account": "identity.admin",
+    "create_org_node": "identity.admin",
 }
 
 _COMPILED: tuple[tuple[str, re.Pattern[str], str], ...] = tuple(

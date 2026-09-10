@@ -69,9 +69,6 @@ test('preserves, switches and renames distinct server conversations', async ({ p
   await expect(page.locator(`[data-conversation-id="${firstId}"]`)).toHaveCount(1);
   await expect(page.locator(`[data-conversation-id="${secondId}"]`)).toHaveCount(1);
 
-  await page.getByRole('link', { name: '调试工作台' }).click();
-  await expect(page.getByText('最近 Agent 活动')).toBeVisible();
-  await page.goBack();
   await expect(page.getByText('云湃企业助手')).toBeVisible();
 
   const firstConversation = page.locator(`[data-conversation-id="${firstId}"]`);
@@ -87,8 +84,6 @@ test('preserves, switches and renames distinct server conversations', async ({ p
   await renameDialog.getByRole('button', { name: /保\s*存/ }).click();
   await expect(page.locator('.conversation-select', { hasText: renamedTitle })).toHaveCount(1);
 
-  await page.getByRole('link', { name: '调试工作台' }).click();
-  await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/c/${firstId}$`));
   await expect(page.locator('.conversation-select', { hasText: renamedTitle })).toHaveCount(1);
 });

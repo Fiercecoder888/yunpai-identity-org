@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from copy import deepcopy
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -14,6 +15,11 @@ from .registry import ToolRegistry, build_default_registry
 from .repository import InMemoryRunRepository, RunRepository
 from .skills import SkillRegistry, build_default_skill_registry
 from .orchestration_bridge import BRIDGED_WORKFLOWS
+
+logger = logging.getLogger("yunpai.agent")
+
+#: 会话内「待补全意图」存储（懒加载单例，避免每次 run 都开库）
+_PENDING_INTENT_STORE: Any = None
 
 
 def _now() -> str:
@@ -138,7 +144,12 @@ class YunpaiGraph:
         if state.get("status") == "waiting_human":
             return state
         if not state.get("plan"):
+            self._inject_pending_intent(state)
             decision = await self.planner.aplan(state["request"], self.registry)
+            if isinstance(decision.get("pending_intent"), dict):
+                self._remember_pending_intent(state, decision["pending_intent"])
+            elif decision.get("pending_resolved"):
+                self._forget_pending_intent(state)
             state["route"], state["plan"] = decision["route"], decision["steps"]
             state["workflow_id"] = decision.get("workflow_id", "")
             state["workflow_version"] = decision.get("workflow_version", "")
@@ -338,9 +349,64 @@ class YunpaiGraph:
                 state["trace"].append({"event": "run.completed", "at": _now()})
         return self._save(state)
 
+    # ------------------------------------------------------------ 会话内「待补全意图」
+
+    def _pending_store(self) -> Any:
+        global _PENDING_INTENT_STORE
+        if _PENDING_INTENT_STORE is None:
+            from .pending_intents import PendingIntentStore
+
+            _PENDING_INTENT_STORE = PendingIntentStore()
+        return _PENDING_INTENT_STORE
+
+    @staticmethod
+    def _conversation_key(state: RunState) -> tuple[str, str]:
+        request = state.get("request") or {}
+        tenant = str(state.get("tenant_id") or request.get("tenant_id") or "default")
+        conversation = str(request.get("conversation_id") or request.get("session_id") or "")
+        return tenant, conversation
+
+    def _inject_pending_intent(self, state: RunState) -> None:
+        """同一会话上一轮追问过的意图，注入到 request 里让 planner 接着补。"""
+        tenant, conversation = self._conversation_key(state)
+        if not conversation:
+            return
+        try:
+            pending = self._pending_store().load(tenant_id=tenant, conversation_id=conversation)
+        except Exception as exc:  # 持久化层故障不应阻断对话
+            logger.warning("pending_intent.load failed: %s", exc)
+            return
+        if pending:
+            state["request"]["pending_intent"] = pending
+            state["trace"].append({"event": "planner.pending_intent", "tool": pending.get("tool"),
+                                   "missing": pending.get("missing"), "at": _now()})
+
+    def _remember_pending_intent(self, state: RunState, pending: dict[str, Any]) -> None:
+        tenant, conversation = self._conversation_key(state)
+        if not conversation:
+            return
+        try:
+            self._pending_store().save(
+                tenant_id=tenant, conversation_id=conversation,
+                tool=str(pending.get("tool") or ""), args=dict(pending.get("args") or {}),
+                missing=[str(item) for item in pending.get("missing") or []],
+                question=str(pending.get("question") or ""))
+            state["trace"].append({"event": "planner.ask_back", "tool": pending.get("tool"),
+                                   "missing": pending.get("missing"), "at": _now()})
+        except Exception as exc:
+            logger.warning("pending_intent.save failed: %s", exc)
+
+    def _forget_pending_intent(self, state: RunState) -> None:
+        tenant, conversation = self._conversation_key(state)
+        if not conversation:
+            return
+        try:
+            self._pending_store().clear(tenant_id=tenant, conversation_id=conversation)
+        except Exception as exc:
+            logger.warning("pending_intent.clear failed: %s", exc)
+
     def route_after_planner(self, state: RunState) -> str:
         return "worker" if state.get("status") == "running" else "end"
-
     def route_after_reviewer(self, state: RunState) -> str:
         return "worker" if state.get("status") == "running" else "end"
 
@@ -351,7 +417,122 @@ class YunpaiGraph:
         while state.get("status") == "running":
             state = await self.worker_node(state)
             state = await self.reviewer_node(state)
-        return state
+        self._finalize_response(state)
+        return self._save(state)
+
+    #: 工具错误码 → 给厂长看的人话
+    _FRIENDLY_ERROR_HINTS = (
+        ("MISSING_USER_ID", "没听清要给谁建号：请带上姓名或账号，例如「给张二申请一个工人账号 worker101」。"),
+        ("INVALID_USER_ID", "账号格式不对：只能用字母/数字/_ . @ -，长度 3~64。"),
+        ("USER_EXISTS", "这个账号已经存在了，换一个账号名即可。"),
+        # 必须排在 INVALID_USER_ID 之后：INVALID_USER_ID 含 INVALID_USER 前缀。
+        ("INVALID_USER", "角色没认出来：可以说「工人/组长/品保/计划员/工程师/主数据管理员/发布负责人/组织管理员/厂长」，也可以写 code（worker、team-leader、quality-assurance、qa、qc、leader…）。"),
+        ("INVALID_BINDING", "角色或组织没认出来：角色可以说「组长/工人/品保监督/计划员」，组织名要用「管理 → 组织架构」里已有的名字。"),
+        ("USER_NOT_FOUND", "这个账号不存在，先用「现在有哪些账号」看看；如果是新员工，可以说「给XXX建一个工人账号」。"),
+        ("NAME_EXISTS", "这个人已经有账号了，不用重复建；要加角色就点明账号，例如「给 worker001 加上品保角色」。"),
+        ("AMBIGUOUS_USER_NAME", "有好几个同名账号：请指名账号，例如「给 worker001 调整」。"),
+        ("ORG_NOT_FOUND", "组织节点不存在：先在「管理 → 组织架构」新建，或先不带班组名。"),
+        ("ORG_PARENT_NOT_FOUND", "上级组织没找到：可以直接说「在<部门名>下面建<班组名>」，或先在「管理 → 组织架构」建好上级。"),
+        ("INVALID_ORG_NAME", "没听清要建的组织名：可以说「创建一个生产部」「创建1班组」。"),
+        ("INVALID_ORG_TYPE", "组织类型只支持公司（company）/ 部门（dept）/ 班组（team）。"),
+        # 动作无关措辞：查账号 / 建号 / 调岗都会被这个码拦下，不能只说「建号」。
+        ("TOOL_FORBIDDEN", "当前账号没有做这个操作的权限（只有厂长/组织管理员可以管理账号）。"),
+        ("WEAK_PASSWORD", "初始密码至少 8 位。"),
+        ("INVALID_PEOPLE", "批量建号的名单格式不对，请再说一次。"),
+    )
+
+    @classmethod
+    def _friendly_error(cls, message: str) -> str:
+        for code, hint in cls._FRIENDLY_ERROR_HINTS:
+            if code in message:
+                return hint
+        return message
+
+    #: 角色 code → 中文名（对话里说人话）
+    _ROLE_LABELS = {
+        "factory-director": "厂长", "org-admin": "组织管理员", "data-steward": "主数据管理员",
+        "engineer": "工程审批", "planner": "计划员", "release-manager": "发布负责人",
+        "quality-assurance": "品保监督", "team-leader": "组长", "worker": "工人",
+    }
+
+    @classmethod
+    def _role_text(cls, codes: Any) -> str:
+        return "、".join(cls._ROLE_LABELS.get(str(code), str(code)) for code in (codes or []))
+
+    @staticmethod
+    def _tool_result_response(state: RunState) -> str:
+        """把工具结果转成一句人话（厂长看的对话内容，不只是卡片）。"""
+        outputs = state.get("outputs") or {}
+        for tool, result in outputs.items():
+            data = result.get("data") if isinstance(result, dict) and isinstance(result.get("data"), dict) else result
+            if not isinstance(data, dict):
+                continue
+            if tool == "create_identity_user":
+                created = [item for item in (data.get("created") or []) if isinstance(item, dict)]
+                if created:
+                    if len(created) == 1:
+                        item = created[0]
+                        roles = YunpaiGraph._role_text(item.get("role_codes"))
+                        return (f"已为 {item.get('display_name')} 创建{roles}账号 {item.get('user_id')}，"
+                                f"一次性初始密码 {item.get('initial_password')}（首次登录需修改密码）。")
+                    who = "、".join(f"{item.get('user_id')}（{item.get('display_name')}）" for item in created)
+                    return f"已创建 {len(created)} 个账号：{who}。每人一个一次性初始密码，见下方卡片（只显示这一次）。"
+            if tool == "assign_identity_account" and data.get("user_id"):
+                org = data.get("org_name") or data.get("org_id") or "原组织"
+                return (f"已把账号 {data.get('user_id')} 调整到 {org}，"
+                        f"角色：{YunpaiGraph._role_text(data.get('role_codes')) or '未变更'}。")
+            if tool == "list_identity_users":
+                users = [item for item in (data.get("users") or []) if isinstance(item, dict)]
+                who = "、".join(f"{item.get('user_id')}（{item.get('display_name')}）" for item in users[:10])
+                return f"本租户当前有 {len(users)} 个账号：{who}{'…' if len(users) > 10 else ''}。"
+            if tool == "create_org_node" and data.get("org_id"):
+                path = " → ".join(str(item) for item in (data.get("org_path_names") or []))
+                head = "已存在同名组织，直接复用" if data.get("reused") else "已创建组织节点"
+                # 一次只建一个：顺手提示下一步怎么接着说（用户要的「让大模型提醒我」）
+                return (f"{head}「{data.get('name')}」（{data.get('org_id')}）"
+                        f"{'，位置：' + path if path else ''}。"
+                        f"要继续建下级或另一个组织，再说一句即可，例如「在{data.get('name')}下面建个班组」。")
+        return ""
+
+    @classmethod
+    def _finalize_response(cls, state: RunState) -> str:
+        """工具型 run 结束后补一句人话回复（否则会话里只有工具卡片、AI 不说话）。
+
+        优先级：身份/账号工具的**结果总结** > 失败原因（可操作的人话）> 已有回复。
+        """
+        summary = cls._tool_result_response(state)
+        if summary:
+            state["response"] = summary
+            state.setdefault("trace", []).append(
+                {"event": "assistant.summary", "at": _now(), "source": "tool_result"})
+            return summary
+        if state.get("status") == "failed":
+            # 失败时给可操作的人话，优先于任何既有（reviewer 通用）回复
+            errors = state.get("errors") or []
+            first = errors[0] if errors and isinstance(errors[0], dict) else {}
+            message = str(first.get("message") or "").strip()
+            if message:
+                text = f"执行失败：{cls._friendly_error(message)}"
+                state["response"] = text
+                state.setdefault("trace", []).append(
+                    {"event": "assistant.summary", "at": _now(), "source": "friendly_error"})
+                return text
+        return ""
+
+    #: 步骤进度的人话文案（模型 reason 里带工具名/内部术语，不适合直接给厂长看）
+    _TOOL_PROGRESS = {
+        "create_identity_user": "正在建账号…",
+        "assign_identity_account": "正在调整账号…",
+        "list_identity_users": "正在查账号…",
+        "create_org_node": "正在建组织…",
+    }
+
+    @classmethod
+    def _step_progress_text(cls, step: dict[str, Any]) -> str:
+        tool = str(step.get("tool") or "")
+        if tool in cls._TOOL_PROGRESS:
+            return cls._TOOL_PROGRESS[tool]
+        return f"正在执行 {str(step.get('module') or '').upper()} · {tool}"
 
     async def stream(self, state: RunState):
         """Execute the same graph as ``run`` and yield persisted progress events."""
@@ -360,7 +541,11 @@ class YunpaiGraph:
             state = await self.planner_node(state)
             thought = next((item for item in reversed(state.get("trace", [])) if item.get("event") == "react.thought"), None)
             if thought:
-                yield self._event(state, "assistant_delta", content=state.get("response") or thought.get("reason", "已生成执行计划"))
+                # chat 直接给答案；工具/工作流只给一句人话确认（模型 reason 里是内部工具名）
+                content = state.get("response") or (
+                    "好的，我来处理。" if state.get("route") != "chat"
+                    else thought.get("reason", "已生成执行计划"))
+                yield self._event(state, "assistant_delta", content=content)
             yield self._event(state, "state_snapshot", state=self._public_state(state))
 
             if state.get("status") != "running":
@@ -370,7 +555,7 @@ class YunpaiGraph:
             while state.get("status") == "running":
                 index = int(state.get("next_step_index", 0))
                 step = state["plan"][index]
-                yield self._event(state, "assistant_delta", content=f"正在执行 {step['module'].upper()} · {step['tool']}")
+                yield self._event(state, "assistant_delta", content=self._step_progress_text(step))
                 yield self._event(state, "step_start", step=deepcopy(step))
                 step_count = len(state.get("steps", []))
                 state = await self.worker_node(state)
@@ -394,13 +579,19 @@ class YunpaiGraph:
                     yield self._event(state, "gate_opened", gate=deepcopy(state["pending_gate"]))
                 yield self._event(state, "state_snapshot", state=self._public_state(state))
 
+            summary = self._finalize_response(state)
+            if summary:
+                yield self._event(state, "assistant_delta", content=summary)
+                self._save(state)  # 人话总结要落库，否则刷新历史看到的是 reviewer 套话
             yield self._event(state, "run_done", state=self._public_state(state))
         except (KeyError, ValueError) as exc:
             state["status"] = "failed"
             error = {"code": "RUN_ERROR", "message": str(exc)}
             state.setdefault("errors", []).append(error)
+            state["response"] = f"执行失败：{self._friendly_error(str(exc))}"
             self._save(state)
             yield self._event(state, "run_error", **error)
+            yield self._event(state, "assistant_delta", content=state["response"])
             yield self._event(state, "run_done", state=self._public_state(state))
 
     @staticmethod

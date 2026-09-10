@@ -6,6 +6,7 @@ import { resetServerMockScenario, server } from '../mocks/server';
 import { useChatStore } from '../store/useChatStore';
 import { useWorkbenchStore } from '../store/useWorkbenchStore';
 import { useNotificationStore } from '../features/notifications/useNotificationStore';
+import { setChatStorageScope } from '../services/chatStorageScope';
 
 type BubbleListItem = {
   key: string;
@@ -108,6 +109,8 @@ afterEach(() => {
   resetMockNotifications();
   resetMockTaskState();
   useChatStore.getState().resetChat();
+  // 聊天本地存储命名空间跟着登录身份走；用例之间必须复位，避免串号。
+  setChatStorageScope(null);
   useWorkbenchStore.getState().resetWorkbench();
   useNotificationStore.getState().resetNotifications();
   window.localStorage.clear();

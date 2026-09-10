@@ -778,6 +778,458 @@ async def ingest_canonical(payload: dict[str, Any], ctx: dict[str, Any]) -> dict
             "evidence": [_evidence("catalog", "ingest_canonical", f"{entity_type} rows={result['data'].get('inserted_rows')} dup={result['data'].get('duplicate')}")]}
 
 
+# ---------------------------------------------------------------------------
+# 身份/账号（对话建账号：厂长在会话里给员工开账号、分配组织与角色）
+# 权限闸在 ToolRegistry.call 统一执行（映射 identity.admin，见 tool_permissions.py）。
+# ---------------------------------------------------------------------------
+
+_USER_ID_RE = __import__("re").compile(r"^[A-Za-z0-9_.@-]{3,64}$")
+
+
+def _identity_store() -> Any:
+    from .identity import IdentityStore
+
+    return IdentityStore(os.getenv("YUNPAI_IDENTITY_DB", "runtime/yunpai-identity.sqlite"))
+
+
+def _identity_tenant(payload: dict[str, Any], ctx: dict[str, Any]) -> str:
+    return str(payload.get("tenant_id") or ctx.get("tenant_id") or "default")
+
+
+def _resolve_org_id(store: Any, tenant: str, payload: dict[str, Any]) -> str | None:
+    """org_id 优先；否则按 org_name 在组织树里精确/包含匹配（对话里用户只报班组名）。"""
+    org_id = str(payload.get("org_id") or "").strip()
+    if org_id:
+        return org_id
+    name = str(payload.get("org_name") or "").strip()
+    if not name:
+        return None
+    nodes = store.org_tree(tenant_id=tenant)
+    for node in nodes:
+        if str(node.get("name") or "") == name:
+            return str(node["org_id"])
+    for node in nodes:
+        if name in str(node.get("name") or ""):
+            return str(node["org_id"])
+    raise _tool_error("identity", "ORG_NOT_FOUND",
+                      f"组织节点不存在: {name}（可先用「组织架构」页新建，或直接给 org_id）")
+
+
+def _org_name_for(store: Any, tenant: str, org_id: str | None) -> str | None:
+    if not org_id:
+        return None
+    for node in store.org_tree(tenant_id=tenant):
+        if str(node.get("org_id") or "") == str(org_id):
+            return str(node.get("name") or "")
+    return None
+
+
+def _tool_error(tool: str, code: str, message: str) -> Any:
+    from .registry import ToolHTTPError
+
+    return ToolHTTPError(tool, code, message)
+
+
+async def list_identity_users(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """本租户账号列表（可按组织/角色过滤）。"""
+    store = _identity_store()
+    tenant = _identity_tenant(payload, ctx)
+    users = store.list_users(tenant_id=tenant)
+    org_id = str(payload.get("org_id") or "").strip()
+    role = str(payload.get("role") or payload.get("role_code") or "").strip()
+    if org_id:
+        users = [item for item in users if str(item.get("org_id") or "") == org_id]
+    if role:
+        users = [item for item in users if role in list(item.get("role_codes") or [])]
+    limit = max(1, int(payload.get("limit") or 50))
+    users = users[:limit]
+    return {
+        "tenant_id": tenant,
+        "total": len(users),
+        "users": users,
+        "trace_id": _trace(ctx, "list_identity_users"),
+        "evidence": [_evidence("identity", f"users:{tenant}", f"count={len(users)} org={org_id or '-'} role={role or '-'}")],
+    }
+
+
+def _next_user_ids(store: Any, tenant: str, prefix: str, count: int) -> list[str]:
+    """按前缀生成不冲突的账号：worker001、worker002…（跳过已占用的）。"""
+    used = {str(item.get("user_id") or "") for item in store.list_users(tenant_id=tenant)}
+    ids: list[str] = []
+    index = 1
+    while len(ids) < count:
+        candidate = f"{prefix}{index:03d}"
+        index += 1
+        if candidate in used or candidate in ids:
+            continue
+        ids.append(candidate)
+    return ids
+
+
+#: 角色英文/口语别名 → 角色 code（大小写不敏感）。
+#: **只做归一化，不是意图词表**：不参与路由，也不改变工具选择逻辑。
+_ROLE_ALIASES: dict[str, tuple[str, ...]] = {
+    "quality-assurance": ("qa", "qc", "quality", "quality assurance", "qa/qc",
+                          "品保", "质检", "品控", "品保监督"),
+    "team-leader": ("leader", "team lead", "foreman", "组长", "班长"),
+    "worker": ("worker", "操作工", "工人", "员工", "装配工"),
+    "planner": ("planner", "计划员", "计划"),
+    "engineer": ("engineer", "工程师", "工程"),
+    "data-steward": ("steward", "data steward", "主数据", "资料员"),
+    "release-manager": ("release", "release manager", "发布负责人"),
+    "org-admin": ("admin", "org admin", "组织管理员", "管理员"),
+    "factory-director": ("director", "factory director", "厂长"),
+}
+
+#: 别名索引（小写 → code）。模型常把「品保」写成 qa/qc，直接失败太脆。
+_ROLE_ALIAS_INDEX: dict[str, str] = {
+    alias.strip().lower(): code
+    for code, aliases in _ROLE_ALIASES.items()
+    for alias in aliases
+    if alias.strip()
+}
+
+
+def _normalize_roles(store: Any, tenant: str, roles: Any) -> list[str]:
+    """把角色值规整成角色 code：模型/用户说「组长」「qa」也要落到 team-leader / quality-assurance。
+
+    匹配顺序（合法 code 不被改写）：
+    1. 租户角色表的 ``role_code``（大小写不敏感）；
+    2. 英文/口语别名表（大小写不敏感，见 ``_ROLE_ALIASES``）；
+    3. 租户角色表的中文名（精确）；
+    4. 「唯一包含」匹配（例如「品保」→「品保监督」）；
+    5. 都匹配不上 → 原样返回，交给下游报「未注册角色」。
+    """
+    values = [str(role).strip() for role in (roles or []) if str(role).strip()]
+    if not values:
+        return []
+    try:
+        catalog = store.list_roles(tenant_id=tenant)
+    except Exception:
+        return values
+    by_code = {str(item.get("role_code")): str(item.get("role_code")) for item in catalog}
+    by_code_lower = {code.lower(): code for code in by_code}
+    by_name = {str(item.get("name")): str(item.get("role_code"))
+               for item in catalog if str(item.get("name") or "").strip()}
+    resolved: list[str] = []
+    for token in values:
+        lowered = token.lower()
+        if token in by_code:
+            resolved.append(token)
+            continue
+        if lowered in by_code_lower:
+            resolved.append(by_code_lower[lowered])
+            continue
+        alias = _ROLE_ALIAS_INDEX.get(lowered)
+        if alias:
+            resolved.append(alias)
+            continue
+        if token in by_name:
+            resolved.append(by_name[token])
+            continue
+        candidates = {code for name, code in by_name.items() if name in token or token in name}
+        resolved.append(candidates.pop() if len(candidates) == 1 else token)
+    return resolved
+
+
+def _create_one(store: Any, tenant: str, *, user_id: str, display_name: str,
+                role_codes: list[str], org_id: str | None, skill: Any,
+                password: str | None) -> dict[str, Any]:
+    from .auth import generate_password, hash_password
+
+    if not _USER_ID_RE.match(user_id):
+        raise _tool_error("create_identity_user", "INVALID_USER_ID",
+                          f"账号只允许字母/数字/_ . @ -，长度 3~64：{user_id}")
+    if store.get_user(tenant_id=tenant, user_id=user_id):
+        raise _tool_error("create_identity_user", "USER_EXISTS", f"账号已存在: {user_id}")
+    initial = str(password or "") or generate_password()
+    if len(initial) < 8:
+        raise _tool_error("create_identity_user", "WEAK_PASSWORD", "初始密码至少 8 位")
+    try:
+        store.create_user(tenant_id=tenant, user_id=user_id,
+                          password_hash=hash_password(initial),
+                          display_name=display_name or user_id,
+                          org_id=org_id, status="active", must_change_password=1)
+        store.bind_user(tenant_id=tenant, user_id=user_id, role_codes=role_codes,
+                        org_id=org_id, skill=skill)
+    except ValueError as exc:
+        raise _tool_error("create_identity_user", "INVALID_USER", str(exc)) from exc
+    return {"user_id": user_id, "display_name": display_name or user_id,
+            "org_id": org_id, "org_name": _org_name_for(store, tenant, org_id),
+            "role_codes": role_codes, "skill": skill,
+            "initial_password": initial}
+
+
+async def create_identity_user(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """建账号 + 绑角色/组织（支持单个与批量）；初始密码只回显一次，首登强制改密。
+
+    单个：``{user_id, display_name, role_codes, org_name}``
+    批量：``{people:[{display_name, user_id?, role_codes?, org_name?}...], user_id_prefix}``
+    """
+    store = _identity_store()
+    tenant = _identity_tenant(payload, ctx)
+    default_roles = _normalize_roles(store, tenant, payload.get("role_codes")) or ["worker"]
+    default_org = _resolve_org_id(store, tenant, payload)
+    default_skill = payload.get("skill")
+
+    people = payload.get("people")
+    if isinstance(people, list) and people:
+        entries: list[dict[str, Any]] = [item for item in people if isinstance(item, dict)]
+        if not entries:
+            raise _tool_error("create_identity_user", "INVALID_PEOPLE", "people 必须是对象数组")
+        prefix = str(payload.get("user_id_prefix") or "worker").strip() or "worker"
+        generated = iter(_next_user_ids(store, tenant, prefix, len(entries)))
+        created: list[dict[str, Any]] = []
+        for entry in entries:
+            user_id = str(entry.get("user_id") or "").strip() or next(generated)
+            roles = _normalize_roles(store, tenant, entry.get("role_codes")) or default_roles
+            org_id = _resolve_org_id(store, tenant, entry) if (entry.get("org_id") or entry.get("org_name")) else default_org
+            created.append(_create_one(
+                store, tenant, user_id=user_id,
+                display_name=str(entry.get("display_name") or "").strip() or user_id,
+                role_codes=roles, org_id=org_id,
+                skill=entry.get("skill") or default_skill, password=None))
+        return {
+            "tenant_id": tenant,
+            "count": len(created),
+            "created": created,
+            "role_codes": default_roles,
+            "org_id": default_org,
+            "password_returned_once": True,
+            "must_change_password": True,
+            "trace_id": _trace(ctx, "create_identity_user"),
+            "evidence": [_evidence("identity", f"users:{tenant}",
+                                   f"created={len(created)} role={','.join(default_roles)}")],
+        }
+
+    user_id = str(payload.get("user_id") or "").strip()
+    display_name = str(payload.get("display_name") or "").strip()
+    if not user_id and display_name:
+        _, existing = _resolve_user_id_by_name(store, tenant, display_name)
+        if existing:
+            who = existing[0]
+            raise _tool_error(
+                "create_identity_user", "NAME_EXISTS",
+                f"「{display_name}」已经有账号 {who.get('user_id')}（角色：{','.join(str(r) for r in (who.get('role_codes') or ['工人']))}）。"
+                f"不用重复建号；如果是要给他加角色，可以说「给 {who.get('user_id')} 加上品保角色」。")
+        user_id = next(iter(_next_user_ids(
+            store, tenant, str(payload.get("user_id_prefix") or "worker").strip() or "worker", 1)))
+    if not user_id:
+        raise _tool_error("create_identity_user", "MISSING_USER_ID",
+                          "需要给出账号（user_id）或姓名（display_name），多人请用 people 数组")
+    created = _create_one(store, tenant, user_id=user_id, display_name=display_name or user_id,
+                          role_codes=default_roles, org_id=default_org,
+                          skill=default_skill, password=payload.get("password"))
+    return {
+        "tenant_id": tenant,
+        "count": 1,
+        "created": [created],
+        "user_id": created["user_id"],
+        "display_name": created["display_name"],
+        "org_id": created["org_id"],
+        "role_codes": created["role_codes"],
+        "skill": created["skill"],
+        "initial_password": created["initial_password"],
+        "password_returned_once": True,
+        "must_change_password": True,
+        "trace_id": _trace(ctx, "create_identity_user"),
+        "evidence": [_evidence("identity", created["user_id"],
+                               f"created role={','.join(default_roles)} org={default_org or '-'}")],
+    }
+
+
+def _resolve_user_id_by_name(store: Any, tenant: str, name: str) -> tuple[str | None, list[dict[str, Any]]]:
+    """按 display_name 精确匹配账号。返回 (唯一 user_id 或 None, 全部匹配)。"""
+    target = str(name or "").strip()
+    if not target:
+        return None, []
+    matches = [u for u in store.list_users(tenant_id=tenant)
+               if str(u.get("display_name") or "").strip() == target]
+    ids = [str(u.get("user_id")) for u in matches if str(u.get("user_id") or "").strip()]
+    return (ids[0] if len(ids) == 1 else None), matches
+
+
+async def assign_identity_account(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """给已有账号调组织/角色（分配账号、换岗、加角色）。"""
+    store = _identity_store()
+    tenant = _identity_tenant(payload, ctx)
+    user_id = str(payload.get("user_id") or "").strip()
+    if not user_id and (payload.get("display_name") or payload.get("name")):
+        match, matches = _resolve_user_id_by_name(
+            store, tenant, str(payload.get("display_name") or payload.get("name") or ""))
+        if len(matches) > 1:
+            who = "、".join(f"{u.get('user_id')}（{u.get('display_name')}）" for u in matches)
+            raise _tool_error("assign_identity_account", "AMBIGUOUS_USER_NAME",
+                              f"有 {len(matches)} 个叫「{payload.get('display_name')}」的账号：{who}。请指定账号，例如「给 worker001 调整」")
+        user_id = match or ""
+    user = store.get_user(tenant_id=tenant, user_id=user_id)
+    if not user and user_id:
+        # 模型常把**姓名**填进 user_id（「把张伟分到1班组」）→ 按姓名唯一匹配回账号
+        match, matches = _resolve_user_id_by_name(store, tenant, user_id)
+        if len(matches) > 1:
+            who = "、".join(f"{u.get('user_id')}（{u.get('display_name')}）" for u in matches)
+            raise _tool_error("assign_identity_account", "AMBIGUOUS_USER_NAME",
+                              f"有 {len(matches)} 个叫「{user_id}」的账号：{who}。请指定账号，例如「给 worker001 调整」")
+        if match:
+            user_id = match
+            user = store.get_user(tenant_id=tenant, user_id=user_id)
+    if not user:
+        raise _tool_error("assign_identity_account", "USER_NOT_FOUND",
+                          f"账号不存在: {user_id}（如果是新员工，可以说「给{payload.get('display_name') or '他'}建一个账号」）")
+    bindings = store.list_bindings(tenant_id=tenant, user_id=user_id)
+    current = bindings[0] if bindings else {}
+    raw_roles = payload.get("role_codes")
+    if isinstance(raw_roles, list) and raw_roles:
+        role_codes = _normalize_roles(store, tenant, raw_roles)
+        if str(payload.get("role_mode") or "set").strip().lower() == "add":
+            # 「加上/再加」→ 在原角色上追加（去重保序）
+            merged = list(current.get("role_codes") or []) + role_codes
+            role_codes = list(dict.fromkeys(str(role) for role in merged if str(role).strip()))
+    else:
+        role_codes = list(current.get("role_codes") or []) or ["worker"]
+    if payload.get("org_id") or payload.get("org_name"):
+        org_id = _resolve_org_id(store, tenant, payload)
+    else:
+        # 只改角色、没提组织 → 保留原组织（否则「让他当组长」会把班组清空）
+        org_id = current.get("org_id")
+    try:
+        binding = store.bind_user(tenant_id=tenant, user_id=user_id, role_codes=role_codes,
+                                  org_id=org_id, skill=payload.get("skill"))
+    except ValueError as exc:
+        raise _tool_error("assign_identity_account", "INVALID_BINDING", str(exc)) from exc
+    return {
+        "tenant_id": tenant,
+        "user_id": user_id,
+        "display_name": user.get("display_name"),
+        "org_id": org_id,
+        "org_name": _org_name_for(store, tenant, org_id),
+        "role_codes": role_codes,
+        "binding": binding,
+        "trace_id": _trace(ctx, "assign_identity_account"),
+        "evidence": [_evidence("identity", user_id,
+                               f"assigned role={','.join(role_codes)} org={org_id or '-'}")],
+    }
+
+
+# ---------------------------------------------------------------------------
+# 组织节点（对话建公司/部门/班组；同名同父复用，不重复建）
+# ---------------------------------------------------------------------------
+
+_ORG_TYPE_PREFIX = {"company": "company", "dept": "dept", "team": "team"}
+
+
+def _org_type_from_name(name: str) -> str:
+    """按名称推断节点类型：含公司/厂 → company；含部 → dept；含班组/组/线/车间 → team。"""
+    if any(token in name for token in ("公司", "厂")):
+        return "company"
+    if "部" in name:
+        return "dept"
+    if any(token in name for token in ("班组", "组", "线", "车间")):
+        return "team"
+    return "team"
+
+
+def _org_slug(name: str, org_type: str, taken: set[str]) -> str:
+    """生成稳定且不冲突的 org_id：``team-1``/``dept-3f2a1b`` 这类 slug。
+
+    名称里的 ASCII 字母数字直接保留（「1班组」→ ``team-1``）；纯中文名用名称的
+    短摘要（稳定：同一名称永远同一后缀），与既有节点冲突时再加序号。
+    """
+    ascii_part = "".join(
+        ch for ch in name.lower() if ch.isascii() and (ch.isalnum() or ch in "-_")
+    ).strip("-_")
+    if not ascii_part:
+        ascii_part = sha256(name.encode("utf-8")).hexdigest()[:6]
+    prefix = _ORG_TYPE_PREFIX.get(org_type, "org")
+    base = f"{prefix}-{ascii_part}"[:60]
+    slug = base
+    index = 2
+    while slug in taken:
+        slug = f"{base}-{index}"[:64]
+        index += 1
+    return slug
+
+
+def _resolve_parent_id(payload: dict[str, Any], nodes: list[dict[str, Any]]) -> str | None:
+    """父节点：parent_id 优先（必须是已有节点）；否则按 parent_name 精确/唯一包含匹配。"""
+    raw_id = str(payload.get("parent_id") or "").strip()
+    if raw_id:
+        if not any(str(node.get("org_id") or "") == raw_id for node in nodes):
+            raise _tool_error("create_org_node", "ORG_PARENT_NOT_FOUND", f"父组织不存在: {raw_id}")
+        return raw_id
+    parent_name = str(payload.get("parent_name") or "").strip()
+    if not parent_name:
+        return None
+    for node in nodes:
+        if str(node.get("name") or "") == parent_name:
+            return str(node["org_id"])
+    matched = {str(node["org_id"]) for node in nodes if parent_name in str(node.get("name") or "")}
+    if len(matched) == 1:
+        return matched.pop()
+    raise _tool_error("create_org_node", "ORG_PARENT_NOT_FOUND",
+                      f"父组织不存在: {parent_name}（可先在「管理 → 组织架构」新建，或直接给 parent_id）")
+
+
+def _org_payload(store: Any, tenant: str, node: dict[str, Any], *, created: bool) -> dict[str, Any]:
+    org_id = str(node.get("org_id") or "")
+    path = store.org_path(tenant_id=tenant, org_id=org_id)
+    names = {str(item.get("org_id") or ""): str(item.get("name") or "")
+             for item in store.org_tree(tenant_id=tenant)}
+    return {
+        "tenant_id": tenant,
+        "org_id": org_id,
+        "name": str(node.get("name") or ""),
+        "org_type": str(node.get("org_type") or ""),
+        "parent_id": node.get("parent_id") or None,
+        "org_path": path,
+        "org_path_names": [names.get(item, item) for item in path],
+        "created": created,
+        "reused": not created,
+    }
+
+
+async def create_org_node(payload: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+    """新建组织节点（公司/部门/班组），并挂到父节点下。
+
+    - ``name``：节点名（必填），如「1班组」「生产部」；
+    - ``org_type``：company|dept|team（可选，不传按名称推断）；
+    - ``parent_name`` / ``parent_id``：父节点（可选，找不到报 ORG_PARENT_NOT_FOUND）。
+
+    幂等：**同名同父节点已存在时复用**（不重复建、org_id 不变）。
+    """
+    from .identity import ORG_TYPES
+
+    store = _identity_store()
+    tenant = _identity_tenant(payload, ctx)
+    name = str(payload.get("name") or "").strip()
+    if not name:
+        raise _tool_error("create_org_node", "INVALID_ORG_NAME", "需要给出组织节点名称，如「1班组」「生产部」")
+    raw_type = str(payload.get("org_type") or "").strip().lower()
+    if raw_type and raw_type not in ORG_TYPES:
+        raise _tool_error("create_org_node", "INVALID_ORG_TYPE",
+                          f"org_type 只能是 company/dept/team：{raw_type}")
+    nodes = store.org_tree(tenant_id=tenant)
+    parent_id = _resolve_parent_id(payload, nodes)
+    for node in nodes:
+        # 同名同父 → 复用（用户重复说「建1班组」不会建出两个）
+        if (str(node.get("name") or "") == name
+                and (node.get("parent_id") or None) == (parent_id or None)):
+            result = _org_payload(store, tenant, node, created=False)
+            result.update({"trace_id": _trace(ctx, "create_org_node"),
+                           "evidence": [_evidence("identity", result["org_id"],
+                                                  f"reused name={name} parent={parent_id or '-'}")]})
+            return result
+    org_type = raw_type or _org_type_from_name(name)
+    slug = _org_slug(name, org_type, {str(node.get("org_id") or "") for node in nodes})
+    node = store.upsert_org(tenant_id=tenant, org_id=slug, name=name,
+                            parent_id=parent_id, org_type=org_type, source="manual")
+    result = _org_payload(store, tenant, node, created=True)
+    result.update({"trace_id": _trace(ctx, "create_org_node"),
+                   "evidence": [_evidence("identity", result["org_id"],
+                                          f"created name={name} type={org_type} parent={parent_id or '-'}")]})
+    return result
+
+
 HANDLERS = {
     "data_import_run": m0_import,
     "data_import_status": m0_status,
@@ -813,4 +1265,9 @@ HANDLERS = {
     "ingest_recognized": ingest_recognized,
     "query_recognized_table": query_recognized_table,
     "ingest_canonical": ingest_canonical,
+    # 身份/账号（对话建账号、分配账号、建组织节点）
+    "list_identity_users": list_identity_users,
+    "create_identity_user": create_identity_user,
+    "assign_identity_account": assign_identity_account,
+    "create_org_node": create_org_node,
 }

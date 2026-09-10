@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Form, Input, Space, Typography } from 'antd';
 import { useState } from 'react';
 import { useAuthStore } from '../auth/useAuthStore';
+import { markOrgGuidePending } from '../features/org/guidanceApi';
 import { landingPathForRoles } from './LoginPage';
 
 /**
@@ -8,6 +9,7 @@ import { landingPathForRoles } from './LoginPage';
  *
  * 只有系统还没有任何账号时才会被 `AuthBoundary` 渲染；注册成功后自动登录，
  * 该账号同时绑 factory-director + org-admin（业务总控 + 组织管理员）。
+ * 注册完成后先弹出「组织架构推荐」步骤（可跳过），再进入会话页。
  */
 export function RegisterAdminPage() {
   const registerAdmin = useAuthStore((state) => state.registerAdmin);
@@ -45,6 +47,8 @@ export function RegisterAdminPage() {
                 user_id: values.user_id.trim(),
                 password: values.password,
               });
+              // 注册完成 → 组织架构推荐步骤（可跳过）→ 再进会话页
+              markOrgGuidePending();
               window.location.replace(landingPathForRoles(me.roles));
             } catch (submitError) {
               setError(submitError instanceof Error ? submitError.message : '注册失败');

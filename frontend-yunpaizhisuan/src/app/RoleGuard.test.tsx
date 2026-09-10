@@ -14,7 +14,6 @@ const renderRoute = (path: AppPath, content: string) =>
       <Routes>
         {/* 被拒时回角色自己的落地页；为可能的目标各定义一个可识别页面 */}
         <Route path="/" element={<div>对话页落地</div>} />
-        {path !== '/dashboard' ? <Route path="/dashboard" element={<div>Dashboard 落地页</div>} /> : null}
         {path !== '/worker' ? <Route path="/worker" element={<div>工人落地页</div>} /> : null}
         <Route path={path} element={<RoleGuard path={path}>{content}</RoleGuard>} />
       </Routes>
@@ -28,24 +27,25 @@ describe('RoleGuard', () => {
   });
 
   it('renders children when the current role holds the route permission', async () => {
-    renderRoute('/dashboard', '受保护的 Dashboard');
+    renderRoute('/org', '受保护的组织架构');
 
-    expect(await screen.findByText('受保护的 Dashboard')).toBeInTheDocument();
+    expect(await screen.findByText('受保护的组织架构')).toBeInTheDocument();
   });
 
-  it('renders permission-free routes without a role requirement', async () => {
-    renderRoute('/tasks', '任务看板内容');
+  it('renders a route whose permission the current role holds', async () => {
+    window.localStorage.setItem('mockRoleId', 'worker');
+    renderRoute('/worker', '工人工作台内容');
 
-    expect(await screen.findByText('任务看板内容')).toBeInTheDocument();
+    expect(await screen.findByText('工人工作台内容')).toBeInTheDocument();
   });
 
   it('redirects to the role landing page and writes a permission denied audit when the role lacks access', async () => {
     window.localStorage.setItem('mockRoleId', 'worker');
-    // 工人角色无 quality:supervise → 拒绝 → 回工人自己的落地页 /worker（不是 /dashboard）
-    renderRoute('/quality', '不应渲染的 Quality');
+    // 工人角色无 role:manage → 拒绝 → 回工人自己的落地页 /worker
+    renderRoute('/roles', '不应渲染的角色权限页');
 
     expect(await screen.findByText('工人落地页')).toBeInTheDocument();
-    expect(screen.queryByText('不应渲染的 Quality')).not.toBeInTheDocument();
+    expect(screen.queryByText('不应渲染的角色权限页')).not.toBeInTheDocument();
 
     await waitFor(async () => {
       const logs = await getAuditLogs();
@@ -54,8 +54,8 @@ describe('RoleGuard', () => {
           expect.objectContaining({
             actor: '生产工人',
             action: 'PERMISSION_DENIED',
-            module: 'QualitySupervision',
-            targetId: '/quality',
+            module: 'Roles',
+            targetId: '/roles',
             result: 'blocked',
           }),
         ]),
@@ -66,10 +66,10 @@ describe('RoleGuard', () => {
   it('fails closed when the role query errors', async () => {
     vi.stubEnv('VITE_ENABLE_MSW', 'false');
     server.use(http.get('/api/auth/me', () => HttpResponse.json({ message: 'Auth unavailable' }, { status: 503 })));
-    renderRoute('/quality', '不应渲染的 Quality');
+    renderRoute('/roles', '不应渲染的角色权限页');
 
     // 角色未知 → 默认落地页（对话页），仍不放行目标页
     expect(await screen.findByText('对话页落地')).toBeInTheDocument();
-    expect(screen.queryByText('不应渲染的 Quality')).not.toBeInTheDocument();
+    expect(screen.queryByText('不应渲染的角色权限页')).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
-import { BellOutlined, MenuOutlined } from '@ant-design/icons';
-import { Badge, Breadcrumb, Button, Drawer, Layout } from 'antd';
+import { BellOutlined } from '@ant-design/icons';
+import { Badge, Breadcrumb, Button, Layout } from 'antd';
 import type { BreadcrumbProps } from 'antd';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
@@ -8,7 +8,6 @@ import { isDemoRoleEnabled } from '../app/runtimeMode';
 import { useTabsStore } from '../store/useTabsStore';
 import { useRecentVisitsStore } from '../store/useRecentVisitsStore';
 import { ModuleTabs } from './ModuleTabs';
-import { SideNav } from './SideNav';
 import { CommandPalette } from '../components/CommandPalette';
 import { DatabaseTenantSwitcher } from '../components/DatabaseTenantSwitcher';
 import { VersionBadge } from '../components/VersionBadge';
@@ -20,15 +19,21 @@ import { WorkbenchBell } from '../features/notifications/WorkbenchBell';
 import { TodoCenterDrawer } from '../features/todos/TodoCenterDrawer';
 import { useTodoCenter } from '../features/todos/useTodoCenter';
 
-const { Content, Header, Sider } = Layout;
+const { Content, Header } = Layout;
 
 const groupTitles = new Map(sidebarGroups.map((group) => [group.key, group.title]));
 
+/**
+ * 工作台外壳。
+ *
+ * 左侧深色模块导航（云湃智算 / 我的工作台 / 各模块页）已按用户要求移除（废稿）：
+ * 组织架构 / 账号管理 / 角色与权限 从对话页顶部的「管理」下拉进入（AdminNavMenu）。
+ * 此处仅保留页头、模块标签页与内容区。
+ */
 export function WorkbenchLayout() {
   const location = useLocation();
   const openTab = useTabsStore((state) => state.openTab);
   const recordVisit = useRecentVisitsStore((state) => state.recordVisit);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [todoOpen, setTodoOpen] = useState(false);
   const roleQuery = useCurrentRole();
   const todo = useTodoCenter(roleQuery.data?.permissions);
@@ -59,22 +64,8 @@ export function WorkbenchLayout() {
 
   return (
     <Layout className="workbench-shell">
-      <Sider width={220} className="workbench-sider">
-        <div className="workbench-brand">
-          <span className="brand-title">云湃智算</span>
-          <span className="brand-subtitle">工业智造 Agent</span>
-        </div>
-        <SideNav />
-      </Sider>
       <Layout>
         <Header className="workbench-header">
-          <Button
-            className="mobile-nav-trigger"
-            type="text"
-            icon={<MenuOutlined />}
-            aria-label="打开导航"
-            onClick={() => setMobileNavOpen(true)}
-          />
           <div className="workbench-header-copy">
             <div className="header-title">云湃智造运营中心</div>
             <div className="header-subtitle">订单识别·任务协同·生产排程·操作留痕</div>
@@ -99,16 +90,6 @@ export function WorkbenchLayout() {
       </Layout>
       <TodoCenterDrawer open={todoOpen} onClose={() => setTodoOpen(false)} />
       <CommandPalette />
-      <Drawer
-        className="mobile-nav-drawer"
-        title="云湃智算导航"
-        placement="left"
-        width={240}
-        open={mobileNavOpen}
-        onClose={() => setMobileNavOpen(false)}
-      >
-        <SideNav onNavigate={() => setMobileNavOpen(false)} />
-      </Drawer>
     </Layout>
   );
 }

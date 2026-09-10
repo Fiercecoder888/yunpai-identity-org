@@ -68,6 +68,20 @@ export function EnterpriseAssistantPage() {
   const recognizedM7Batches = useRef(new Set<string>());
   const menuButton = useRef<HTMLButtonElement>(null);
   const localLangGraph = import.meta.env.VITE_LOCAL_LANGGRAPH === 'true';
+  // M1–M5 订单全链路面板（「订单管理 / 选择订单查看 M1-M5 / 重新运行」）需要 order.ingest
+  // （上传/导入订单）才渲染：种子角色里只有 厂长 与 主数据管理员 拥有该权限；
+  // 品保（order.view/order.review/report.view）、组长、工人看不到这个框。
+  // 品保的对话功能与厂长完全一致——这里只摘掉面板本身，ChatPanel 照常渲染并独占宽度。
+  // 用权限码判断而不是写死角色 id，后续调整角色授权时无需改前端。
+  const canRunOrderFlow = me?.permissions?.includes('order.ingest') ?? false;
+  const shellClassName = [
+    'assistant-shell',
+    collapsed ? 'sidebar-collapsed' : '',
+    canRunOrderFlow ? '' : 'assistant-shell-no-flow',
+  ].filter(Boolean).join(' ');
+  const orderFlowPanel = localLangGraph
+    ? <LocalAgentRunPanel pmcProgressRequest={pmcProgressRequest} />
+    : <DataFlowPanel pmcProgressRequest={pmcProgressRequest} />;
   const toolModalRef = useRef(toolModal);
   useEffect(() => {
     toolModalRef.current = toolModal;
@@ -270,7 +284,7 @@ export function EnterpriseAssistantPage() {
   }, [conversationId, navigate, selectedConversationId]);
 
   return (
-    <main className={collapsed ? 'assistant-shell sidebar-collapsed' : 'assistant-shell'}>
+    <main className={shellClassName}>
       {!collapsed ? <aside className="conversation-sidebar desktop-sidebar"><ConversationSidebar /></aside> : null}
       <header className="assistant-header">
         <div className="assistant-header-left">
@@ -325,9 +339,9 @@ export function EnterpriseAssistantPage() {
           )}
         </div>
       </header>
-      {localLangGraph
-        ? <LocalAgentRunPanel pmcProgressRequest={pmcProgressRequest} />
-        : <DataFlowPanel pmcProgressRequest={pmcProgressRequest} />}
+      {/* M1–M5 订单全链路面板：仅 order.ingest（上传/导入订单）可见，其余角色完全不渲染
+          （不占位、不留空白右栏），对话区由 .assistant-shell-no-flow 铺满。 */}
+      {canRunOrderFlow ? orderFlowPanel : null}
       <ChatPanel
         onToolAction={openToolModal}
         m7DeliveryDraft={currentM7Draft}

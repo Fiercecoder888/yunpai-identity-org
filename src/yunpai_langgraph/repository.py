@@ -14,6 +14,7 @@ class RunRepository(Protocol):
     def save(self, state: RunState) -> None: ...
     def get(self, run_id: str) -> RunState | None: ...
     def list(self, *, tenant_id: str | None = None, limit: int = 100) -> list[RunState]: ...
+    def delete(self, run_id: str) -> bool: ...
 
 
 class InMemoryRunRepository:
@@ -26,6 +27,10 @@ class InMemoryRunRepository:
     def get(self, run_id: str) -> RunState | None:
         value = self._runs.get(run_id)
         return deepcopy(value) if value else None
+
+    def delete(self, run_id: str) -> bool:
+        """删除运行快照（归属校验在 API 层做，仓库只按 id 删）。"""
+        return self._runs.pop(str(run_id), None) is not None
 
     def list(self, *, tenant_id: str | None = None, limit: int = 100) -> list[RunState]:
         values = list(reversed(self._runs.values()))
@@ -72,6 +77,13 @@ class SQLiteRunRepository:
         with self._lock, self._connect() as db:
             row = db.execute("SELECT state_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
         return json.loads(row["state_json"]) if row else None
+
+    def delete(self, run_id: str) -> bool:
+        """删除运行快照，返回是否真的删到（False = 不存在）。"""
+        with self._lock, self._connect() as db:
+            cursor = db.execute("DELETE FROM runs WHERE run_id=?", (str(run_id),))
+            removed = cursor.rowcount > 0
+        return removed
 
     def list(self, *, tenant_id: str | None = None, limit: int = 100) -> list[RunState]:
         sql, params = "SELECT state_json FROM runs", []

@@ -1,0 +1,165 @@
+{
+  "module": "identity",
+  "tools": [
+    {
+      "name": "list_identity_users",
+      "description": "查询本租户的账号列表（账号、姓名、所属组织、角色、状态）。厂长在对话里问“现在有哪些账号 / 有哪些工人 / 某个部门有谁”时使用。",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "org_id": { "type": "string", "description": "按组织节点 id 过滤（可选），如 team-asm" },
+          "role": { "type": "string", "description": "按角色 code 过滤（可选），如 worker / team-leader" },
+          "limit": { "type": "integer", "default": 50, "minimum": 1, "maximum": 200 }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "tenant_id": { "type": "string" },
+          "total": { "type": "integer" },
+          "users": { "type": "array" }
+        }
+      },
+      "execution": "sync",
+      "capability": "identity_admin",
+      "side_effect": "none",
+      "review_gate": "none"
+    },
+    {
+      "name": "create_identity_user",
+      "description": "给员工创建登录账号并绑定角色与组织，返回一次性初始密码（只回显一次，首次登录须改密）。单个用 user_id/display_name；多个（如「给赵一 李二 王三 建工人账号」「给5个工人分配账号，他们分别是…」）用 people 数组，账号没给就按前缀自动生成。厂长在对话里说“帮我给张伟建一个工人账号 / 给张一申请一个工人账号 worker100 / 给5个工人分配账号”时使用；角色默认 worker，可指定 team-leader / quality-assurance / planner / engineer / data-steward / release-manager / org-admin 等。",
+      "input_schema": {
+        "type": "object",
+        "anyOf": [
+          { "required": ["user_id"] },
+          { "required": ["display_name"] },
+          { "required": ["people"] }
+        ],
+        "properties": {
+          "user_id": { "type": "string", "description": "登录账号（单个建号时用），只允许字母/数字/_ . @ -，3~64 位，如 worker100" },
+          "display_name": { "type": "string", "description": "姓名，如 张伟" },
+          "people": {
+            "type": "array",
+            "description": "批量建号：每人一项，只给 display_name 也行（账号自动生成）",
+            "items": {
+              "type": "object",
+              "properties": {
+                "user_id": { "type": "string" },
+                "display_name": { "type": "string" },
+                "role_codes": { "type": "array", "items": { "type": "string" } },
+                "org_id": { "type": "string" },
+                "org_name": { "type": "string" },
+                "skill": { "type": "string" }
+              }
+            }
+          },
+          "user_id_prefix": { "type": "string", "description": "批量自动生成账号时的前缀，默认 worker（生成 worker001、worker002…）" },
+          "role_codes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "角色 code 列表，默认 [\"worker\"]"
+          },
+          "org_id": { "type": "string", "description": "组织节点 id（可选），如 team-asm；不传则挂公司根" },
+          "org_name": { "type": "string", "description": "组织名称（可选，按名称匹配组织节点），如 装配班组" },
+          "skill": { "type": "string", "description": "技能/工种（可选），如 装配工" },
+          "password": { "type": "string", "description": "初始密码（可选，至少 8 位）；不传则系统生成一次性密码" }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "tenant_id": { "type": "string" },
+          "count": { "type": "integer" },
+          "created": { "type": "array" },
+          "user_id": { "type": ["string", "null"] },
+          "display_name": { "type": ["string", "null"] },
+          "org_id": { "type": ["string", "null"] },
+          "role_codes": { "type": "array" },
+          "initial_password": { "type": ["string", "null"] },
+          "must_change_password": { "type": "boolean" }
+        }
+      },
+      "execution": "sync",
+      "capability": "identity_admin",
+      "side_effect": "external_write",
+      "review_gate": "none"
+    },
+    {
+      "name": "assign_identity_account",
+      "description": "给已有账号调整组织归属与角色（分配账号、换岗、加角色）。厂长在对话里说“把张伟调到装配班组 / 让李娜当组长 / 给 worker001 加个品保角色”时使用；给姓名时按姓名匹配已有账号（同名多个会追问要哪个）。",
+      "input_schema": {
+        "type": "object",
+        "anyOf": [
+          { "required": ["user_id"] },
+          { "required": ["display_name"] }
+        ],
+        "properties": {
+          "user_id": { "type": "string", "description": "要调整的账号，如 worker001（与 display_name 二选一，优先）；只记得姓名时也可直接填姓名，系统会按姓名唯一匹配账号" },
+          "display_name": { "type": "string", "description": "要调整员工的姓名（与 user_id 二选一；按姓名匹配已有账号）" },
+          "org_id": { "type": "string", "description": "新的组织节点 id（可选），如 team-asm" },
+          "org_name": { "type": "string", "description": "新的组织名称（可选，按名称匹配组织节点），如 装配班组" },
+          "role_codes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "新的角色 code 列表（可选）；不传则沿用原有角色"
+          },
+          "role_mode": {
+            "type": "string",
+            "enum": ["set", "add"],
+            "description": "set=用 role_codes 替换原有角色（默认，用于「改成/换成/当组长」）；add=在原有角色上追加（用于「加上/再加/顺便给…也加」）"
+          },
+          "skill": { "type": "string", "description": "技能/工种（可选）" }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "tenant_id": { "type": "string" },
+          "user_id": { "type": "string" },
+          "org_id": { "type": ["string", "null"] },
+          "role_codes": { "type": "array" }
+        }
+      },
+      "execution": "sync",
+      "capability": "identity_admin",
+      "side_effect": "external_write",
+      "review_gate": "none"
+    },
+    {
+      "name": "create_org_node",
+      "description": "新建组织节点（公司 / 部门 / 班组）并挂到父节点下，返回节点 id 与所在层级路径。厂长在对话里说“创建1班组 / 新建生产部 / 建一个车间 / 把1班组挂到生产部下面”时使用；同名同父节点已存在时直接复用（不会重复建）。",
+      "input_schema": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string", "description": "组织节点名称，如 1班组 / 生产部 / 桐庐云湃电子有限公司" },
+          "org_type": {
+            "type": "string",
+            "enum": ["company", "dept", "team"],
+            "description": "节点类型：company=公司 / dept=部门 / team=班组；不传则按名称推断（含「公司/厂」→company，含「部」→dept，含「班组/组/线/车间」→team，兜底 team）"
+          },
+          "parent_name": { "type": "string", "description": "父节点名称（可选，按名称匹配），如 生产部；找不到会报 ORG_PARENT_NOT_FOUND" },
+          "parent_id": { "type": "string", "description": "父节点 id（可选，直接给 org_id），如 dept-prod；与 parent_name 二选一，parent_id 优先" }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "tenant_id": { "type": "string" },
+          "org_id": { "type": "string" },
+          "name": { "type": "string" },
+          "org_type": { "type": "string" },
+          "parent_id": { "type": ["string", "null"] },
+          "org_path": { "type": "array" },
+          "org_path_names": { "type": "array" },
+          "created": { "type": "boolean" },
+          "reused": { "type": "boolean" }
+        }
+      },
+      "execution": "sync",
+      "capability": "identity_admin",
+      "side_effect": "external_write",
+      "review_gate": "none"
+    }
+  ]
+}

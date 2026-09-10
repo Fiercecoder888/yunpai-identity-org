@@ -6,7 +6,6 @@ import { hasPermission, type PermissionCode } from '../../services/permissionApi
 import { useCurrentRole } from './useCurrentRole';
 
 const ENTRIES: Array<{ path: AppPath; label: string; permission: PermissionCode }> = [
-  { path: '/setup', label: '架构设计引导', permission: 'system:setup' },
   { path: '/org', label: '组织架构', permission: 'org:write' },
   { path: '/accounts', label: '账号管理', permission: 'account:write' },
   { path: '/roles', label: '角色与权限', permission: 'role:manage' },

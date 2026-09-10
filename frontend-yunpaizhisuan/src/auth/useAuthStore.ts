@@ -13,8 +13,19 @@ import {
   type RegisterAdminPayload,
 } from './authApi';
 import { authRuntime } from './authRuntime';
+import { setChatStorageScope } from '../services/chatStorageScope';
 
 const DB_TENANT_KEY = 'yunpai.db-tenant';
+
+/**
+ * 把登录身份接到聊天本地存储命名空间（`yunpai.<tenant>:<user>.*`）。
+ * 没有真实 `user_id`（未登录 / 匿名会话 / MSW 演示模式）→ 回退全局键，
+ * 保证既有 demo 与测试行为不变。
+ */
+const applyChatStorageScope = (me?: AuthMe) => {
+  const userId = me?.user_id;
+  setChatStorageScope(userId ? { tenantId: me?.tenant_id ?? me?.tenant?.id, userId } : null);
+};
 
 /**
  * 鉴权状态（PR #6 账号密码模式）。
@@ -36,7 +47,8 @@ type AuthState = {
   login: (userId: string, password: string) => Promise<AuthMe>;
   registerAdmin: (payload: RegisterAdminPayload) => Promise<AuthMe>;
   logout: () => Promise<void>;
-  changePassword: (oldPassword: string, newPassword: string) => Promise<void>;
+  /** 首登强制改密可省略 `oldPassword`（请求体不带 `old_password`）；主动改密必填。 */
+  changePassword: (oldPassword: string | undefined, newPassword: string) => Promise<void>;
   /** 兼容旧契约：单租户模式下只刷新会话（无切换端点）。 */
   switchTenant: (tenantId: string) => Promise<void>;
   /** 兼容旧契约：匿名会话模式下重建会话（PR #6 返回 false）。 */
@@ -75,9 +87,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         companyName = bootstrapStatus.company_name;
       }
       authRuntime.setCsrfToken(me?.session?.csrf_token);
+      applyChatStorageScope(me);
       set({ status: 'ready', config, me, needsBootstrap, companyName, error: undefined });
     } catch (error) {
       authRuntime.setCsrfToken(undefined);
+      applyChatStorageScope(undefined);
       set({
         status: 'error',
         error: error instanceof Error ? error.message : 'Authentication unavailable',
@@ -89,6 +103,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   refreshMe: async () => {
     const me = await getAuthMe();
     authRuntime.setCsrfToken(me.session?.csrf_token);
+    applyChatStorageScope(me);
     set({ status: 'ready', me, needsBootstrap: false, error: undefined });
     return me;
   },
@@ -108,11 +123,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       await logoutUser();
     } finally {
       authRuntime.setCsrfToken(undefined);
+      applyChatStorageScope(undefined);
       set({ status: 'ready', me: undefined, needsBootstrap: false, error: undefined });
     }
   },
 
-  changePassword: async (oldPassword: string, newPassword: string) => {
+  changePassword: async (oldPassword: string | undefined, newPassword: string) => {
     await apiChangePassword(oldPassword, newPassword);
     await get().refreshMe();
   },
@@ -141,6 +157,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           me = await getAuthMe();
         }
         authRuntime.setCsrfToken(me.session?.csrf_token);
+        applyChatStorageScope(me);
         set({ status: 'ready', me, error: undefined });
         return true;
       } catch (error) {

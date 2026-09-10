@@ -460,6 +460,137 @@ describe('ChatPanel', () => {
     expect(onToolAction).toHaveBeenCalledWith('m7-warehouse', { m7Tab: 'delivery' });
   });
 
+  it('renders a failed tool step as 失败 with the backend reason and no success artifacts', async () => {
+    // 用户实测：工人账号问「现在有那些账号」→ 工具被权限闸拒绝（TOOL_FORBIDDEN），
+    // run 失败，但卡片却显示「完成」。失败步骤必须整条走失败分支。
+    const FORBIDDEN_REASON = '当前登录账号没有身份管理权限（只有厂长/组织管理员可以建号）。';
+    async function* stream(): AsyncGenerator<ChatStreamItem> {
+      yield {
+        type: 'message_start',
+        message_id: 'm-forbidden',
+        session_id: 's',
+        conversation_id: 'c',
+        created_at: '2026-09-09T00:00:00Z',
+      };
+      yield {
+        type: 'tool_start',
+        message_id: 'm-forbidden',
+        step_id: 'st-forbidden',
+        tool: 'list_identity_users',
+        label: '查询本租户账号',
+      };
+      yield {
+        type: 'tool_error',
+        message_id: 'm-forbidden',
+        step_id: 'st-forbidden',
+        tool: 'list_identity_users',
+        status: 'failed',
+        duration_ms: 0,
+        error: FORBIDDEN_REASON,
+      };
+      yield { type: 'delta', message_id: 'm-forbidden', content: `执行失败：${FORBIDDEN_REASON}` };
+      yield { type: 'message_done', message_id: 'm-forbidden', finish_reason: 'error' };
+    }
+
+    renderWithApp(<ChatPanel streamFactory={stream} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看最近订单全链路' }));
+
+    expect(await screen.findByText('list_identity_users')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('chat-tool-steps').querySelector('[data-tool-status="failed"]')).not.toBeNull());
+
+    expect(screen.getByText('失败')).toBeInTheDocument();
+    expect(screen.queryByText('完成')).not.toBeInTheDocument();
+    expect(screen.getByTestId('chat-tool-step-error')).toHaveTextContent(FORBIDDEN_REASON);
+    expect(screen.queryByTestId('account-list-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('account-created-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('account-created-batch-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('account-assigned-card')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-m2-artifacts')).not.toBeInTheDocument();
+    expect(screen.queryByText(/查看返回结果/)).not.toBeInTheDocument();
+  });
+
+  it('hides success artifacts and raw JSON when a failed step still carries a result payload', async () => {
+    // 数据层可能保留上一轮/失败信封里的 result；只要步骤是失败态，
+    // 身份卡、M2/M0 卡片和「查看返回结果」都不得渲染。
+    useChatStore.setState({
+      messages: [{
+        id: 'assistant-forbidden-stale',
+        role: 'assistant',
+        content: '执行失败：当前登录账号没有身份管理权限。',
+        status: 'failed',
+        tools: [{
+          id: 'forbidden-stale-step',
+          tool: 'list_identity_users',
+          label: '查询本租户账号',
+          status: 'failed',
+          error: '当前登录账号没有身份管理权限（只有厂长/组织管理员可以建号）。',
+          result: {
+            tenant_id: 'default',
+            users: [{ user_id: 'worker001', display_name: '张伟', role_codes: ['worker'] }],
+          },
+        }],
+      }],
+    });
+
+    try {
+      renderWithApp(<ChatPanel />);
+
+      expect(screen.getByText('失败')).toBeInTheDocument();
+      expect(screen.queryByText('完成')).not.toBeInTheDocument();
+      expect(screen.getByTestId('chat-tool-step-error')).toHaveTextContent(
+        '当前登录账号没有身份管理权限（只有厂长/组织管理员可以建号）。',
+      );
+      expect(screen.queryByTestId('account-list-card')).not.toBeInTheDocument();
+      expect(screen.queryByText(/查看返回结果/)).not.toBeInTheDocument();
+      expect(screen.queryByText('worker001')).not.toBeInTheDocument();
+    } finally {
+      useChatStore.setState({ messages: [] });
+    }
+  });
+
+  it('keeps 完成 plus the identity card for a successful identity step (regression)', async () => {
+    async function* stream(): AsyncGenerator<ChatStreamItem> {
+      yield {
+        type: 'message_start',
+        message_id: 'm-list-ok',
+        session_id: 's',
+        conversation_id: 'c',
+        created_at: '2026-09-09T00:00:00Z',
+      };
+      yield {
+        type: 'tool_start',
+        message_id: 'm-list-ok',
+        step_id: 'st-list-ok',
+        tool: 'list_identity_users',
+        label: '查询本租户账号',
+      };
+      yield {
+        type: 'tool_result',
+        message_id: 'm-list-ok',
+        step_id: 'st-list-ok',
+        tool: 'list_identity_users',
+        status: 'ok',
+        duration_ms: 3,
+        summary: '工具调用成功',
+        result: {
+          tenant_id: 'default',
+          users: [{ user_id: 'worker001', display_name: '张伟', org_id: 'team-asm', role_codes: ['worker'] }],
+        },
+      };
+      yield { type: 'delta', message_id: 'm-list-ok', content: '本租户有 1 个账号。' };
+      yield { type: 'message_done', message_id: 'm-list-ok', finish_reason: 'stop' };
+    }
+
+    renderWithApp(<ChatPanel streamFactory={stream} />);
+    fireEvent.click(screen.getByRole('button', { name: '查看最近订单全链路' }));
+
+    expect(await screen.findByTestId('account-list-card')).toBeInTheDocument();
+    expect(screen.getByText('完成')).toBeInTheDocument();
+    expect(screen.queryByText('失败')).not.toBeInTheDocument();
+    expect(screen.getByText('worker001')).toBeInTheDocument();
+    expect(screen.getByText(/查看返回结果/)).toBeInTheDocument();
+  });
+
   it('embeds gate decision actions in the conversation and resumes the run on approval', async () => {
     const user = userEvent.setup();
     const resumeSpy = vi.spyOn(chatApi, 'resumeLocalRunStream').mockImplementation(async function* () {

@@ -7,11 +7,11 @@ export type WorkbenchTab = {
   closable: boolean;
 };
 
-const dashboardTab: WorkbenchTab = {
-  path: '/dashboard',
-  title: 'Dashboard',
-  closable: false,
-};
+/**
+ * 关闭最后一个标签页时的兜底落地页 = Agent 对话页。
+ * 原固定标签页 `/dashboard` 已随业务模块页废稿删除（router 里不再有该路由）。
+ */
+const HOME_PATH = '/';
 
 type TabsState = {
   tabs: WorkbenchTab[];
@@ -30,11 +30,11 @@ const uniqueTabs = (tabs: WorkbenchTab[]) => {
 export const useTabsStore = create<TabsState>()(
   persist(
     (set, get) => ({
-      tabs: [dashboardTab],
-      recentPaths: ['/dashboard'],
+      tabs: [],
+      recentPaths: [],
       openTab: (tab) =>
         set((state) => ({
-          tabs: uniqueTabs([dashboardTab, ...state.tabs, tab]),
+          tabs: uniqueTabs([...state.tabs, tab]),
           recentPaths: [tab.path, ...state.recentPaths.filter((path) => path !== tab.path)].slice(0, 10),
         })),
       closeTab: (path) => {
@@ -46,19 +46,17 @@ export const useTabsStore = create<TabsState>()(
 
         const tabs = state.tabs.filter((item) => item.path !== path);
         const recentPaths = state.recentPaths.filter((item) => item !== path);
-        const fallbackPath = recentPaths.find((item) => tabs.some((tabItem) => tabItem.path === item)) ?? '/dashboard';
+        const fallbackPath = recentPaths.find((item) => tabs.some((tabItem) => tabItem.path === item)) ?? HOME_PATH;
 
-        set({
-          tabs: uniqueTabs([dashboardTab, ...tabs]),
-          recentPaths: recentPaths.length > 0 ? recentPaths : ['/dashboard'],
-        });
+        set({ tabs, recentPaths });
 
         return fallbackPath;
       },
-      resetTabs: () => set({ tabs: [dashboardTab], recentPaths: ['/dashboard'] }),
+      resetTabs: () => set({ tabs: [], recentPaths: [] }),
     }),
     {
-      name: 'yunpai-workbench-tabs',
+      // 存储键升版：旧的持久化状态里可能带着已下线的 /dashboard 固定标签页。
+      name: 'yunpai-workbench-tabs-v2',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ tabs: state.tabs, recentPaths: state.recentPaths }),
     },

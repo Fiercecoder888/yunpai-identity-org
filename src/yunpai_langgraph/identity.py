@@ -648,7 +648,8 @@ class IdentityStore:
         """账号列表（含绑定角色/组织），供厂长账号管理页与引导AI 使用。"""
         with self._txn() as db:
             rows = db.execute(
-                """SELECT u.user_id, u.display_name, u.org_id, u.status,
+                """SELECT u.user_id, u.display_name,
+                          COALESCE(b.org_id, u.org_id) AS org_id, u.status,
                           u.must_change_password, u.created_at,
                           b.role_codes, b.skill
                      FROM users u

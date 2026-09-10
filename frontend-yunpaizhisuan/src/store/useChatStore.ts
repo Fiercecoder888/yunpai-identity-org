@@ -21,9 +21,18 @@ import {
   type ChatToolDataRef,
 } from '../services/chatApi';
 import { HttpClientError } from '../services/httpClient';
+import { chatStorageKey, onChatStorageScopeChange } from '../services/chatStorageScope';
 import { extractToolDataRef } from '../features/chat/toolDataRef';
 import { uuidV4 } from '../utils/uuid';
 
+/**
+ * 工具步骤状态。后端 orchestrator 的 `step.status` 还有 `blocked`，历史回读时按下述规则归一化，
+ * 所以 `ChatToolStep` 不再单列 `blocked`（渲染层不必再判一次）：
+ * - `blocked` + `error`（TOOL_FORBIDDEN 权限拒绝，graph.py `record.update(status="blocked", error=…)`）
+ *   → `failed` + 原因；
+ * - `blocked` 无 `error`（reviewer 未通过、已开人工 Gate，graph.py `record["status"] = "blocked"`）
+ *   → `waiting_human`，与 `LocalAgentRunPanel` 的既有语义一致。
+ */
 export type ChatToolStep = { id: string; tool: string; label: string; status: 'running' | 'waiting_human' | 'ok' | 'failed'; durationMs?: number; summary?: string; error?: string; result?: unknown; resultTruncated?: boolean; dataRef?: ChatToolDataRef };
 export type ChatAttachment = {
   id: string;
@@ -79,16 +88,17 @@ type ChatState = {
   ) => Promise<ChatMessage>;
 };
 
+/** 遗留的全局键名；实际读写都过 `chatStorageKey()` 落到当前用户的命名空间。 */
 export const CHAT_LAST_CONVERSATION_KEY = 'yunpai.chat.last-conversation-id';
 const LOCAL_MESSAGE_SETS_KEY = 'yunpai.local-agent-message-sets';
-export const lastSelectedConversationId = () => globalThis.localStorage?.getItem(CHAT_LAST_CONVERSATION_KEY) ?? undefined;
-const rememberConversation = (id: string) => globalThis.localStorage?.setItem(CHAT_LAST_CONVERSATION_KEY, id);
+export const lastSelectedConversationId = () => globalThis.localStorage?.getItem(chatStorageKey(CHAT_LAST_CONVERSATION_KEY)) ?? undefined;
+const rememberConversation = (id: string) => globalThis.localStorage?.setItem(chatStorageKey(CHAT_LAST_CONVERSATION_KEY), id);
 const forgetConversation = (id: string) => {
-  if (lastSelectedConversationId() === id) globalThis.localStorage?.removeItem(CHAT_LAST_CONVERSATION_KEY);
+  if (lastSelectedConversationId() === id) globalThis.localStorage?.removeItem(chatStorageKey(CHAT_LAST_CONVERSATION_KEY));
 };
 const readLocalMessageSets = (): Record<string, ChatMessage[]> => {
   try {
-    const value = JSON.parse(globalThis.localStorage?.getItem(LOCAL_MESSAGE_SETS_KEY) || '{}') as unknown;
+    const value = JSON.parse(globalThis.localStorage?.getItem(chatStorageKey(LOCAL_MESSAGE_SETS_KEY)) || '{}') as unknown;
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, ChatMessage[]> : {};
   } catch {
     return {};
@@ -105,7 +115,7 @@ const persistLocalMessages = (conversationId: string, messages: ChatMessage[]) =
     }),
   }));
   try {
-    globalThis.localStorage?.setItem(LOCAL_MESSAGE_SETS_KEY, JSON.stringify({ ...readLocalMessageSets(), [conversationId]: stored }));
+    globalThis.localStorage?.setItem(chatStorageKey(LOCAL_MESSAGE_SETS_KEY), JSON.stringify({ ...readLocalMessageSets(), [conversationId]: stored }));
   } catch {
     // History remains available in memory if browser storage is full or unavailable.
   }
@@ -114,21 +124,52 @@ const forgetLocalMessages = (conversationId: string) => {
   if (import.meta.env.VITE_LOCAL_LANGGRAPH !== 'true') return;
   const messageSets = readLocalMessageSets();
   delete messageSets[conversationId];
-  globalThis.localStorage?.setItem(LOCAL_MESSAGE_SETS_KEY, JSON.stringify(messageSets));
+  globalThis.localStorage?.setItem(chatStorageKey(LOCAL_MESSAGE_SETS_KEY), JSON.stringify(messageSets));
 };
 const uid = (prefix: string) => `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 const streamingId = (messages: ChatMessage[]) => [...messages].reverse().find((item) => item.role === 'assistant' && item.status === 'streaming')?.id;
 const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
+/** 历史里步骤失败原因：`{code,message}` 或字符串（后端两种都可能）。 */
+const stepErrorText = (error: unknown): string | undefined => {
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object') {
+    const detail = error as { message?: unknown; code?: unknown };
+    if (typeof detail.message === 'string' && detail.message.trim()) return detail.message;
+    if (typeof detail.code === 'string' && detail.code.trim()) return detail.code;
+  }
+  return undefined;
+};
+/**
+ * 历史回读（刷新页面）时的步骤状态归一化：
+ * - `failed` → `failed`（带原因）；
+ * - `blocked` + `error`（TOOL_FORBIDDEN 权限拒绝）→ `failed` + 原因，
+ *   否则刷新后被拒步骤会显示「运行中」且没有原因；
+ * - `blocked` 无 `error`（reviewer 未通过 → 已开人工 Gate）→ `waiting_human`；
+ * - `ok` / `waiting_human` 原样，其它未知状态仍按 `running` 兜底。
+ */
+const toToolStepStatus = (status: string, error: unknown): ChatToolStep['status'] => {
+  if (status === 'failed') return 'failed';
+  if (status === 'blocked') return stepErrorText(error) ? 'failed' : 'waiting_human';
+  if (status === 'ok') return 'ok';
+  if (status === 'waiting_human') return 'waiting_human';
+  return 'running';
+};
 const toMessages = (items: ChatHistoryMessage[]): ChatMessage[] => items.map((item) => ({
   id: item.id, role: item.role, content: item.content,
   status: item.status === 'completed' ? 'completed' : item.status === 'streaming' ? 'streaming' : item.run?.status === 'cancelled' ? 'cancelled' : 'failed',
   error: item.run?.error,
   attachments: item.attachments,
   structuredData: item.structured_data,
-  tools: item.run?.tool_steps.map((step) => ({ id: step.step_id, tool: step.tool, label: step.safe_summary ?? step.tool,
-    status: step.status === 'ok' ? 'ok' : step.status === 'failed' ? 'failed' : step.status === 'waiting_human' ? 'waiting_human' : 'running', summary: step.safe_summary, durationMs: step.duration_ms,
-    result: parseToolResult(step.safe_result), resultTruncated: step.result_truncated,
-    dataRef: extractToolDataRef(step.tool, undefined, parseToolResult(step.safe_result)) })),
+  tools: item.run?.tool_steps.map((step) => {
+    const status = toToolStepStatus(step.status, step.error);
+    return {
+      id: step.step_id, tool: step.tool, label: step.safe_summary ?? step.tool, status,
+      ...(status === 'failed' ? { error: stepErrorText(step.error) ?? '执行失败' } : {}),
+      summary: step.safe_summary, durationMs: step.duration_ms,
+      result: parseToolResult(step.safe_result), resultTruncated: step.result_truncated,
+      dataRef: extractToolDataRef(step.tool, undefined, parseToolResult(step.safe_result)),
+    };
+  }),
 }));
 
 const parseToolResult = (raw?: string | null): unknown => {
@@ -577,3 +618,7 @@ export const useChatStore = create<ChatState>((set, get) => {
     },
   };
 });
+
+// 登录 / 退出 / 切换租户会改变本地存储命名空间：清掉内存里的会话，
+// 避免上一个账号的会话列表或消息在页面内（刷新前）继续可见。
+onChatStorageScopeChange(() => useChatStore.getState().resetChat());

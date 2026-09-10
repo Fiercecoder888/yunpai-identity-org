@@ -6,6 +6,7 @@ import { requestFollowUps, type ChatStreamItem, type ChatStreamOptions } from '.
 import { useChatStore } from '../../store/useChatStore';
 import { M2RunArtifacts } from '../m2/M2RunArtifacts';
 import { M0DocArtifacts } from '../m0/M0DocArtifacts';
+import { AccountToolArtifacts } from '../identity/AccountToolArtifacts';
 import type { M7WarehouseTab } from '../M7WarehousePanel';
 import {
   m7DeliveryDraftContext,
@@ -24,6 +25,9 @@ export type ChatToolActionOptions = {
 
 export const SUGGESTED_PROMPTS = ['检查采购预警与物料齐套风险', '排查本周排程冲突', '查看最近订单全链路', '有一批供应商的货要入库了'];
 const EMPTY_REPLY_FALLBACK = '未获取到有效回答，请重试或换一种问法';
+// 失败步骤必须带原因（后端 TOOL_FORBIDDEN 之类的原因由 chatApi 透传）。
+// 万一事件里既没有 error 也没有 summary，用一个中性提示兜底，绝不冒充“完成”。
+const TOOL_FAILURE_FALLBACK = '这一步没有成功完成，请稍后重试或换个说法。';
 const M7_PREPARE_WORKFLOW_TABS = {
   prepare_m7_inbound_workflow: 'delivery',
   prepare_m7_quality_inspection_workflow: 'qc',
@@ -302,25 +306,32 @@ export function ChatPanel({
                           const waitingHuman = step.status === 'waiting_human';
                           const hasResult = step.result !== undefined && step.result !== null;
                           const showLabel = Boolean(step.label) && step.label !== step.tool;
+                          // 失败态的唯一判定：status==='failed' 或带 error。
+                          // 工具被权限闸拒绝（TOOL_FORBIDDEN）时 run 失败，这里必须整条走失败分支：
+                          // 不显示“完成”、不渲染任何成功卡片/原始 JSON，只显示失败原因。
+                          const failed = step.status === 'failed' || Boolean(step.error);
+                          const failureReason = failed
+                            ? step.error?.trim() || step.summary?.trim() || TOOL_FAILURE_FALLBACK
+                            : '';
                           const workflowOptions = m7WorkflowOptions(step.tool, step.result);
                           const workflowTab = workflowOptions?.m7Tab;
                           return (
                             <div
-                              className={running ? 'chat-tool-step chat-tool-step-running' : waitingHuman ? 'chat-tool-step chat-tool-step-waiting' : 'chat-tool-step'}
+                              className={failed ? 'chat-tool-step chat-tool-step-failed' : running ? 'chat-tool-step chat-tool-step-running' : waitingHuman ? 'chat-tool-step chat-tool-step-waiting' : 'chat-tool-step'}
                               key={step.id}
-                              data-tool-status={step.status}
+                              data-tool-status={failed ? 'failed' : step.status}
                             >
                               <div className="chat-tool-step-header">
-                                {running ? <LoadingOutlined spin /> : <ToolOutlined />}
+                                {running && !failed ? <LoadingOutlined spin /> : <ToolOutlined />}
                                 <code className="chat-tool-step-tool">{step.tool}</code>
-                                <Tag color={step.status === 'failed' ? 'error' : step.status === 'ok' ? 'success' : waitingHuman ? 'warning' : 'processing'}>
-                                  {running ? '运行中' : waitingHuman ? '等待人工' : step.status === 'ok' ? '完成' : '失败'}
+                                <Tag color={failed ? 'error' : step.status === 'ok' ? 'success' : waitingHuman ? 'warning' : 'processing'}>
+                                  {failed ? '失败' : running ? '运行中' : waitingHuman ? '等待人工' : step.status === 'ok' ? '完成' : '失败'}
                                 </Tag>
-                                {step.durationMs !== undefined ? <span className="chat-tool-step-meta">{step.durationMs} ms</span> : null}
+                                {!failed && step.durationMs !== undefined ? <span className="chat-tool-step-meta">{step.durationMs} ms</span> : null}
                               </div>
                               {showLabel ? <span className="chat-tool-step-label">{step.label}</span> : null}
-                              {step.error ? <span className="chat-tool-step-error">{step.error}</span> : null}
-                              {workflowTab && step.status === 'ok' ? (
+                              {failed ? <span className="chat-tool-step-error" data-testid="chat-tool-step-error">{failureReason}</span> : null}
+                              {!failed && workflowTab && step.status === 'ok' ? (
                                 <Button
                                   size="small"
                                   icon={workflowOptions?.m7Panel === 'file-recognition'
@@ -333,10 +344,11 @@ export function ChatPanel({
                                     : `打开 ${M7_WORKFLOW_LABELS[workflowTab]}`}
                                 </Button>
                               ) : null}
-                              {step.dataRef ? <ToolDataRefPreview dataRef={step.dataRef} /> : null}
-                              {!step.error && hasResult ? <M2RunArtifacts result={step.result} /> : null}
-                              {!step.error && hasResult ? <M0DocArtifacts result={step.result} /> : null}
-                              {!step.error && hasResult ? (
+                              {!failed && step.dataRef ? <ToolDataRefPreview dataRef={step.dataRef} /> : null}
+                              {!failed && hasResult ? <M2RunArtifacts result={step.result} /> : null}
+                              {!failed && hasResult ? <M0DocArtifacts result={step.result} /> : null}
+                              {!failed && hasResult ? <AccountToolArtifacts result={step.result} runId={message.runId} tool={step.tool} /> : null}
+                              {!failed && hasResult ? (
                                 <details className="chat-tool-step-result">
                                   <summary className="chat-tool-step-result-summary">
                                     查看返回结果{step.resultTruncated ? '（已截断）' : ''}
@@ -344,7 +356,7 @@ export function ChatPanel({
                                   <pre className="chat-tool-step-result-pre">{formatToolResult(step.result)}</pre>
                                 </details>
                               ) : null}
-                              {!step.error && !hasResult && step.summary ? (
+                              {!failed && !hasResult && step.summary ? (
                                 <span className="chat-tool-step-summary">{step.summary}</span>
                               ) : null}
                             </div>
